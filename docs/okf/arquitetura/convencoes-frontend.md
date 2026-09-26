@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Convenções de frontend
-description: Stack, estrutura de pastas, padrões de componentes, estilo e testes do frontend React/TypeScript do Hermes.
+description: Stack, estrutura de pastas, padrões de componentes, estilo e testes do frontend React/TypeScript do Gaspar.
 resource: types.ts
 tags: [hermes, okf, frontend, react, typescript, arquitetura]
 timestamp: 2026-06-17T00:00:00Z

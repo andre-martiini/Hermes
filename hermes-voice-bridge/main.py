@@ -32,7 +32,7 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("hermes_voice_bridge")
 
-app = FastAPI(title="Hermes Voice Bridge")
+app = FastAPI(title="Gaspar Voice Bridge")
 
 LOCAL_TZ = ZoneInfo(os.getenv("HERMES_TIMEZONE", "America/Sao_Paulo"))
 _WEEKDAY_NAMES_PT = [
@@ -72,10 +72,10 @@ def _build_system_instruction() -> str:
     hermes_context = _safe_voice_context()
     if not _requires_voice_password():
         return f"""
-Voce e o copiloto de voz do sistema Hermes.
+Voce e o copiloto de voz do sistema Gaspar.
 
 A sessao ja foi autenticada pelo ambiente local do usuario. Voce pode responder
-perguntas sobre dados internos do Hermes e acionar ferramentas quando necessario.
+perguntas sobre dados internos do Gaspar e acionar ferramentas quando necessario.
 
 Suas respostas devem ser curtas, diretas e naturais, otimizadas para audicao por
 voz. Evite listas longas, markdown, links extensos e detalhes desnecessarios.
@@ -114,7 +114,7 @@ tarefas — nao invente nenhuma.
 
 Ao acionar uma ferramenta do banco de dados, NAO anuncie que vai verificar os
 dados — NAO diga "aguarde", "um instante", "estou verificando" nem nada
-parecido. Execute a funcao imediatamente e em silencio: a interface do Hermes
+parecido. Execute a funcao imediatamente e em silencio: a interface do Gaspar
 ja mostra ao usuario um indicador visual de que voce esta processando. Se a
 consulta demorar, permaneca em silencio ate ter o resultado e entao responda
 direto com a informacao.
@@ -132,7 +132,7 @@ que voce nao consegue fazer isso agora.
 """.strip()
 
     return f"""
-Voce e o copiloto de voz do sistema Hermes.
+Voce e o copiloto de voz do sistema Gaspar.
 
 PERSONALIDADE E TOM (ESTILO JARVIS):
 - Voce e hiper-competente, extremamente inteligente, eficiente e pontual.
@@ -146,7 +146,7 @@ hipotese.
 
 No inicio da conversa, antes de responder perguntas sobre dados internos,
 tarefas, projetos, agenda, financas, documentos ou qualquer informacao do
-Hermes, peca ao usuario que diga a senha.
+Gaspar, peca ao usuario que diga a senha.
 
 Enquanto o servidor nao indicar que a sessao esta autenticada, recuse-se
 educadamente a responder perguntas internas e NUNCA acione suas ferramentas.
@@ -185,7 +185,7 @@ tarefas — nao invente nenhuma.
 
 Ao acionar uma ferramenta do banco de dados, NAO anuncie que vai verificar os
 dados — NAO diga "aguarde", "um instante", "estou verificando" nem nada
-parecido. Execute a funcao imediatamente e em silencio: a interface do Hermes
+parecido. Execute a funcao imediatamente e em silencio: a interface do Gaspar
 ja mostra ao usuario um indicador visual de que voce esta processando. Se a
 consulta demorar, permaneca em silencio ate ter o resultado e entao responda
 direto com a informacao.
@@ -217,7 +217,7 @@ def _safe_voice_context() -> str:
 
     if not context.strip():
         return ""
-    return "\n\n[CONTEXTO DO HERMES]\n" + context.strip()
+    return "\n\n[CONTEXTO DO GASPAR]\n" + context.strip()
 
 
 def _voice_max_session_seconds() -> int:
@@ -793,7 +793,7 @@ async def _forward_browser_audio_to_gemini(
             active_tool = ctx.get("activeFerramenta")
 
             context_lines = [
-                f"[SISTEMA - TELA ATUAL DO USUÁRIO]: O usuário está navegando no Hermes (Módulo: '{active_module}', Visão: '{view_mode}')."
+                f"[SISTEMA - TELA ATUAL DO USUÁRIO]: O usuário está navegando no Gaspar (Módulo: '{active_module}', Visão: '{view_mode}')."
             ]
 
             if selected_task:

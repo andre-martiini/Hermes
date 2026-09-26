@@ -287,7 +287,7 @@ export const montarPromptUltimosSegundos = (
   const contexto = tituloReuniao ? `Contexto da reunião: "${tituloReuniao}"\n\n` : '';
 
   return (
-    `Você é o copiloto de reuniões em tempo real do Hermes.\n` +
+    `Você é o copiloto de reuniões em tempo real do Gaspar.\n` +
     contexto +
     `O usuário solicitou apoio imediato sobre o que responder ao que acabou de ser dito nos últimos 30 segundos da reunião.\n\n` +
     `=== FALAS RECENTES (ÚLTIMOS ~30 SEGUNDOS) ===\n` +
@@ -317,7 +317,7 @@ export const montarPromptConsultaAcervo = (
   }).join('\n\n');
 
   return (
-    `Você é o assistente executivo Hermes consultando o histórico e acervo de reuniões gravadas do usuário.\n\n` +
+    `Você é o assistente executivo Gaspar consultando o histórico e acervo de reuniões gravadas do usuário.\n\n` +
     `Pergunta do usuário:\n"${pergunta}"\n\n` +
     `=== ACERVO DE REUNIÕES GRAVADAS ===\n` +
     `${resumoReunioes || '(Nenhuma reunião encontrada no histórico)'}\n\n` +

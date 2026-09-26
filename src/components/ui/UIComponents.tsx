@@ -675,7 +675,7 @@ export const NotificationCenter = ({
       <div className="p-6 border-b border-border-grid bg-surface-container-low flex items-center justify-between">
         <div>
           <h3 className="text-[10px] font-black text-on-surface uppercase tracking-widest font-mono">Notificações</h3>
-          <p className="text-[8px] text-slate-400 font-black uppercase mt-1 font-mono">Hermes Sys-Core</p>
+          <p className="text-[8px] text-slate-400 font-black uppercase mt-1 font-mono">Gaspar Sys-Core</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="bg-primary-tactile text-white text-[10px] font-black px-2.5 py-1 rounded-none shadow-soft-touch font-mono">

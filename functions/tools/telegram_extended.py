@@ -426,7 +426,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
         # Inconsistência de data sinaliza, não bloqueia — e vai para o diário,
         # onde uma observação sobre prazo fica visível na interface e sobrevive
         # à conversa.
-        nota = f"[Telegram Hermes] Plano de ação atualizado: {justificativa}"
+        nota = f"[Telegram Gaspar] Plano de ação atualizado: {justificativa}"
         avisos = subtarefas.inconsistencias(plano_final, task_data.get("prazo_final"))
         if avisos:
             nota += "\n⚠️ " + "; ".join(avisos)
@@ -508,7 +508,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "data_atualizacao": now_iso,
             "acompanhamento": firestore.ArrayUnion([{
                 "data": now_iso,
-                "nota": f"[Telegram Hermes] Lembrete agendado para {reminder_date} {reminder_time}."
+                "nota": f"[Telegram Gaspar] Lembrete agendado para {reminder_date} {reminder_time}."
             }]),
         }
         task_ref.update(update_payload)
@@ -626,7 +626,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
                 contents=section_prompt,
             )
             sections_content[secao] = sect_resp.text or "*(conteúdo indisponível)*"
-        md_parts = [f"# {titulo}", "", f"**Tipo:** Relatório {tipo.capitalize()}  ", f"**Data:** {data_hoje}  ", "**Gerado por:** Hermes Telegram  ", "", "---", ""]
+        md_parts = [f"# {titulo}", "", f"**Tipo:** Relatório {tipo.capitalize()}  ", f"**Data:** {data_hoje}  ", "**Gerado por:** Gaspar Telegram  ", "", "---", ""]
         for secao, content in sections_content.items():
             md_parts.append(f"## {secao}")
             md_parts.append("")

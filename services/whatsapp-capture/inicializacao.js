@@ -34,7 +34,7 @@ export function criarInicializador({ inicializar, destruir, alertar, agendar = s
             await inicializar();
             if (falhas > 0) {
                 log.log(`[Init] WhatsApp Web aberto após ${falhas} falha(s).`);
-                alertar(`✅ Hermes WhatsApp: o worker conseguiu abrir o WhatsApp Web depois de ${falhas} tentativa(s) sem sucesso.`);
+                alertar(`✅ Gaspar WhatsApp: o worker conseguiu abrir o WhatsApp Web depois de ${falhas} tentativa(s) sem sucesso.`);
             }
             falhas = 0;
         } catch (erro) {
@@ -44,7 +44,7 @@ export function criarInicializador({ inicializar, destruir, alertar, agendar = s
             log.error(`[Init] Falha ao abrir o WhatsApp Web (${origem}, falha ${falhas}):`, erro);
             if (deveAvisar(falhas)) {
                 alertar(
-                    `⚠️ Hermes WhatsApp: não consegui abrir o WhatsApp Web (${motivo}). ` +
+                    `⚠️ Gaspar WhatsApp: não consegui abrir o WhatsApp Web (${motivo}). ` +
                     `Tento de novo sozinho em ${Math.round(espera / 1000)}s — falha ${falhas}. ` +
                     'Enquanto isso não há captura nem envio.'
                 );

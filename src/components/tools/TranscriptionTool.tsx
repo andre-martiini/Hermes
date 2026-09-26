@@ -220,7 +220,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     const target = text || transcription?.refined;
     if (target && onSendToCopiloto) {
       onSendToCopiloto(target);
-      showToast("Texto enviado ao Copiloto Hermes!", "success");
+      showToast("Texto enviado ao Copiloto Gaspar!", "success");
     }
   };
 

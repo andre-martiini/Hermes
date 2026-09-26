@@ -1,6 +1,6 @@
 {
   "name": "video_ajustar",
-  "description": "Aplica os ajustes que o usuário pediu no storyboard de um projeto do Hermes Vídeo (estado aguardando_storyboard) e gera a prévia de novo refazendo SÓ o que mudou: narração nova refaz o áudio daquela cena; descrição visual nova da cena i refaz o quadro final dela (Ki, e o K0 se for a cena 1); instrução para um quadro refaz só aquele quadro. Repetir o mesmo ajuste não muda nada. Roda como job: devolve status 'processing' + job_id; busque com consultar_job.",
+  "description": "Aplica os ajustes que o usuário pediu no storyboard de um projeto do Gaspar Vídeo (estado aguardando_storyboard) e gera a prévia de novo refazendo SÓ o que mudou: narração nova refaz o áudio daquela cena; descrição visual nova da cena i refaz o quadro final dela (Ki, e o K0 se for a cena 1); instrução para um quadro refaz só aquele quadro. Repetir o mesmo ajuste não muda nada. Roda como job: devolve status 'processing' + job_id; busque com consultar_job.",
   "parameters": {
     "type": "object",
     "properties": {

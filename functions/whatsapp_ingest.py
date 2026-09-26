@@ -162,7 +162,7 @@ def _build_triage_prompt(chat_name: str, messages: list[dict], candidates_text: 
     conversa = _format_conversation_text(messages)
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
 
-    return f"""Você é o Hermes, assistente pessoal, analisando uma janela de mensagens do WhatsApp
+    return f"""Você é o Gaspar, assistente pessoal, analisando uma janela de mensagens do WhatsApp
 da conversa "{chat_name}". Hoje é {hoje}.
 
 AÇÕES ATIVAS DO USUÁRIO:
@@ -389,7 +389,7 @@ def _alert_pending_media_window(db, telegram_chat_id, wa_chat_id: str, chat_name
     titulo = str(linked_candidates[0].get("titulo") or "(sem título)")
     e_mais = f" e mais {len(linked_candidates) - 1} ação(ões)" if len(linked_candidates) > 1 else ""
     text = (
-        f'⚠️ Hermes WhatsApp: "{chat_name}" (vinculada à ação "{titulo}"{e_mais}) recebeu '
+        f'⚠️ Gaspar WhatsApp: "{chat_name}" (vinculada à ação "{titulo}"{e_mais}) recebeu '
         f"{n_pendentes} mensagem(ns) de mídia cujo conteúdo não pôde ser recuperado "
         f"(ex.: áudio não capturado). A janela não foi analisada pela triagem — confira a "
         f"Caixa de Entrada do WhatsApp para consolidar manualmente."

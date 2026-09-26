@@ -352,7 +352,7 @@ def _andre_ids(db) -> set[str]:
 # acompanhar -- comentário espelhado ao lado de `_CANAL_ICONS` para isso
 # não passar despercebido.
 _AUTO_LINK_ICONS = "📧📱📋📅🌐🔔"
-_AUTO_LINK_NOTE_RE = re.compile(r"^(?:EMAIL|WHATSAPP)::JSON::|^\[[" + _AUTO_LINK_ICONS + r"] Hermes\]\s")
+_AUTO_LINK_NOTE_RE = re.compile(r"^(?:EMAIL|WHATSAPP)::JSON::|^\[[" + _AUTO_LINK_ICONS + r"] (?:Hermes|Gaspar)\]\s")
 
 
 def _diario_mais_recente(acompanhamento) -> datetime | None:
@@ -365,9 +365,10 @@ def _diario_mais_recente(acompanhamento) -> datetime | None:
     por `_AUTO_LINK_NOTE_RE`:
       - ``EMAIL::JSON::{...}`` (canal e-mail);
       - ``WHATSAPP::JSON::{...}`` (canal whatsapp);
-      - ``[{icone} Hermes] {rótulo}: ...`` (demais canais -- sipac,
+      - ``[{icone} Gaspar] {rótulo}: ...`` (demais canais -- sipac,
         calendar, pagina -- sempre começa com um ícone entre colchetes
-        seguido de " Hermes]").
+        seguido de " Gaspar]"; notas gravadas antes da renomeação trazem
+        " Hermes]" e continuam reconhecidas).
     A primeira versão desta função só excluía o primeiro formato -- a
     revisão adversarial mostrou que os outros dois têm o mesmo problema:
     vincular uma conversa de WhatsApp (ou um processo SIPAC, reunião etc.)
@@ -668,7 +669,7 @@ def _get_llm_client(db):
 
 def _build_prompt_classificador(texto: str, is_email: bool) -> str:
     fonte = "e-mail" if is_email else "mensagem de WhatsApp"
-    return f"""Você é o Hermes, assistente pessoal do André. Classifique se a mensagem
+    return f"""Você é o Gaspar, assistente pessoal do André. Classifique se a mensagem
 abaixo de fato PEDE uma resposta ou ação dele, ou se pode ficar sem resposta.
 
 MENSAGEM ({fonte}):

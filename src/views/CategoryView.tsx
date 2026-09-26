@@ -50,7 +50,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
           <button
             onClick={() => onAnalysePatterns?.(areaTematica)}
             className={`bg-slate-950 hover:bg-${color}-600 text-white px-6 py-3 rounded-lg md:rounded-2xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-3 shadow-lg active:scale-95`}
-            title="Pedir para o HERMES aprender com seus processos recentes"
+            title="Pedir para o GASPAR aprender com seus processos recentes"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />

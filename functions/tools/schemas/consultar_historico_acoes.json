@@ -1,6 +1,6 @@
 {
   "name": "consultar_historico_acoes",
-  "description": "Busca ações, tarefas e projetos no Hermes com pesquisa flexível por frase natural, termos aproximados, sinônimos, erros de digitação e número de processo",
+  "description": "Busca ações, tarefas e projetos no Gaspar com pesquisa flexível por frase natural, termos aproximados, sinônimos, erros de digitação e número de processo",
   "parameters": {
     "type": "object",
     "properties": {

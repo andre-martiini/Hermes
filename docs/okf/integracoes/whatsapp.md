@@ -1,13 +1,13 @@
 ---
 type: integration
-title: Integração WhatsApp no Hermes
+title: Integração WhatsApp no Gaspar
 description: Microsserviço de captura de mensagens WhatsApp, triagem por IA com vínculo a ações e busca semântica via digests vetorizados.
 resource: services/whatsapp-capture
 tags: [hermes, whatsapp, integracao, gemini, firestore]
 timestamp: 2026-08-14T00:00:00-03:00
 ---
 
-# Integração WhatsApp no Hermes
+# Integração WhatsApp no Gaspar
 
 > **Fluxo principal (desde 2026-08-14):** captura (worker local, §1-2) → **Caixa de Entrada WhatsApp** (`WhatsappInboxView.tsx`, §3) → consolidação manual (transcrição + síntese, `whatsapp_consolidation.py`) → diário da ação + digest curado (§4). A triagem automática por IA (§3-legado) foi substituída pela consolidação manual e fica dormente atrás do flag `whatsapp_ingest.enabled` (desligado).
 
@@ -30,7 +30,7 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 
 ### Resiliência
 
-- `disconnected`/`auth_failure` disparam um alerta no Telegram (mesmo bot/chat do resto do Hermes) e o worker tenta reconectar automaticamente, exceto em `LOGOUT` (aí é preciso reescanear o QR).
+- `disconnected`/`auth_failure` disparam um alerta no Telegram (mesmo bot/chat do resto do Gaspar) e o worker tenta reconectar automaticamente, exceto em `LOGOUT` (aí é preciso reescanear o QR).
 - Heartbeat a cada 5 min em `system/whatsapp_worker.last_seen` — usado pela Cloud Function de despacho de WhatsApp (§4) para saber se o worker está de pé.
 
 ### Backfill de histórico (sob demanda e no boot)

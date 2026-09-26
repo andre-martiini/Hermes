@@ -38,7 +38,7 @@ _STOPWORDS = {
     "meu", "seu", "sua", "relacionado", "relacionada", "referente",
     "sobre", "acerca", "cujo", "cuja", "qual", "quais",
     "nome", "chamada", "chamado", "registrada", "registrado", "sistema",
-    "hermes", "historico", "histórico",
+    "hermes", "gaspar", "historico", "histórico",
     "acao", "acoes", "tarefa", "tarefas", "pesquisa", "pesquisar",
     "pesquise", "busca", "buscar", "busque", "procura", "procurar",
     "procure", "localiza", "localizar", "localize", "ative", "ativar",

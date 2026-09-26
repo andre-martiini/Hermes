@@ -41,7 +41,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         data_limite_fim: str = None,
         status: str = None,
     ):
-        """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
+        """Busca ações e tarefas no Gaspar. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
         if contexto_ativo == "acao" and acao_snapshot:
             titulo_acao = acao_snapshot.get("titulo") or request_acao_id or "ação atual"
             return (
@@ -123,7 +123,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         return "\n".join(lines)
 
     def buscar_arquivos_acervo(query: str):
-        """Busca documentos, manuais e arquivos no Acervo Global do Hermes."""
+        """Busca documentos, manuais e arquivos no Acervo Global do Gaspar."""
         from tools.busca_acervo import buscar_acervo
         res = buscar_acervo(query)
         if res.get("erro"):
@@ -141,7 +141,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         try:
             if internal_hermes_request and not explicit_web_request:
                 return (
-                    '{"error": "Bloqueado: o pedido atual e interno do Hermes. '
+                    '{"error": "Bloqueado: o pedido atual e interno do Gaspar. '
                     'Nao use internet como substituto para consultas do sistema."}'
                 )
             tavily_key = _get_api_keys(db).get("tavily_api_key")
@@ -228,7 +228,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         intervalo_semanas_recorrencia: int = None,
     ):
         """
-        Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
+        Cria uma nova ação no Gaspar. Apresente draft ao usuário antes de chamar.
         Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
         IMPORTANTE: area_tematica deve ser EXATAMENTE UMA das áreas temáticas válidas
         listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
@@ -423,7 +423,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
             now_iso = datetime.now(timezone.utc).isoformat()
             diary_entry = {
                 'data': now_iso,
-                'nota': f"[Copiloto Hermes] {justificativa or 'Reagendamento em lote.'}"
+                'nota': f"[Copiloto Gaspar] {justificativa or 'Reagendamento em lote.'}"
             }
 
             count_this_week = 0
@@ -563,7 +563,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 campos_desc = ', '.join(f"{k}='{v}'" for k, v in updates.items() if k not in ('data_atualizacao', 'data_conclusao'))
                 diary_entry = {
                     'data': now_iso,
-                    'nota': f"[Copiloto Hermes/Telegram] Edição em lote ({justificativa}). Campos alterados: {campos_desc}."
+                    'nota': f"[Copiloto Gaspar/Telegram] Edição em lote ({justificativa}). Campos alterados: {campos_desc}."
                 }
                 batch.update(task_ref, {
                     **updates,
@@ -582,7 +582,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
             return f"ERRO ao editar ações em lote: {e}"
 
     def salvar_memoria_global(fato: str, categoria: str):
-        """Persiste fato durável na memória global do Hermes. Apenas para regras estáveis e preferências permanentes."""
+        """Persiste fato durável na memória global do Gaspar. Apenas para regras estáveis e preferências permanentes."""
         try:
             import uuid as _uuid
             node_id = str(_uuid.uuid4())[:16]
@@ -625,7 +625,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
 
     def agendar_lembrete_acao(data: str, horario: str, task_id: str = None, texto: str = ""):
         """
-        Agenda um lembrete para uma acao do Hermes.
+        Agenda um lembrete para uma acao do Gaspar.
         data: Data do lembrete no formato YYYY-MM-DD.
         horario: Horario do lembrete no formato HH:MM.
         task_id: ID da acao. Opcional quando ja existe uma acao em contexto.

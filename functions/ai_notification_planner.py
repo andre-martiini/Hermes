@@ -45,7 +45,7 @@ AI_PLANNER_STALE_HOURS = 2
 _CATEGORY_ICONS = {"acoes": "🗒️", "estrategia": "🎯", "geral": "🤖"}
 
 AI_PLANNER_PERSONA = (
-    "Você é o planejador proativo do Hermes: um processo que roda uma vez por dia, sem "
+    "Você é o planejador proativo do Gaspar: um processo que roda uma vez por dia, sem "
     "interação com o usuário, e decide se vale a pena interromper o dia dele com alguma "
     "notificação no Telegram.\n\n"
     "Escopo desta rodada: apenas tarefas/ações (`tarefas`) e metas estratégicas pessoais "
@@ -398,7 +398,7 @@ def dispatch_pending_ai_notifications(db, now) -> None:
 
     for doc_snap in pending:
         data = doc_snap.to_dict() or {}
-        title = str(data.get("title") or "Hermes IA").strip()
+        title = str(data.get("title") or "Gaspar IA").strip()
         message = str(data.get("message") or "").strip()
         category = str(data.get("category") or "geral").strip()
         icon = _CATEGORY_ICONS.get(category, "🤖")
@@ -408,7 +408,7 @@ def dispatch_pending_ai_notifications(db, now) -> None:
             print(f"[AINotifications] Nenhum chat_id do Telegram configurado; notificação {doc_snap.id} permanece pendente.")
             continue
 
-        text = f"{icon} Hermes IA — {title}\n\n{message}" if message else f"{icon} Hermes IA — {title}"
+        text = f"{icon} Gaspar IA — {title}\n\n{message}" if message else f"{icon} Gaspar IA — {title}"
         keyboard = [[
             {"text": "👍 Útil", "callback_data": f"ai_notif:{doc_snap.id}:useful"},
             {"text": "👎 Dispensar", "callback_data": f"ai_notif:{doc_snap.id}:dismiss"},

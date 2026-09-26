@@ -6,7 +6,7 @@
     "properties": {
       "task_id": {
         "type": "string",
-        "description": "ID exato da tarefa no Hermes"
+        "description": "ID exato da tarefa no Gaspar"
       }
     },
     "required": ["task_id"]

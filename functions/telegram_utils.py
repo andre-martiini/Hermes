@@ -627,7 +627,7 @@ def _summarize_memory_conflict(conflict: dict) -> str:
     lines = [
         "",
         "<b>Card de conflito de memoria</b>",
-        "O Hermes encontrou duas memorias parecidas e precisa de uma decisao.",
+        "O Gaspar encontrou duas memorias parecidas e precisa de uma decisao.",
     ]
     if conflict.get("existing_text"):
         lines.append(f"Atual: {html.escape(str(conflict.get('existing_text'))[:300])}")
@@ -1087,7 +1087,7 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
 
     if re.match(r"^/start$", text, re.IGNORECASE):
         return (
-            "👋 Olá! Sou o <b>Hermes Copiloto</b>.\n\n"
+            "👋 Olá! Sou o <b>Gaspar Copiloto</b>.\n\n"
             "Comandos disponíveis:\n"
             "• <code>/entrar [termo]</code> — busca ações e trava o contexto nelas\n"
             "• <code>/sair</code> — sai do contexto trancado, retorna ao modo geral\n"
@@ -1302,7 +1302,7 @@ _ACTION_SEARCH_STOPWORDS = {
     "nos", "nas", "ao", "se", "ou", "acao", "acoes", "tarefa", "tarefas",
     "pesquisa", "pesquisar", "pesquise", "busca", "buscar", "busque",
     "procura", "procurar", "procure", "localiza", "localizar", "localize",
-    "ative", "ativar", "ativa", "contexto", "hermes", "por", "favor",
+    "ative", "ativar", "ativa", "contexto", "hermes", "gaspar", "por", "favor",
 }
 
 def _action_query_terms(text: str) -> list[str]:
@@ -1819,7 +1819,7 @@ def _format_action_lookup_results(query: str, results: list) -> str:
     query_label = html.escape(query or "sua busca")
     if not results:
         return (
-            f"Nenhuma acao encontrada para <i>{query_label}</i> no historico do Hermes.\n"
+            f"Nenhuma acao encontrada para <i>{query_label}</i> no historico do Gaspar.\n"
             "Nao pesquisei e-mails, acervo ou internet porque voce pediu uma acao do sistema."
         )
 
@@ -2175,7 +2175,7 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         else ""
     )
     return (
-        f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today} e o horário local atual é {time_str}."
+        f"Você é o Copiloto Gaspar, estrategista sênior de processos. Hoje é {today} e o horário local atual é {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTÁTICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2220,7 +2220,7 @@ def _build_system_instruction_guarded(
         else ""
     )
     base = (
-        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
+        f"Voce e o Copiloto Gaspar, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2240,7 +2240,7 @@ def _build_system_instruction_guarded(
         "## REGRAS ABSOLUTAS\n"
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "4. Se o pedido for sobre dados internos do Gaspar, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
         "5. Agendamento/Agenda: Por padrao, ao propor ou criar uma acao, NAO proponha nem defina horarios de inicio/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia (data_limite). SO preencha horario_inicio e horario_fim se o usuario pedir explicitamente para agendar um horario especifico. Nesse caso, voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se o agendamento for para hoje, o horario inicial DEVE ser sempre posterior ao horario local atual. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot.\n"
         "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
@@ -2295,7 +2295,7 @@ def _build_system_instruction_guarded_v2(
         else ""
     )
     base = (
-        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
+        f"Voce e o Copiloto Gaspar, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2321,7 +2321,7 @@ def _build_system_instruction_guarded_v2(
         "## REGRAS ABSOLUTAS\n"
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "4. Se o pedido for sobre dados internos do Gaspar, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
         "5. Agendamento/Agenda: Por padrao, ao propor ou criar uma acao, NAO proponha nem defina horarios de inicio/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia (data_limite). SO preencha horario_inicio e horario_fim se o usuario pedir explicitamente para agendar um horario especifico. Nesse caso, voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se o agendamento for para hoje, o horario inicial DEVE ser sempre posterior ao horario local atual. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot.\n"
         "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
@@ -2450,6 +2450,7 @@ def _is_internal_hermes_request(text: str) -> bool:
     lowered = _normalize_for_matching(text)
     internal_markers = [
         "hermes",
+        "gaspar",
         "no sistema",
         "no copilot",
         "copiloto",
@@ -2545,7 +2546,7 @@ def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str,
 
 def _build_tts_director_instruction(voice_profile: str) -> str:
     return (
-        "Voce e o diretor de TTS do Hermes. "
+        "Voce e o diretor de TTS do Gaspar. "
         "Recebera uma resposta factual pronta e deve apenas converte-la em um roteiro curto para fala natural. "
         "Nao adicione fatos novos. "
         "Nao inclua links, nomes tecnicos longos nem listas densas. "

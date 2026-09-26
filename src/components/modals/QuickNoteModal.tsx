@@ -70,7 +70,7 @@ export const QuickNoteModal: React.FC<QuickNoteModalProps> = ({ isOpen, onClose,
       if (data.refined) onAddIdea(data.refined);
     } catch (error: any) {
       console.error("Erro ao transcrever:", error);
-      showAlert("Erro", error?.message || "Erro ao processar áudio via Hermes AI.");
+      showAlert("Erro", error?.message || "Erro ao processar áudio via Gaspar AI.");
     } finally {
       setIsProcessing(false);
     }

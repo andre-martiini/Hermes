@@ -18,7 +18,7 @@ Permite ao Hermes conversar com contatos autorizados no WhatsApp em nome do Andr
       André a vê no próprio WhatsApp; o Telegram só recebe o que exige atenção (escalonamentos
       pela fila de atenção), nunca o texto das respostas já enviadas.
 - Identidade explícita obrigatória:
-    * Toda mensagem enviada pelo bot começa rigorosamente com '**Hermes Bot:** '.
+    * Toda mensagem enviada pelo bot começa rigorosamente com '**Gaspar:** '.
 """
 
 from __future__ import annotations
@@ -37,7 +37,13 @@ from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
 
 COLLECTION_CONVERSAS = "whatsapp_secretario_conversas"
 COLLECTION_PRIORITARIOS = "secretario_contatos_prioritarios"
-PREFIXO_ASSINATURA = "**Hermes Bot:** "
+PREFIXO_ASSINATURA = "**Gaspar:** "
+# Aceita a assinatura atual ("**Gaspar:**") e a antiga ("**Hermes Bot:**"), que
+# continua no histórico das conversas. Em "Gaspar" os dois-pontos são obrigatórios:
+# sem eles, uma mensagem do André que comece com o nome seria lida como do bot.
+_RE_ASSINATURA_BOT = re.compile(
+    r"^\*{0,2}\s*(?:Hermes Bot:?|Gaspar\s*(?::|\*{1,2}\s*:))\*{0,2}\s*", re.IGNORECASE
+)
 DEFAULT_MAX_TROCAS = 2
 DEFAULT_MAX_TROCAS_PRIORITARIO = 6
 DEFAULT_JANELA_MIN = 10
@@ -72,14 +78,14 @@ _DIAS_DE_AGENDA = 14
 # ---------------------------------------------------------------------------
 
 def prefixar_assinatura(texto: str) -> str:
-    """Garante que toda mensagem do secretário comece rigorosamente com '**Hermes Bot:** '."""
+    """Garante que toda mensagem do secretário comece rigorosamente com '**Gaspar:** '."""
     limpo = str(texto or "").strip()
     if not limpo:
         return PREFIXO_ASSINATURA.strip()
     if limpo.startswith(PREFIXO_ASSINATURA):
         return limpo
-    # Se tiver variações como "**Hermes Bot:**" sem espaço ou sem negrito
-    sem_tag = re.sub(r"^\*{0,2}Hermes Bot:?\*{0,2}\s*", "", limpo, flags=re.IGNORECASE).strip()
+    # Se tiver variações como "**Gaspar:**" sem espaço ou sem negrito (ou a antiga "**Hermes Bot:**")
+    sem_tag = _RE_ASSINATURA_BOT.sub("", limpo).strip()
     return f"{PREFIXO_ASSINATURA}{sem_tag}"
 
 
@@ -1052,14 +1058,14 @@ def obter_briefing_ativo(
 # Ferramentas do LLM e Prompt
 # ---------------------------------------------------------------------------
 
-SECRETARIO_SYSTEM_PROMPT = """Você é o Secretário Pessoal do André (Hermes Bot) no WhatsApp.
+SECRETARIO_SYSTEM_PROMPT = """Você é o Secretário Pessoal do André (Gaspar) no WhatsApp.
 O André está indisponível no momento (em reunião, em trânsito ou focado em trabalho de alta concentração) e você atende quem escreve no WhatsApp em nome dele.
 
 SEU OBJETIVO:
 Conversar com o interlocutor com cortesia, entender o motivo do contato e anotar o recado completo com precisão para repassar ao André.
 
 GUARDRAILS INEGOCIÁVEIS (SIGA RIGOROSAMENTE):
-1. IDENTIDADE EXPLÍCITA: Toda resposta que você gerar DEVE começar rigorosamente com "**Hermes Bot:** ". A pessoa precisa sempre saber que está falando com o assistente do André.
+1. IDENTIDADE EXPLÍCITA: Toda resposta que você gerar DEVE começar rigorosamente com "**Gaspar:** ". A pessoa precisa sempre saber que está falando com o assistente do André.
 2. REGRA DE AGENDA (ASSIMETRIA DE SEGURANÇA):
    - A agenda real do André só chega, quando a mensagem trata de horário, no bloco "AGENDA" da mensagem de trabalho. Sem esse bloco você NÃO tem acesso à agenda: não confirme nem negue disponibilidade, apenas anote o pedido. Se o bloco indicar agenda indisponível ou com falhas, trate a agenda como DESCONHECIDA (nunca como vazia).
    - Se o André estiver OCUPADO: você PODE informar isso diretamente de forma factual (ex: "O André tem um compromisso marcado nesse horário").
@@ -1125,7 +1131,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                 "properties": {
                     "resposta_para_contato": {
                         "type": "string",
-                        "description": "Mensagem exata a ser enviada no WhatsApp para o contato (começando com '**Hermes Bot:** ').",
+                        "description": "Mensagem exata a ser enviada no WhatsApp para o contato (começando com '**Gaspar:** ').",
                     },
                     "resumo_recado": {
                         "type": "string",
@@ -1158,7 +1164,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                 "properties": {
                     "resposta_para_contato": {
                         "type": "string",
-                        "description": "Mensagem exata a ser enviada no WhatsApp para o contato (começando com '**Hermes Bot:** ').",
+                        "description": "Mensagem exata a ser enviada no WhatsApp para o contato (começando com '**Gaspar:** ').",
                     },
                     "resumo_estruturado": {
                         "type": "string",
@@ -1215,7 +1221,7 @@ Esta é a PRIMEIRA mensagem desta conversa.
 CONTEXTO DA CONVERSA:
 Esta conversa JÁ ESTÁ EM ANDAMENTO (você já se apresentou anteriormente).
 - NÃO repita 'sou o assistente do André', saudações formais longas nem reintroduza quem você é.
-- O prefixo "**Hermes Bot:** " já identifica você. Vá direto ao ponto e responda à mensagem atual com objetividade e cortesia.
+- O prefixo "**Gaspar:** " já identifica você. Vá direto ao ponto e responda à mensagem atual com objetividade e cortesia.
 """
 
     if briefing:
@@ -1379,8 +1385,6 @@ def _executar_llm_secretario(
 # ---------------------------------------------------------------------------
 # Operações de Banco de Dados e Fila
 # ---------------------------------------------------------------------------
-
-_RE_ASSINATURA_BOT = re.compile(r"^\*{0,2}\s*Hermes Bot:?\*{0,2}", re.IGNORECASE)
 
 
 def eh_mensagem_do_bot(mensagem: dict) -> bool:

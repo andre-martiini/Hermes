@@ -24,7 +24,7 @@ def main() -> None:
         print("Defina FIREBASE_WEB_API_KEY no .env antes de rodar este script.")
         sys.exit(1)
 
-    email = input("Email Hermes (Firebase Auth): ").strip()
+    email = input("Email Gaspar (Firebase Auth): ").strip()
     password = getpass.getpass("Senha: ")
 
     resp = requests.post(

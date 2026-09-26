@@ -262,7 +262,7 @@ def _do_drive(args: dict) -> tuple[bytes, str]:
     except Exception as exc:  # noqa: BLE001
         raise ValueError(
             f"Nao consegui abrir o arquivo '{file_id}' no Drive: {exc}. "
-            "Confira se ele existe e se a conta do Hermes tem acesso."
+            "Confira se ele existe e se a conta do Gaspar tem acesso."
         ) from exc
 
     if meta.get("trashed"):

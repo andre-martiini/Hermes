@@ -19,7 +19,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "buscar_tarefas_pendentes_hoje",
                 "description": (
-                    "Busca no Firestore as tarefas do Hermes com data_limite igual a hoje "
+                    "Busca no Firestore as tarefas do Gaspar com data_limite igual a hoje "
                     "e status em andamento ou stand-by."
                 ),
                 "parameters": {
@@ -35,7 +35,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "buscar_tarefas_amanha",
                 "description": (
-                    "Busca no Firestore as tarefas abertas do Hermes com data_limite igual a amanha."
+                    "Busca no Firestore as tarefas abertas do Gaspar com data_limite igual a amanha."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -49,7 +49,7 @@ GEMINI_TOOL_DECLARATIONS = [
             },
             {
                 "name": "buscar_tarefas_atrasadas",
-                "description": "Busca tarefas abertas do Hermes com data_limite anterior a hoje.",
+                "description": "Busca tarefas abertas do Gaspar com data_limite anterior a hoje.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -62,7 +62,7 @@ GEMINI_TOOL_DECLARATIONS = [
             },
             {
                 "name": "buscar_tarefas_por_periodo",
-                "description": "Busca tarefas abertas do Hermes entre duas datas no formato YYYY-MM-DD.",
+                "description": "Busca tarefas abertas do Gaspar entre duas datas no formato YYYY-MM-DD.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -85,7 +85,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "buscar_tarefas_por_termo",
                 "description": (
-                    "Busca tarefas no Hermes por termo no titulo, descricao, notas, projeto, area ou tags."
+                    "Busca tarefas no Gaspar por termo no titulo, descricao, notas, projeto, area ou tags."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -109,7 +109,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "resumo_projetos_ativos",
                 "description": (
-                    "Resume projetos cadastrados no Hermes e conta tarefas abertas ligadas a cada projeto."
+                    "Resume projetos cadastrados no Gaspar e conta tarefas abertas ligadas a cada projeto."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -124,7 +124,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "buscar_memorias_relevantes",
                 "description": (
-                    "Busca memorias e fatos registrados no Hermes por termo textual simples."
+                    "Busca memorias e fatos registrados no Gaspar por termo textual simples."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -144,7 +144,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "navegar_sistema",
                 "description": (
-                    "Navega na interface do sistema Hermes para um modulo ou visao especifica. "
+                    "Navega na interface do sistema Gaspar para um modulo ou visao especifica. "
                     "Use quando o usuario pedir para ir, abrir ou acessar uma tela/modulo, ou para 'programar o meu dia' / 'fazer a programação do dia'. "
                     "Modulos aceitos: 'dashboard', 'programacao_dia' (abrir agenda do dia), 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
                 ),
@@ -162,7 +162,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "abrir_detalhe_acao",
                 "description": (
-                    "OBRIGATORIO: Abre a janela/modal de detalhamento ou execucao de uma acao/tarefa no Hermes na tela do usuario. "
+                    "OBRIGATORIO: Abre a janela/modal de detalhamento ou execucao de uma acao/tarefa no Gaspar na tela do usuario. "
                     "Chame SEMPRE esta ferramenta quando o usuario pedir para abrir, ver, detalhar ou mostrar uma acao especifica. "
                     "Nao apenas responda ou busque no banco de dados; voce DEVE chamar esta ferramenta para abrir o modal na tela dele."
                 ),
@@ -180,7 +180,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "abrir_ferramenta",
                 "description": (
-                    "Abre uma ferramenta especifica dentro do Hermes. "
+                    "Abre uma ferramenta especifica dentro do Gaspar. "
                     "Ferramentas validas: 'shopping' (Lista de Compras), 'transcription' (Transcricao), 'batch_transcription', 'meeting_transcription', 'sipac_tracking' (SIPAC), 'monitor_paginas', 'long_transcription', 'pop_manager'."
                 ),
                 "parameters": {
@@ -208,7 +208,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "filtrar_acoes",
                 "description": (
-                    "Aplica um filtro de busca textual ou status na lista de acoes do Hermes."
+                    "Aplica um filtro de busca textual ou status na lista de acoes do Gaspar."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -245,7 +245,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "enviar_whatsapp_contato",
                 "description": (
-                    "Prepara e abre a conversa do WhatsApp no computador/navegador do usuario com um contato do Hermes. "
+                    "Prepara e abre a conversa do WhatsApp no computador/navegador do usuario com um contato do Gaspar. "
                     "Use SEMPRE que o usuario pedir para enviar WhatsApp, mandar um ZAP ou abrir conversa com alguem da agenda de contatos."
                 ),
                 "parameters": {
@@ -253,7 +253,7 @@ GEMINI_TOOL_DECLARATIONS = [
                     "properties": {
                         "nome_ou_telefone": {
                             "type": "STRING",
-                            "description": "Nome da pessoa cadastrada no modulo de Contatos do Hermes (ex: 'Maria', 'Joao Silva') ou numero de telefone.",
+                            "description": "Nome da pessoa cadastrada no modulo de Contatos do Gaspar (ex: 'Maria', 'Joao Silva') ou numero de telefone.",
                         },
                         "mensagem": {
                             "type": "STRING",
@@ -267,7 +267,7 @@ GEMINI_TOOL_DECLARATIONS = [
                 "name": "agendar_whatsapp_contato",
                 "description": (
                     "Agenda o envio de uma mensagem de WhatsApp para um contato num horario futuro. "
-                    "No horario programado, o Hermes enviara os botoes de confirmacao ('Sim, Enviar' / 'Cancelar') no Telegram. "
+                    "No horario programado, o Gaspar enviara os botoes de confirmacao ('Sim, Enviar' / 'Cancelar') no Telegram. "
                     "Use quando o usuario pedir para agendar, programar ou marcar um WhatsApp para depois/amanha/data especifica."
                 ),
                 "parameters": {
@@ -292,7 +292,7 @@ GEMINI_TOOL_DECLARATIONS = [
             {
                 "name": "buscar_contatos_agenda",
                 "description": (
-                    "Busca ou lista contatos no modulo de Contatos do Hermes. "
+                    "Busca ou lista contatos no modulo de Contatos do Gaspar. "
                     "A busca ignora acentos, maiusculas, minusculas e til. "
                     "Use quando o usuario perguntar sobre contatos, numeros de telefone ou quiser procurar alguem na agenda."
                 ),
@@ -825,7 +825,7 @@ def _buscar_contatos_no_banco(termo_busca: str = "", limite: int = 15) -> list[d
 
 
 def buscar_contatos_agenda(termo_busca: str = "") -> dict:
-    """Busca contatos na agenda do Hermes sem distinção de acentos, maiúsculas ou minúsculas."""
+    """Busca contatos na agenda do Gaspar sem distinção de acentos, maiúsculas ou minúsculas."""
     encontrados = _buscar_contatos_no_banco(termo_busca, limite=20)
     return {
         "status": "sucesso",
@@ -859,7 +859,7 @@ def enviar_whatsapp_contato(nome_ou_telefone: str, mensagem: str) -> dict:
 
     if not telefone_bruto:
         return {
-            "erro": f"Não foi possível encontrar o telefone de '{nome_ou_tel}' no cadastro de Contatos do Hermes. Verifique se a pessoa está cadastrada com número de telefone."
+            "erro": f"Não foi possível encontrar o telefone de '{nome_ou_tel}' no cadastro de Contatos do Gaspar. Verifique se a pessoa está cadastrada com número de telefone."
         }
 
     tel_formatado = _limpar_telefone(telefone_bruto)

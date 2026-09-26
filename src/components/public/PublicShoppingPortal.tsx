@@ -211,7 +211,7 @@ const PublicShoppingPortal = () => {
             {items.length === 0 ? (
               <div className="py-24 text-center text-slate-300">
                 <p className="font-bold uppercase tracking-wider text-sm">Nenhum item disponivel</p>
-                <p className="text-xs font-medium mt-2 opacity-60">Adicione itens no Hermes para comecar</p>
+                <p className="text-xs font-medium mt-2 opacity-60">Adicione itens no Gaspar para comecar</p>
               </div>
             ) : (
               <div className="space-y-4">

@@ -214,7 +214,7 @@ const PersonalDiaryView: React.FC<PersonalDiaryViewProps> = ({ isDark = false })
             <div>
                 <h3 className={`text-xl font-black ${isDark ? 'text-white' : 'text-slate-800'}`}>Diário Pessoal</h3>
                 <p className={`text-xs font-medium mt-1 font-sans ${isDark ? 'text-slate-400' : 'text-slate-550'}`}>
-                    Registro diário gerado automaticamente às 21h30 a partir da sua atividade no Hermes. Você pode editar as entradas aqui (à mão ou pedindo um ajuste à IA) ou pelo Telegram ("✍️ Ajustar").
+                    Registro diário gerado automaticamente às 21h30 a partir da sua atividade no Gaspar. Você pode editar as entradas aqui (à mão ou pedindo um ajuste à IA) ou pelo Telegram ("✍️ Ajustar").
                 </p>
             </div>
 
@@ -222,7 +222,7 @@ const PersonalDiaryView: React.FC<PersonalDiaryViewProps> = ({ isDark = false })
                 <div className={`max-w-3xl rounded-2xl border p-5 ${isDark ? 'border-indigo-400/20 bg-indigo-500/10' : 'border-indigo-100 bg-indigo-50/60'}`}>
                     <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Anotações para o diário de hoje</p>
                     <p className={`mt-0.5 text-xs ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
-                        Pontos que você quer que entrem na consolidação de hoje às 21h30 — coisas que o Hermes não registrou sozinho.
+                        Pontos que você quer que entrem na consolidação de hoje às 21h30 — coisas que o Gaspar não registrou sozinho.
                     </p>
 
                     {todayNotes.length > 0 && (

@@ -1,7 +1,7 @@
 ---
 type: index
 title: Arquitetura
-description: Documentação de referência sobre schema de dados, Cloud Functions e convenções de frontend do Hermes, para orientar desenvolvedores e agentes de IA externos.
+description: Documentação de referência sobre schema de dados, Cloud Functions e convenções de frontend do Gaspar, para orientar desenvolvedores e agentes de IA externos.
 tags: [hermes, okf, arquitetura]
 timestamp: 2026-06-17T00:00:00Z
 ---

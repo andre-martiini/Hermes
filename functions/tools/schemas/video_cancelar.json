@@ -1,6 +1,6 @@
 {
   "name": "video_cancelar",
-  "description": "Cancela um projeto do Hermes Vídeo. Se estiver renderizando, o worker para antes do próximo clipe — o que já foi gerado continua pago e registrado, e um clipe que já estava no Veo ainda pode ser cobrado. Cancelado é final: para recomeçar, crie outro projeto. Sem custo; repetir não muda nada.",
+  "description": "Cancela um projeto do Gaspar Vídeo. Se estiver renderizando, o worker para antes do próximo clipe — o que já foi gerado continua pago e registrado, e um clipe que já estava no Veo ainda pode ser cobrado. Cancelado é final: para recomeçar, crie outro projeto. Sem custo; repetir não muda nada.",
   "parameters": {
     "type": "object",
     "properties": {

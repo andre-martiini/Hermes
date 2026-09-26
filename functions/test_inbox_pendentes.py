@@ -476,8 +476,11 @@ class InboxPendentesTest(unittest.TestCase):
         (sipac/calendar/pagina/demais canais): `"[{icone} Hermes] {rótulo}:
         ..."` -- também automático, também sem evidência de tratamento."""
         from inbox_pendentes import _diario_mais_recente
-        acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': '[📋 Hermes] Processo SIPAC: Requerimento 123'}]
-        self.assertIsNone(_diario_mais_recente(acompanhamento))
+        # O nome atual (Gaspar) e o antigo (Hermes), que segue nas notas já gravadas.
+        for nome in ('Gaspar', 'Hermes'):
+            with self.subTest(nome=nome):
+                acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': f'[📋 {nome}] Processo SIPAC: Requerimento 123'}]
+                self.assertIsNone(_diario_mais_recente(acompanhamento))
 
     def test_diario_mais_recente_escolhe_a_mais_recente_entre_varias_genuinas(self):
         from inbox_pendentes import _diario_mais_recente
@@ -506,6 +509,8 @@ class InboxPendentesTest(unittest.TestCase):
             "[Copiloto Hermes] Ação editada via card de confirmação. Campos alterados: status.",
             "[Telegram Hermes] Plano de ação atualizado: etapa marcada como feita.",
             "[Telegram Hermes] Lembrete agendado para amanhã.",
+            "[Copiloto Gaspar] Plano de ação atualizado: revisão concluída.",
+            "[Telegram Gaspar] Lembrete agendado para amanhã.",
         ]:
             with self.subTest(nota=nota):
                 acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': nota}]

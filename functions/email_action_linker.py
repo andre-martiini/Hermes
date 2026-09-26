@@ -491,7 +491,7 @@ def _internal_date_to_sp_iso(internal_date) -> str:
 
 def _build_prompt(sender: str, subject: str, body: str, snippet: str, candidates_text: str) -> str:
     return f"""
-Você é o Hermes, assistente pessoal que administra as ações (tarefas) do usuário.
+Você é o Gaspar, assistente pessoal que administra as ações (tarefas) do usuário.
 Analise o e-mail abaixo e decida se ele tem relação direta com alguma das ações
 ativas listadas. Só aponte relação quando houver um vínculo claro e específico
 (mesmo assunto, mesma contraparte, mesmo processo/projeto) — na dúvida, prefira
@@ -733,7 +733,7 @@ def _build_diary_note(msg_id: str, data: dict, mutacoes_aplicadas: list[str] | N
 
     icon = _CANAL_ICONS.get(canal, "🔔")
     label = _CANAL_LABELS.get(canal, "Sinal")
-    lines = [f"[{icon} Hermes] {label}: {_signal_title(data)}"]
+    lines = [f"[{icon} Gaspar] {label}: {_signal_title(data)}"]
     origem_sinal = _signal_origin(data)
     if origem_sinal:
         lines.append(origem_sinal)

@@ -49,7 +49,7 @@ def get_id_token(*, force_refresh: bool = False) -> str:
         return _cached_token
     refresh_token = keyring.get_password(KEYRING_SERVICE, KEYRING_USER)
     if not refresh_token:
-        raise AuthError("Sessão Hermes ausente. Execute login_hermes.py uma vez.")
+        raise AuthError("Sessão Gaspar ausente. Execute login_hermes.py uma vez.")
     response = requests.post(
         "https://securetoken.googleapis.com/v1/token",
         params={"key": _api_key()},
@@ -57,7 +57,7 @@ def get_id_token(*, force_refresh: bool = False) -> str:
         timeout=20,
     )
     if response.status_code != 200:
-        raise AuthError(f"Não foi possível renovar a sessão Hermes ({response.status_code}).")
+        raise AuthError(f"Não foi possível renovar a sessão Gaspar ({response.status_code}).")
     payload = response.json()
     rotated = payload.get("refresh_token")
     if rotated and rotated != refresh_token:

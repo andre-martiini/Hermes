@@ -28,7 +28,7 @@ def _gemini_model() -> str:
 
 VOICE_SYSTEM_SUFFIX = """
 
-Voce e o copiloto de voz do Hermes, rodando como cliente local no computador
+Voce e o copiloto de voz do Gaspar, rodando como cliente local no computador
 do usuario. Respostas devem ser curtas, diretas e naturais para audicao por
 voz — evite listas longas, markdown ou links extensos. Ao decidir usar uma
 ferramenta, prossiga direto, sem pedir permissao antes. Se uma ferramenta
@@ -106,7 +106,7 @@ class VoiceSession:
         if self._chat is not None:
             return self._chat
 
-        self._notify("Conectando ao Hermes...")
+        self._notify("Conectando ao Gaspar...")
         mcp_tools = mcp_client.list_tools()
         gemini_tools = _build_gemini_tools(mcp_tools)
 
@@ -150,7 +150,7 @@ class VoiceSession:
                 break
 
             names = ", ".join(sorted({fc.name for fc in function_calls}))
-            self._notify(f"Consultando o Hermes: {names}...")
+            self._notify(f"Consultando o Gaspar: {names}...")
 
             response_parts = []
             for fc in function_calls:

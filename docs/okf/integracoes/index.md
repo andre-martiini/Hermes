@@ -1,7 +1,7 @@
 ---
 type: index
 title: Integrações
-description: Integrações externas do Hermes (WhatsApp, modelos Gemini).
+description: Integrações externas do Gaspar (WhatsApp, modelos Gemini).
 tags: [hermes, okf, integracoes]
 timestamp: 2026-06-17T00:00:00Z
 ---

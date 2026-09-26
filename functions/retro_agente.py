@@ -252,7 +252,7 @@ def formatar_texto_agregado(
 
 def construir_prompt_retro(texto_agregado: str) -> str:
     """Monta o prompt para o Gemini com a regra inegociável de proposta nula sem padrão repetido."""
-    return f"""Você é o analista de retrospectiva semanal do sistema autônomo Hermes/Jarvis.
+    return f"""Você é o analista de retrospectiva semanal do sistema autônomo Gaspar/Jarvis.
 Sua missão é analisar o desempenho das rotinas agendadas do agente e o uso de ferramentas MCP na semana concluída.
 
 DADOS AGREGADOS DA SEMANA:

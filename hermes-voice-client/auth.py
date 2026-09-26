@@ -42,7 +42,7 @@ def _get_refresh_token() -> str:
     token = keyring.get_password(KEYRING_SERVICE, KEYRING_USER)
     if not token:
         raise AuthError(
-            "Nenhuma sessao Hermes encontrada no keyring do sistema. "
+            "Nenhuma sessao Gaspar encontrada no keyring do sistema. "
             "Rode 'python login.py' primeiro para autenticar."
         )
     return token

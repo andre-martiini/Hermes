@@ -829,7 +829,7 @@ def _assign_acervo_tags(
     """Atribui tags ao arquivo avulso via Retrieval-First (mesmo padrão da Fase 1)."""
     client = _gemini_client(api_key)
     tags_list = ", ".join(f'"{t}"' for t in existing_tags[:100]) if existing_tags else "(nenhuma ainda)"
-    prompt = f"""Você é um classificador de documentos corporativos do sistema Hermes.
+    prompt = f"""Você é um classificador de documentos corporativos do sistema Gaspar.
 
 Arquivo: {nome}
 Conteúdo (trecho):
@@ -894,7 +894,7 @@ def _generate_kg_tags(task_data: dict, existing_tags: list[str], api_key: str) -
 
     tags_list = ", ".join(f'"{t}"' for t in existing_tags[:80]) if existing_tags else "(nenhuma ainda)"
 
-    prompt = f"""Você é um classificador de tarefas operacionais do sistema Hermes.
+    prompt = f"""Você é um classificador de tarefas operacionais do sistema Gaspar.
 
 Tarefa: {titulo}
 Área Temática: {area}
@@ -1033,7 +1033,7 @@ def _dual_pass_find_or_create_node(
             f"{i+1}. [{c['id']}] \"{c['titulo']}\" (similaridade: {c['similarity']:.2f})\n   Resumo: {c['resumo']}"
             for i, c in enumerate(top_candidates)
         )
-        prompt = f"""Você é um classificador de conhecimento operacional do sistema Hermes.
+        prompt = f"""Você é um classificador de conhecimento operacional do sistema Gaspar.
 
 Resumo do procedimento executado na tarefa recém-concluída:
 \"\"\"{summary[:800]}\"\"\"
@@ -1109,7 +1109,7 @@ def _crystallize_task(task_id: str, task_data: dict, db, api_key: str):
     client = _gemini_client(api_key)
 
     # ── Resumo do procedimento ────────────────────────────────────────────────
-    summary_prompt = f"""Você é um analista de processos operacionais do sistema Hermes.
+    summary_prompt = f"""Você é um analista de processos operacionais do sistema Gaspar.
 Leia o diário de bordo abaixo e redija um resumo técnico conciso (máximo 5 frases) descrevendo:
 1. O que foi feito (procedimento operatório)
 2. Decisões-chave tomadas
@@ -2308,7 +2308,7 @@ def _build_synthesis(
         )
     fontes = "\n\n".join(fontes_lines)
 
-    prompt = f"""Você é o motor de respostas do sistema Hermes. Responda à pergunta do usuário APENAS com base nas fontes abaixo.
+    prompt = f"""Você é o motor de respostas do sistema Gaspar. Responda à pergunta do usuário APENAS com base nas fontes abaixo.
 
 PERGUNTA: "{query}"
 
@@ -2401,7 +2401,7 @@ def _build_file_search_synthesis(
         if metadata_filter:
             file_search_args["metadata_filter"] = metadata_filter
 
-        prompt = f"""Voce e o motor de respostas do Hermes. Responda a pergunta do usuario usando somente os documentos recuperados pelo File Search.
+        prompt = f"""Voce e o motor de respostas do Gaspar. Responda a pergunta do usuario usando somente os documentos recuperados pelo File Search.
 
 Pergunta: {query}
 

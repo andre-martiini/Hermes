@@ -79,7 +79,7 @@ export const buildDiaryWhatsappNote = (
 // uma sugestão decidida pela fila web (DashboardView.tsx) produza a mesma nota
 // que uma decidida via Telegram.
 export const buildDiaryGenericNote = (icon: string, label: string, titulo: string, origem: string, resumo: string, link?: string) => {
-  const lines = [`[${icon} Hermes] ${label}: ${titulo}`];
+  const lines = [`[${icon} Gaspar] ${label}: ${titulo}`];
   if (origem) lines.push(origem);
   if (resumo) lines.push(resumo);
   if (link) lines.push(`Link: ${link}`);
