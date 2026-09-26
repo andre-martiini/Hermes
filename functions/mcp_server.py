@@ -176,6 +176,10 @@ _TOOLS_LONGAS: set[str] = {
     # Devolvem texto JSON no sucesso (o `resultado` de `consultar_job` é string).
     "video_gerar_previa",
     "video_ajustar",
+    # Imagens (GPT Image): de dezenas de segundos a ~2 min em qualidade alta.
+    # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
+    "gerar_imagem",
+    "editar_imagem",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60
@@ -236,6 +240,12 @@ _INSTRUCTIONS = (
     "de contato e so com o 'sim' do usuario `video_renderizar`, que devolve a "
     "previa com o custo e exige `confirmar_acao`; ~2 palavras/s, ate ~15 "
     "palavras por cena.\n"
+    "- Imagens: `gerar_imagem` (e `editar_imagem`, com imagens de referencia) "
+    "devolve `job_id`; chame `consultar_job` ate `done` sem perguntar ao "
+    "usuario. O resultado traz a imagem anexada — olhe-a e diga ao usuario "
+    "o que saiu — e `link_download`, o arquivo original que baixa direto, "
+    "para usar em slides, artefatos e documentos. Padrao: qualidade medium; "
+    "so suba para high quando o detalhe importar.\n"
     "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
     "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
     "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "
@@ -1335,6 +1345,14 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # desta fatia pequena; ver docs/autonomia/execucao.md.
     if estruturado is not None:
         envelope["structuredContent"] = estruturado
+    # Imagem pronta: a previa entra como bloco `image` para o cliente VER a
+    # imagem sem baixar nada. So acrescenta itens a `content`; o texto e o
+    # `structuredContent` (contrato em cache no cliente) ficam iguais.
+    if (name == "consultar_job" and not is_error and isinstance(result, dict)
+            and result.get("status") == "done" and result.get("tool") in ("gerar_imagem", "editar_imagem")):
+        from imagens_geradas import blocos_de_previa
+
+        envelope["content"].extend(blocos_de_previa(result.get("resultado")))
     return envelope
 
 

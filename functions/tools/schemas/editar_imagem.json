@@ -1,0 +1,87 @@
+{
+  "name": "editar_imagem",
+  "description": "Cria uma imagem nova a partir de 1 ou mais imagens de referência e uma instrução (ex.: 'mantenha estas pessoas e troque o fundo', 'use este logotipo', 'refaça no estilo desta imagem'). Modelo padrão sunburst, feito para edição controlada. No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download e o link do Drive. As referências vêm por origem, nunca em base64 pela conversa. Não envie fotos ou documentos com dados de terceiros sem pedido explícito do usuário.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "imagens": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "description": "Imagens de referência. Cada item tem exatamente uma origem: drive_file_id (preferida), upload_token (de preparar_upload), url ou gmail_message_id (+ nome_anexo)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "drive_file_id": {"type": "string", "description": "ID ou link de arquivo no Google Drive"},
+            "upload_token": {"type": "string", "description": "Token de preparar_upload, depois do PUT"},
+            "url": {"type": "string", "description": "URL http(s) da imagem"},
+            "gmail_message_id": {"type": "string", "description": "Mensagem do Gmail com a imagem anexada"},
+            "nome_anexo": {"type": "string", "description": "Parte do nome do anexo, com gmail_message_id"}
+          }
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "O que fazer com as referências: o que manter, o que mudar e o estilo"
+      },
+      "mascara": {
+        "type": "object",
+        "description": "Opcional: PNG com transparência na área a mudar (mesmo tamanho da 1a imagem). Mesma forma de origem de cada item de imagens",
+        "properties": {
+          "drive_file_id": {"type": "string"},
+          "upload_token": {"type": "string"},
+          "url": {"type": "string"},
+          "gmail_message_id": {"type": "string"}
+        }
+      },
+      "modelo": {
+        "type": "string",
+        "enum": ["sunburst", "flare", "gpt-image-2"],
+        "description": "sunburst (padrão, edição mais controlada), flare (mais rápido), gpt-image-2 (mais barato)"
+      },
+      "proporcao": {
+        "type": "string",
+        "enum": ["1:1", "16:9", "4:3", "3:4", "9:16"],
+        "description": "Proporção da imagem final. Padrão 1:1"
+      },
+      "qualidade": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "xhigh", "max", "auto"],
+        "description": "Padrão medium"
+      },
+      "fundo": {
+        "type": "string",
+        "enum": ["auto", "transparente", "opaco"],
+        "description": "transparente exige formato png ou webp"
+      },
+      "formato": {
+        "type": "string",
+        "enum": ["png", "jpeg", "webp"],
+        "description": "Padrão png"
+      },
+      "quantidade": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "description": "Quantas variações (1 a 4). Padrão 1"
+      },
+      "provedor": {
+        "type": "string",
+        "enum": ["openai", "google"],
+        "description": "openai (padrão) ou google (Gemini; ignora a máscara)"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID de uma ação do Hermes: a imagem fica anexada a ela e registrada no diário"
+      },
+      "nome_arquivo": {
+        "type": "string",
+        "description": "Nome do arquivo sem extensão. Padrão: derivado do prompt"
+      }
+    },
+    "required": [
+      "imagens",
+      "prompt"
+    ]
+  }
+}

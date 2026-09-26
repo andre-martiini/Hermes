@@ -1965,49 +1965,32 @@ class TestRegistrarCorrecaoProcedimentoNaoIdempotente(unittest.TestCase):
 
 
 class TestGerarImagemNaoIdempotente(unittest.TestCase):
-    """`gerar_imagem` (P03 sub-entrega 19/N): nome de blob novo
-    (`uuid4().hex[:8]`) e upload incondicional a cada chamada -- repetir o
-    MESMO prompt persiste uma segunda imagem. Também incrementa a cota
-    diária (`check_and_increment_limit`) a cada chamada que passa da
-    checagem, outro efeito adicional real."""
+    """`gerar_imagem` (P03 sub-entrega 19/N; provedor OpenAI desde 26/09/2026):
+    id novo (`uuid4().hex[:12]`) e upload incondicional a cada chamada --
+    repetir o MESMO prompt paga e persiste uma segunda imagem. O uso do dia
+    (`system_usage/imagens`, base do teto diario) soma as duas."""
 
-    def _ctx_com_genai_fake(self, image_bytes: bytes):
+    def test_repetir_o_mesmo_prompt_gera_dois_arquivos_e_soma_o_uso(self):
+        import imagens_geradas
+        from llm_providers import openai_images
+        from test_imagens_geradas import FakeBucket, FakeDrive, _png, _resp
         from tools.tool_context import ToolContext
+        from video_fakes import FakeDb
 
-        part = MagicMock()
-        part.inline_data.data = image_bytes
-        candidate = MagicMock()
-        candidate.content.parts = [part]
-        resp = MagicMock()
-        resp.candidates = [candidate]
+        db, bucket, client = FakeDb(), FakeBucket(), MagicMock()
+        client.images.generate.return_value = _resp([_png()])
+        ctx = ToolContext(user_uid="dono", canal="web", _db=db)
 
-        genai_client = MagicMock()
-        genai_client.models.generate_content.return_value = resp
-        return ToolContext(_db=MagicMock(), _genai_client=genai_client), genai_client
-
-    def test_repetir_o_mesmo_prompt_gera_dois_blobs_com_nomes_distintos(self):
-        ctx, genai_client = self._ctx_com_genai_fake(b"fake-image-bytes")
-
-        bucket = MagicMock()
-        blobs_criados = []
-
-        def _blob(nome):
-            blobs_criados.append(nome)
-            return MagicMock()
-
-        bucket.blob.side_effect = _blob
-
-        with patch("hermes_core_logic._get_hermes_storage_bucket", return_value=bucket), \
-                patch("hermes_core_logic._blob_public_url", return_value="https://exemplo/img.jpg"), \
-                patch("gemini_cost_controls.check_and_increment_limit", return_value=True) as fake_limit:
+        with patch.object(imagens_geradas, "_bucket", lambda: bucket),                 patch.object(imagens_geradas, "_url_publica", lambda blob: f"https://s/{blob.name}"),                 patch.object(imagens_geradas, "_drive_service", FakeDrive),                 patch.object(openai_images, "cliente", lambda db, **_: client):
             r1 = hermes_tools.gerar_imagem(ctx, {"prompt": "um gato"})
             r2 = hermes_tools.gerar_imagem(ctx, {"prompt": "um gato"})
 
         self.assertNotIn("ERRO|", r1)
         self.assertNotIn("ERRO|", r2)
-        self.assertEqual(len(blobs_criados), 2)
-        self.assertEqual(len(set(blobs_criados)), 2, "cada chamada deve gerar um nome de blob novo")
-        self.assertEqual(fake_limit.call_count, 2, "a cota diária é incrementada a cada chamada, não só na 1ª")
+        originais = [n for n in bucket.arquivos if not n.endswith("_previa.jpg")]
+        self.assertEqual(len(set(originais)), 2, "cada chamada deve gravar um arquivo novo")
+        uso = next(v for k, v in db.docs.items() if k.startswith("system_usage/imagens/daily/"))
+        self.assertEqual(uso["calls"], 2, "o uso do dia soma cada chamada, nao so a 1a")
 
 
 if __name__ == "__main__":

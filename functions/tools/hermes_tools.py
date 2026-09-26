@@ -1529,54 +1529,17 @@ def preparar_remocao_horarios_em_lote(ctx: ToolContext, args: dict):
 
 
 def gerar_imagem(ctx: ToolContext, args: dict):
-    from google.genai import types
+    """GPT Image (OpenAI) por padrao; Google como opcao e plano B. Ver imagens_geradas.py."""
+    import imagens_geradas
 
-    from gemini_cost_controls import check_and_increment_limit
+    return imagens_geradas.executar(ctx, args, modo="gerar")
 
-    try:
-        limit_images = int(os.environ.get("LIMIT_IMAGE_GENERATION", "5"))
-        if not check_and_increment_limit(ctx.db, ctx.user_uid, "image_generation", limit_images):
-            return "ERRO|Voce atingiu o limite diario de 5 geracoes de imagem."
 
-        import uuid
+def editar_imagem(ctx: ToolContext, args: dict):
+    """Edita a partir de imagens de referencia (e mascara opcional). Ver imagens_geradas.py."""
+    import imagens_geradas
 
-        config = types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            image_config=types.ImageConfig(
-                aspect_ratio=args.get("proporcao") or "1:1", image_size="1K"
-            ),
-            thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
-        )
-        resp = ctx.genai_client.models.generate_content(
-            model="gemini-3.1-flash-image-preview",
-            contents=[args.get("prompt")],
-            config=config,
-        )
-
-        image_bytes = None
-        if getattr(resp, "candidates", None):
-            cand = resp.candidates[0]
-            if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
-                for part in cand.content.parts:
-                    if getattr(part, "inline_data", None) and getattr(part.inline_data, "data", None):
-                        image_bytes = part.inline_data.data
-                        break
-
-        if not image_bytes:
-            return "ERRO|Nao foi possivel gerar a imagem."
-
-        from hermes_core_logic import _blob_public_url, _get_hermes_storage_bucket
-
-        bucket = _get_hermes_storage_bucket()
-        blob = bucket.blob(f"imagens_geradas/img_{uuid.uuid4().hex[:8]}.jpg")
-        blob.upload_from_string(image_bytes, content_type="image/jpeg")
-        url = _blob_public_url(blob)
-        return f"![Imagem Gerada]({url})\n\n*(Imagem gerada via Imagen 3. URL: {url})*"
-    except Exception as e:
-        import traceback
-
-        print(f"[hermes_tools] Erro ao gerar imagem: {e}\n{traceback.format_exc()}")
-        return f"⚠️ Erro ao gerar imagem: {e}"
+    return imagens_geradas.executar(ctx, args, modo="editar")
 
 
 def consultar_processo_sipac(ctx: ToolContext, args: dict):
@@ -2675,6 +2638,7 @@ _HANDLERS: dict = {
     "preparar_reagendamento_em_lote": preparar_reagendamento_em_lote,
     "preparar_remocao_horarios_em_lote": preparar_remocao_horarios_em_lote,
     "gerar_imagem": gerar_imagem,
+    "editar_imagem": editar_imagem,
     "consultar_processo_sipac": consultar_processo_sipac,
     "acompanhar_processo_sipac": acompanhar_processo_sipac,
 

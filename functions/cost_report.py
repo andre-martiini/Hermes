@@ -260,6 +260,7 @@ def format_ai_block(
     usd_brl: float,
     day: date,
     video: dict[str, Any] | None = None,
+    imagens: dict[str, Any] | None = None,
 ) -> list[str]:
     """Bloco de telemetria própria de IA. ``day`` é o dia corrente (rótulo próprio,
     distinto do dia do bloco GCP — ver nota no topo do módulo). ``video`` é o uso
@@ -286,6 +287,15 @@ def format_ai_block(
         rotulos = {"narracao": "narrações", "quadro": "quadros", "clipe": "clipes"}
         partes = [f"{int(n)} {rotulos.get(nome, nome)}" for nome, n in sorted(itens.items()) if n]
         lines.append(f"  • Vídeo: US$ {usd:.2f} (~{brl(usd * usd_brl)})" + (f" | {', '.join(partes)}" if partes else ""))
+    if imagens:
+        # `system_usage/imagens/daily` (imagens_geradas.py): custo pelo `usage` da OpenAI,
+        # preço de tabela para as do Google. Separado da linha OpenAI, que é só texto.
+        usd = float(imagens.get("estimated_usd") or 0.0)
+        n = int(imagens.get("imagens") or 0)
+        por_provedor = imagens.get("provedores") or {}
+        google = int((por_provedor.get("google") or {}).get("imagens") or 0)
+        detalhe = f" ({google} pelo Google)" if google else ""
+        lines.append(f"  • Imagens: {n} {'imagem' if n == 1 else 'imagens'}{detalhe}, US$ {usd:.2f} (~{brl(usd * usd_brl)})")
     return lines
 
 
@@ -301,6 +311,7 @@ def build_message(
     *,
     today: date,
     video: dict[str, Any] | None = None,
+    imagens: dict[str, Any] | None = None,
 ) -> str:
     """Monta a mensagem final. ``day`` é o dia do bloco GCP (sempre o dia anterior,
     pelo atraso do export do Billing); ``today`` é o dia corrente, usado para
@@ -323,7 +334,7 @@ def build_message(
     else:
         lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({gcp_error})" if gcp_error else ""))
     lines.append("")
-    lines.extend(format_ai_block(gemini, openai, usd_brl, today, video=video))
+    lines.extend(format_ai_block(gemini, openai, usd_brl, today, video=video, imagens=imagens))
     if firestore_lines:
         lines.append("")
         lines.append(f"🗄️ <b>Firestore por function — {today.strftime('%d/%m')} (parcial, até agora)</b>")
@@ -407,6 +418,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     gemini = _usage_doc(db, "gemini", day_key)
     openai = _usage_doc(db, "openai", day_key)
     video = _usage_doc(db, "video", day_key)
+    imagens = _usage_doc(db, "imagens", day_key)
 
     firestore_lines = None
     try:
@@ -424,7 +436,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
         usd_brl = 5.30
 
     return build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error,
-                         today=today, video=video)
+                         today=today, video=video, imagens=imagens)
 
 
 @scheduler_fn.on_schedule(

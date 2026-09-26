@@ -9895,7 +9895,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def gerar_imagem(prompt: str, proporcao: str = "1:1"):
             """
-            Gera uma imagem realista ou artística usando o modelo Imagen do Google.
+            Gera uma imagem realista ou artística (GPT Image da OpenAI; Gemini como plano B).
             Use esta ferramenta sempre que o usuário pedir para criar, gerar, desenhar ou imaginar uma imagem.
             Parâmetros:
             - prompt: descrição detalhada da imagem a ser gerada (em português ou inglês).

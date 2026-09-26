@@ -220,6 +220,7 @@ class TestMcpAnnotations(unittest.TestCase):
             "editar_plano_acao",
             "gerar_relatorio",
             "gerar_imagem",
+            "editar_imagem",
             "criar_rascunho_whatsapp",
             "solicitar_autorizacao_argos",
             "confirmar_edicao_em_lote",

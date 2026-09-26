@@ -1,16 +1,56 @@
 {
   "name": "gerar_imagem",
-  "description": "Gera uma imagem a partir de uma descrição textual e devolve a URL pública em Markdown",
+  "description": "Gera imagem a partir de uma descrição (GPT Image da OpenAI por padrão). No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download (arquivo original, URL pública que baixa direto — use em slides, páginas e documentos) e o link do Drive. Com task_id, anexa à ação. Só o prompt já basta; os demais parâmetros são opcionais.",
   "parameters": {
     "type": "object",
     "properties": {
       "prompt": {
         "type": "string",
-        "description": "Descrição detalhada da imagem a gerar"
+        "description": "Descrição detalhada da imagem (português ou inglês). Para texto dentro da imagem, escreva o texto exato entre aspas"
       },
       "proporcao": {
         "type": "string",
-        "description": "Proporção da imagem: '1:1', '16:9', '4:3', '3:4' ou '9:16'"
+        "enum": ["1:1", "16:9", "4:3", "3:4", "9:16"],
+        "description": "Proporção. Padrão 1:1. 16:9 para slides, 9:16 para celular/stories"
+      },
+      "modelo": {
+        "type": "string",
+        "enum": ["flare", "sunburst", "gpt-image-2"],
+        "description": "flare (padrão, rápido), sunburst (mais controle, mais lento), gpt-image-2 (geração anterior, mais barata)"
+      },
+      "qualidade": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "xhigh", "max", "auto"],
+        "description": "Padrão medium. low para rascunho barato; high ou acima só quando o detalhe importa (custa várias vezes mais e leva até ~2 min)"
+      },
+      "fundo": {
+        "type": "string",
+        "enum": ["auto", "transparente", "opaco"],
+        "description": "transparente exige formato png ou webp (útil para logotipo e ícone)"
+      },
+      "formato": {
+        "type": "string",
+        "enum": ["png", "jpeg", "webp"],
+        "description": "Padrão png"
+      },
+      "quantidade": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "description": "Quantas variações gerar (1 a 4), cada uma num arquivo. Padrão 1"
+      },
+      "provedor": {
+        "type": "string",
+        "enum": ["openai", "google"],
+        "description": "openai (padrão) ou google (Gemini, o gerador anterior)"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID de uma ação do Hermes: a imagem fica anexada a ela e registrada no diário"
+      },
+      "nome_arquivo": {
+        "type": "string",
+        "description": "Nome do arquivo sem extensão. Padrão: derivado do prompt"
       }
     },
     "required": [
