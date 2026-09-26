@@ -434,11 +434,30 @@ def registrar_resultado_observado(
     diretamente para `AgentRunStatus.CONCLUIDO`/`FALHA`; `CANCELADO` também
     mapeia para `FALHA` (`AgentRun` não tem desfecho próprio de
     cancelamento -- ver `_REQUEST_STATUS_PARA_AGENT_RUN_STATUS`, no topo do
-    módulo, para a justificativa completa). `lease_ainda_valida=True` é
-    sempre correto aqui: nos dois caminhos (nova conclusão E reentrega
-    idempotente) o fencing já foi conferido acima contra `pedido.lease`
-    ANTES de chegar a esta chamada -- e na reentrega, `concluir_run` ignora
-    esse parâmetro de qualquer forma (run já terminal, ver sua docstring).
+    módulo, para a justificativa completa).
+
+    `lease_ainda_valida` é sempre CALCULADA a partir da lease REAL do
+    pedido (`not lease_expirada(pedido.lease, agora=agora)`), nos dois
+    caminhos -- nunca assumida como `True`. Achado de revisão adversarial:
+    uma versão anterior desta função passava `lease_ainda_valida=True`
+    fixo no caminho de reentrega, sob a justificativa de que
+    `concluir_run` "ignora esse parâmetro de qualquer forma (run já
+    terminal)" -- mas isso só é verdade quando `pedido.run` JÁ está
+    terminal, algo que esta função nunca conferia antes de chamar. Um
+    `PedidoDuravel` construído com `pedido.run` ainda ATIVO (ex.:
+    `INICIADO`/`EM_ANDAMENTO`) ao lado de um ledger já selado -- uma
+    inconsistência que só um wiring futuro com escrita não-atômica de
+    pedido/run poderia produzir, já que os quatro caminhos deste módulo
+    sempre fecham os dois juntos -- forçaria `concluir_run` a fechar esse
+    run com uma lease já expirada há muito tempo, só porque a alegação era
+    aceita sem verificação. Calcular o valor de verdade em vez de assumir
+    corrige isso nos dois caminhos: no caminho de nova conclusão, o
+    resultado é sempre `True` (o `_validar_fencing` logo abaixo já exige
+    lease não expirada antes de chegar aqui, então o cálculo só confirma o
+    que já foi validado); no caminho de reentrega, se `pedido.run` por
+    acaso não estivesse terminal, `concluir_run` corretamente levantaria
+    `RunLeaseInvalida` em vez de fechá-lo às escuras.
+
     Se `_ledger_registrar_resultado` levantar (resultado diferente do já
     selado), a função inteira propaga a exceção SEM chegar a tocar
     `pedido.run` -- mesma garantia de "nunca sobrescreve" que já vale para
@@ -455,7 +474,9 @@ def registrar_resultado_observado(
             raise LeaseInvalida(motivo)
         entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)
         run_atualizado = _fechar_run_se_houver(
-            pedido.run, lease_token, generation, novo_status, resultado, agora
+            pedido.run, lease_token, generation, novo_status, resultado,
+            lease_ainda_valida=not lease_expirada(pedido.lease, agora=agora),
+            agora=agora,
         )
         return dataclasses.replace(pedido, ledger_entry=entrada, run=run_atualizado)
     _validar_fencing(pedido, lease_token, generation, agora)
@@ -476,7 +497,9 @@ def registrar_resultado_observado(
     _transicionar_para_resultado(pedido, novo_status)
     entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)
     run_atualizado = _fechar_run_se_houver(
-        pedido.run, lease_token, generation, novo_status, resultado, agora
+        pedido.run, lease_token, generation, novo_status, resultado,
+        lease_ainda_valida=not lease_expirada(pedido.lease, agora=agora),
+        agora=agora,
     )
     return dataclasses.replace(pedido, status=novo_status, ledger_entry=entrada, run=run_atualizado)
 
@@ -487,14 +510,15 @@ def _fechar_run_se_houver(
     generation: int,
     novo_status: RequestStatus,
     resultado: Any,
+    lease_ainda_valida: bool,
     agora: datetime | None,
 ) -> AgentRun | None:
     """Chamado só de dentro de `registrar_resultado_observado`, nos dois
     caminhos (nova conclusão e reentrega idempotente) -- ver sua docstring
-    para a justificativa completa de `lease_ainda_valida=True` e do
-    mapeamento `_REQUEST_STATUS_PARA_AGENT_RUN_STATUS`. `run is None` (sem
-    `AgentRun` associado, ver docstring de `PedidoDuravel`) devolve `None`
-    sem erro."""
+    para a justificativa completa de `lease_ainda_valida` (SEMPRE calculada
+    pelo chamador a partir da lease real, nunca assumida) e do mapeamento
+    `_REQUEST_STATUS_PARA_AGENT_RUN_STATUS`. `run is None` (sem `AgentRun`
+    associado, ver docstring de `PedidoDuravel`) devolve `None` sem erro."""
     if run is None:
         return None
     status_run = _REQUEST_STATUS_PARA_AGENT_RUN_STATUS.get(novo_status)
@@ -506,7 +530,7 @@ def _fechar_run_se_houver(
         )
     return _run_concluir(
         run, lease_token, generation, status_run,
-        lease_ainda_valida=True, resultado=resultado, agora=agora,
+        lease_ainda_valida=lease_ainda_valida, resultado=resultado, agora=agora,
     )
 
 

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from autonomy.ledger import ConflitoIdempotencia
 from autonomy.requests import ESTADOS_TERMINAIS, RequestStatus
-from autonomy.runs import AgentRunStatus
+from autonomy.runs import AgentRunStatus, RunLeaseInvalida
 from autonomy.execution import (
     LeaseInvalida,
     PedidoDuravel,
@@ -535,14 +535,24 @@ class TestPedidoRunWiring(unittest.TestCase):
         self.assertEqual(atualizado.run.status, AgentRunStatus.EM_ANDAMENTO)
         self.assertEqual(atualizado.run.run_id, "run-1")
 
-    def test_registrar_progresso_repetido_e_idempotente_no_run(self):
+    def test_registrar_progresso_repetido_nao_toca_o_run_de_novo(self):
+        # Achado de revisão adversarial sobre a versão anterior deste teste:
+        # o guarda de registrar_progresso (`if pedido.status !=
+        # EM_ANDAMENTO`) impede QUALQUER segunda chamada a
+        # autonomy.runs.marcar_em_andamento depois da primeira transição --
+        # a idempotência de marcar_em_andamento em si (já testada
+        # isoladamente em test_autonomy_runs.py) nunca chega a ser
+        # exercitada por este caminho; o run é só carregado sem mudança
+        # (mesma identidade de objeto) na segunda chamada. O nome/comentário
+        # anterior ("run já EM_ANDAMENTO é um no-op idempotente em
+        # marcar_em_andamento") sugeria testar essa idempotência, mas a
+        # asserção passava de forma vazia (o objeto nunca era tocado).
         pedido = self._pedido_em_andamento()
         de_novo = registrar_progresso(
             pedido, pedido.lease.lease_token, pedido.lease.generation,
             "op-1", {"acao": "x"}, {"passo": 2}, agora=T0 + timedelta(seconds=5),
         )
-        # Segunda chamada não deveria falhar (run já EM_ANDAMENTO é um
-        # no-op idempotente em autonomy.runs.marcar_em_andamento).
+        self.assertIs(de_novo.run, pedido.run)
         self.assertEqual(de_novo.run.status, AgentRunStatus.EM_ANDAMENTO)
 
     def test_registrar_progresso_sem_run_nao_quebra(self):
@@ -655,6 +665,53 @@ class TestPedidoRunWiring(unittest.TestCase):
                 {"ok": True}, RequestStatus.CONCLUIDO, agora=T0,
             )
         self.assertEqual(pedido.run.status, AgentRunStatus.EM_ANDAMENTO)
+
+    def test_reentrega_com_run_ainda_ativo_e_lease_vencida_nao_fecha_o_run_as_escuras(self):
+        # Achado de revisão adversarial: uma versão anterior de
+        # _fechar_run_se_houver passava lease_ainda_valida=True fixo no
+        # caminho de reentrega, sob a alegação de que concluir_run "ignora
+        # esse parâmetro de qualquer forma (run já terminal)" -- mas isso só
+        # vale quando pedido.run JÁ está terminal, o que nunca era
+        # conferido. Simula a inconsistência que um wiring futuro com
+        # escrita não-atômica de pedido/run poderia produzir (pedido/ledger
+        # já selados, mas o run correspondente nunca foi fechado): reentrega
+        # do MESMO resultado, bem depois da lease original expirar, precisa
+        # levantar RunLeaseInvalida em vez de forçar o run a CONCLUIDO sem
+        # nenhuma lease real ainda válida por trás.
+        pedido = self._pedido_em_andamento()
+        run_ainda_ativo = pedido.run
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        inconsistente = dataclasses.replace(concluido, run=run_ainda_ativo)
+        with self.assertRaises(RunLeaseInvalida):
+            registrar_resultado_observado(
+                inconsistente, pedido.lease.lease_token, pedido.lease.generation,
+                {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(minutes=10),
+            )
+        # O ledger (já selado antes) segue intacto -- só a tentativa de
+        # fechar o run é que é rejeitada.
+        self.assertEqual(inconsistente.ledger_entry.resultado, {"ok": True})
+
+    def test_reentrega_com_run_ainda_ativo_e_lease_valida_fecha_o_run(self):
+        # Contraparte do teste anterior: se a lease do pedido AINDA estiver
+        # dentro do prazo no momento da reentrega, fechar o run (mesmo que
+        # ele por algum motivo não tivesse sido fechado antes) é seguro --
+        # lease_ainda_valida é calculada como True porque é genuinamente
+        # verdade, não porque foi assumida.
+        pedido = self._pedido_em_andamento()
+        run_ainda_ativo = pedido.run
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        inconsistente = dataclasses.replace(concluido, run=run_ainda_ativo)
+        de_novo = registrar_resultado_observado(
+            inconsistente, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=10),
+        )
+        self.assertEqual(de_novo.run.status, AgentRunStatus.CONCLUIDO)
 
 
 if __name__ == "__main__":
