@@ -23,7 +23,7 @@ Permitir que o Gaspar converse com terceiros no WhatsApp em nome do André duran
 Toda mensagem enviada pelo Gaspar nesse modo começa com o identificador em negrito, seguido de dois-pontos:
 
 ```
-**Gaspar:** [mensagem]
+**Gaspar Bot:** [mensagem]
 ```
 
 Isso se repete em **todas** as mensagens da conversa, não só na primeira — o objetivo é que a pessoa do outro lado nunca esqueça que está falando com o assistente, mesmo numa troca de várias mensagens.
@@ -61,7 +61,7 @@ Uma skill do Claude sozinha não é suficiente, porque não dá presença contí
 
 - Ativação/desativação do modo (toggle manual, ou vinculado a eventos da agenda).
 - Estado de conversa por contato — saber que já está "no meio" de uma investigação com aquela pessoa específica.
-- Aplicação do prefixo `**Gaspar:**` em toda mensagem de saída do outbox nesse modo.
+- Aplicação do prefixo `**Gaspar Bot:**` em toda mensagem de saída do outbox nesse modo.
 - Integração com a consulta de agenda no momento de gerar a resposta.
 - Uso do `avaliar_interrupcao_atencao` (já existente, Fase 2) como critério de quando escalar para o André em vez de continuar sozinho.
 

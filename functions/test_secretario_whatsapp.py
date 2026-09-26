@@ -109,22 +109,23 @@ class TestSecretarioRegrasPuras(unittest.TestCase):
     def test_prefixar_assinatura_adiciona_prefixo_se_ausente(self):
         texto = "Olá, o André está em reunião."
         res = sec.prefixar_assinatura(texto)
-        self.assertEqual(res, "**Gaspar:** Olá, o André está em reunião.")
+        self.assertEqual(res, "**Gaspar Bot:** Olá, o André está em reunião.")
 
     def test_prefixar_assinatura_mantem_prefixo_se_ja_presente(self):
-        texto = "**Gaspar:** Olá, já anotei o seu recado."
+        texto = "**Gaspar Bot:** Olá, já anotei o seu recado."
         res = sec.prefixar_assinatura(texto)
-        self.assertEqual(res, "**Gaspar:** Olá, já anotei o seu recado.")
+        self.assertEqual(res, "**Gaspar Bot:** Olá, já anotei o seu recado.")
 
     def test_prefixar_assinatura_limpa_variacoes_duplicadas(self):
-        for texto in ["Gaspar: Olá, anotei.", "*Gaspar:* Olá, anotei.", "**Gaspar**: Olá, anotei.",
+        for texto in ["Gaspar Bot: Olá, anotei.", "*Gaspar Bot:* Olá, anotei.", "**Gaspar Bot**: Olá, anotei.",
+                      "Gaspar: Olá, anotei.", "**Gaspar**: Olá, anotei.",
                       "Hermes Bot: Olá, anotei.", "**Hermes Bot:** Olá, anotei."]:
             with self.subTest(texto=texto):
-                self.assertEqual(sec.prefixar_assinatura(texto), "**Gaspar:** Olá, anotei.")
+                self.assertEqual(sec.prefixar_assinatura(texto), "**Gaspar Bot:** Olá, anotei.")
 
     def test_prefixar_assinatura_nao_come_o_nome_sem_dois_pontos(self):
         res = sec.prefixar_assinatura("Gaspar é o assistente do André.")
-        self.assertEqual(res, "**Gaspar:** Gaspar é o assistente do André.")
+        self.assertEqual(res, "**Gaspar Bot:** Gaspar é o assistente do André.")
 
     def test_chat_na_allowlist_match_exato_e_digitos(self):
         allowlist = ["5511999999999@c.us", "5521888888888"]
@@ -260,13 +261,14 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
             "chat_id": chat_id,
             "estado": sec.ESTADO_EM_ATENDIMENTO,
             "trocas_count": 1,
-            "historico_mensagens": [{"role": "user", "content": "oi"}, {"role": "assistant", "content": "**Gaspar:** olá"}],
+            "historico_mensagens": [{"role": "user", "content": "oi"}, {"role": "assistant", "content": "**Gaspar Bot:** olá"}],
         })
         for i, texto in enumerate([
-            "**Gaspar:** Anotei o recado.",
+            "**Gaspar Bot:** Anotei o recado.",
+            "Gaspar Bot: Anotei o recado.",
+            "*Gaspar Bot:* Anotei o recado.",
+            "**Gaspar Bot**: Anotei o recado.",
             "Gaspar: Anotei o recado.",
-            "*Gaspar:* Anotei o recado.",
-            "**Gaspar**: Anotei o recado.",
             # assinatura antiga, de antes da renomeação: ainda é o bot
             "**Hermes Bot:** Anotei o recado.",
             "Hermes Bot: Anotei o recado.",
@@ -323,7 +325,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
                 "content": "Oi André", "wa_message_id": "m1"}, llm_runner=llm)
             sec.processar_mensagem_secretario(self.db, {
                 "chat_id": chat_id, "from_me": True,
-                "content": "**Gaspar:** Anotei.", "wa_message_id": "eco1"})
+                "content": "**Gaspar Bot:** Anotei.", "wa_message_id": "eco1"})
             res = sec.processar_mensagem_secretario(self.db, {
                 "chat_id": chat_id, "chat_name": "Carlos", "from_me": False,
                 "content": "Pode me ligar hoje?", "wa_message_id": "m2"}, llm_runner=llm)
@@ -370,7 +372,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
         rascunho = outbox_docs[0].to_dict()
-        self.assertTrue(rascunho["content"].startswith("**Gaspar:** "))
+        self.assertTrue(rascunho["content"].startswith("**Gaspar Bot:** "))
         self.assertEqual(rascunho["tipo"], sec.TIPO_OUTBOX_SECRETARIO)
         self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
         self.assertIsNone(rascunho.get("envio_liberado_em"))
@@ -527,7 +529,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(res["status"], "ok")
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
-        self.assertTrue(outbox_docs[0].to_dict()["content"].startswith("**Gaspar:** "))
+        self.assertTrue(outbox_docs[0].to_dict()["content"].startswith("**Gaspar Bot:** "))
 
     def test_grupo_na_allowlist_com_mentioned_ids_cruzando_andre_ids_processa(self):
         chat_id = "120363000000000000@g.us"
@@ -1793,7 +1795,7 @@ class TestSecretarioGemini(unittest.TestCase):
         self.assertEqual(kw["stop_after_tools"], {"finalizar_atendimento"})
         self.assertEqual(kw["max_rounds"], 2)
         self.assertEqual(kw["feature"], "secretario_whatsapp")
-        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar:** "))
+        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar Bot:** "))
 
     def test_modelo_padrao_e_reserva_vem_da_configuracao_gemini(self):
         from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
@@ -1824,7 +1826,7 @@ class TestSecretarioGemini(unittest.TestCase):
             res = sec._executar_llm_secretario(
                 db=_MockDb(), chat_name="Carlos", texto_mensagem="Oi", historico=[], agora_sp="x")
         self.assertIn("indisponível", res["resposta_para_contato"])
-        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar:** "))
+        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar Bot:** "))
 
     def test_ferramentas_sem_consultar_agenda(self):
         tools, function_map, _ = sec._construir_tools_secretario(_MockDb())
