@@ -283,7 +283,17 @@ def assumir_pedido(
     inteiro e esgotava `tentativas` imediatamente. `pedido.proximo_tentativa_em
     is None` é tolerado sem erro (pedido legado, ou construído sem passar
     pelo sweep -- mesmo espírito de tolerância a dados legados do resto do
-    módulo)."""
+    módulo).
+
+    A checagem exige `pedido.status == RETENTATIVA_AGENDADA` explicitamente,
+    não só `proximo_tentativa_em is not None` -- achado de uma rodada de
+    revisão adversarial sobre o próprio fix acima: nada em
+    `PedidoDuravel.__post_init__` impede um `proximo_tentativa_em` não-None
+    "perdido" num pedido que não está em `RETENTATIVA_AGENDADA` (ex.: um
+    wiring futuro com escrita não-atômica que atualize `status` para
+    `PENDENTE` sem limpar o campo antigo) -- sem esta restrição extra, um
+    pedido `PENDENTE` legítimo seria recusado com uma mensagem confusa de
+    "aguardando retentativa" em vez de ser aceito normalmente."""
     _transicionar(pedido, RequestStatus.RESERVADO)
     agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
     if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora_resolvida):
@@ -292,7 +302,11 @@ def assumir_pedido(
             f"(expira em {pedido.lease.expires_at.isoformat()}) -- não é possível "
             "reassumir antes de expirar."
         )
-    if pedido.proximo_tentativa_em is not None and agora_resolvida < pedido.proximo_tentativa_em:
+    if (
+        pedido.status == RequestStatus.RETENTATIVA_AGENDADA
+        and pedido.proximo_tentativa_em is not None
+        and agora_resolvida < pedido.proximo_tentativa_em
+    ):
         raise LeaseInvalida(
             f"pedido '{pedido.request_id}' agendado para nova tentativa em "
             f"{pedido.proximo_tentativa_em.isoformat()} -- ainda não chegou a hora "

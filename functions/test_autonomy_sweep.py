@@ -293,6 +293,24 @@ class TestReassumirAposSweepLimpaProximaTentativa(unittest.TestCase):
         self.assertIsNone(reassumido.proximo_tentativa_em)
         self.assertEqual(reassumido.tentativas, 1)
 
+    def test_proximo_tentativa_em_perdido_fora_de_retentativa_agendada_nao_bloqueia(self):
+        # Achado de uma rodada de revisão adversarial sobre o fix acima:
+        # PedidoDuravel.__post_init__ não impede um proximo_tentativa_em
+        # não-None "perdido" num pedido que NÃO está em
+        # RETENTATIVA_AGENDADA (ex.: um wiring futuro com escrita não-
+        # atômica que atualize status para PENDENTE sem limpar o campo
+        # antigo). A checagem em assumir_pedido precisa exigir
+        # status == RETENTATIVA_AGENDADA explicitamente, não só o campo
+        # não-None -- senão este pedido PENDENTE legítimo seria recusado
+        # com uma mensagem confusa de "aguardando retentativa".
+        pedido = PedidoDuravel(
+            request_id="req-stray",
+            status=RequestStatus.PENDENTE,
+            proximo_tentativa_em=T0 + timedelta(minutes=5),
+        )
+        reassumido = assumir_pedido(pedido, "executor-a", "run-1", agora=T0)
+        self.assertEqual(reassumido.status, RequestStatus.RESERVADO)
+
 
 if __name__ == "__main__":
     unittest.main()
