@@ -78,6 +78,21 @@ class ResultadoVerificacao(Enum):
 _AUSENTE = object()
 
 
+def _em_branco(valor: str | None) -> bool:
+    """`True` para `None`, string vazia OU string só de espaço em branco.
+    Achado de revisão adversarial: uma versão anterior usava `not valor`
+    diretamente nos identificadores/referências observados
+    (`referencia_consolidacao`, `referencia_artefato`, `provider_message_id`)
+    -- `not "   "` é `False` (string não-vazia é truthy em Python), então um
+    valor só de espaço passava como "presente" e podia produzir `ACEITO`
+    com um identificador inutilizável (não serve para correlacionar nada
+    depois). Usado só para os campos OBSERVADOS deste módulo -- valores
+    *esperados* fornecidos pelo chamador (`destino_esperado`, chaves de
+    `campos_alterados_esperados`, etc.) não passam por aqui: são entrada de
+    quem monta a evidência, não parte do que está sendo julgado."""
+    return valor is None or not valor.strip()
+
+
 @dataclass(frozen=True)
 class VerificacaoResultado:
     """Saída comum de toda função `verificar_*` deste módulo.
@@ -137,12 +152,27 @@ def verificar_atualizacao_tarefa(evidencia: EvidenciaAtualizacaoTarefa) -> Verif
        pode ter sido sobrescrita por outra concorrente -- `PENDENTE`, não
        `REFUTADO`: não há evidência de que o efeito não ocorreu, só de que
        esta releitura específica não o capturou ainda.
-    2. Preservação: qualquer campo que deveria permanecer igual e mudou é
-       `REFUTADO` -- isso é sinal de efeito colateral real (a escrita
-       tocou algo que não devia), não falta de evidência.
-    3. Alteração: qualquer campo esperado ausente da releitura é
-       `PENDENTE` (ainda não temos essa parte da evidência); qualquer
-       campo presente mas com valor diferente do esperado é `REFUTADO`.
+    2. Contradição definitiva (qualquer campo -- alterado OU preservado --
+       PRESENTE na releitura com valor diferente do esperado): `REFUTADO`.
+       Um campo preservado que mudou é efeito colateral real; um campo
+       alterado que não tomou o valor esperado é a escrita não tendo
+       surtido efeito. As duas contam como o MESMO tipo de evidência
+       definitiva e são reportadas juntas, e têm prioridade sobre qualquer
+       lacuna de evidência (item 3): um erro comprovado não deve ficar
+       escondido atrás de "falta dado" só porque outra parte da releitura
+       também está incompleta.
+    3. Lacuna de evidência (qualquer campo -- alterado OU preservado --
+       AUSENTE da releitura): `PENDENTE`. Achado de revisão adversarial:
+       uma versão anterior desta função só verificava ausência para os
+       campos ALTERADOS, tratando um campo PRESERVADO ausente da releitura
+       como "nada a reportar" e podendo terminar em `ACEITO` sem nenhuma
+       evidência sobre se aquele campo sobreviveu à escrita -- exatamente
+       o "aceito por omissão" que a docstring da classe já proibia por
+       escrito, mas o código não impedia. Uma releitura parcial (que só
+       devolve os campos que o próprio chamador tocou, por exemplo) agora
+       nunca produz `ACEITO` para os campos que não trouxe.
+    4. Só chega a `ACEITO` quando NENHUM campo (alterado ou preservado)
+       está ausente e NENHUM está presente com valor divergente.
     """
     if (
         evidencia.versao_esperada is not None
@@ -168,44 +198,50 @@ def verificar_atualizacao_tarefa(evidencia: EvidenciaAtualizacaoTarefa) -> Verif
         if evidencia.campos_releitura.get(campo, _AUSENTE) != valor_esperado
         and evidencia.campos_releitura.get(campo, _AUSENTE) is not _AUSENTE
     }
-    if campos_preservados_violados:
+    campos_divergentes = {
+        campo: {"esperado": valor_esperado, "observado": evidencia.campos_releitura.get(campo, _AUSENTE)}
+        for campo, valor_esperado in evidencia.campos_alterados_esperados.items()
+        if evidencia.campos_releitura.get(campo, _AUSENTE) != valor_esperado
+        and evidencia.campos_releitura.get(campo, _AUSENTE) is not _AUSENTE
+    }
+    if campos_preservados_violados or campos_divergentes:
+        total = len(campos_preservados_violados) + len(campos_divergentes)
         return VerificacaoResultado(
             ResultadoVerificacao.REFUTADO,
             motivo=(
-                f"{len(campos_preservados_violados)} campo(s) que deveriam ser preservados "
-                f"mudaram de valor: {sorted(campos_preservados_violados)}."
+                f"{total} campo(s) presente(s) na releitura com valor diferente do esperado "
+                f"-- preservados violados: {sorted(campos_preservados_violados)}; "
+                f"alterados divergentes: {sorted(campos_divergentes)}."
             ),
-            detalhes={"campos_preservados_violados": campos_preservados_violados},
+            detalhes={
+                "campos_preservados_violados": campos_preservados_violados,
+                "campos_divergentes": campos_divergentes,
+            },
         )
 
-    campos_ausentes = {
+    campos_preservados_ausentes = {
+        campo
+        for campo in evidencia.campos_preservados_esperados
+        if evidencia.campos_releitura.get(campo, _AUSENTE) is _AUSENTE
+    }
+    campos_alterados_ausentes = {
         campo
         for campo in evidencia.campos_alterados_esperados
         if evidencia.campos_releitura.get(campo, _AUSENTE) is _AUSENTE
     }
-    if campos_ausentes:
+    if campos_preservados_ausentes or campos_alterados_ausentes:
+        total = len(campos_preservados_ausentes) + len(campos_alterados_ausentes)
         return VerificacaoResultado(
             ResultadoVerificacao.PENDENTE,
             motivo=(
-                f"{len(campos_ausentes)} campo(s) alterado(s) esperado(s) ainda não aparecem "
-                f"na releitura: {sorted(campos_ausentes)}."
+                f"{total} campo(s) esperado(s) ainda não aparecem na releitura -- "
+                f"preservados sem evidência: {sorted(campos_preservados_ausentes)}; "
+                f"alterados sem evidência: {sorted(campos_alterados_ausentes)}."
             ),
-            detalhes={"campos_ausentes": sorted(campos_ausentes)},
-        )
-
-    campos_divergentes = {
-        campo: {"esperado": valor_esperado, "observado": evidencia.campos_releitura.get(campo)}
-        for campo, valor_esperado in evidencia.campos_alterados_esperados.items()
-        if evidencia.campos_releitura.get(campo) != valor_esperado
-    }
-    if campos_divergentes:
-        return VerificacaoResultado(
-            ResultadoVerificacao.REFUTADO,
-            motivo=(
-                f"{len(campos_divergentes)} campo(s) alterado(s) não têm o valor esperado na "
-                f"releitura: {sorted(campos_divergentes)}."
-            ),
-            detalhes={"campos_divergentes": campos_divergentes},
+            detalhes={
+                "campos_preservados_ausentes": sorted(campos_preservados_ausentes),
+                "campos_alterados_ausentes": sorted(campos_alterados_ausentes),
+            },
         )
 
     return VerificacaoResultado(
@@ -246,7 +282,7 @@ def verificar_consolidacao_audio(evidencia: EvidenciaConsolidacaoAudio) -> Verif
             ResultadoVerificacao.PENDENTE,
             motivo="job de consolidação ainda não concluiu -- job criado não é evidência suficiente.",
         )
-    if not evidencia.referencia_consolidacao:
+    if _em_branco(evidencia.referencia_consolidacao):
         return VerificacaoResultado(
             ResultadoVerificacao.REFUTADO,
             motivo="job concluiu mas não produziu nenhuma referência de consolidação.",
@@ -306,7 +342,7 @@ def verificar_artefato_briefing(evidencia: EvidenciaArtefatoBriefing) -> Verific
     `required_sections` como parte do próprio critério de aceite
     (`artifact_exists_and_matches`), não como algo opcional. Fonte citada
     mas inacessível é `PENDENTE` -- ver docstring da evidência."""
-    if not evidencia.artefato_persistido or not evidencia.referencia_artefato:
+    if not evidencia.artefato_persistido or _em_branco(evidencia.referencia_artefato):
         return VerificacaoResultado(
             ResultadoVerificacao.REFUTADO,
             motivo="artefato não foi persistido (ou não tem referência recuperável) -- texto transitório não basta.",
@@ -374,22 +410,39 @@ def verificar_envio_whatsapp(evidencia: EvidenciaEnvioWhatsApp) -> VerificacaoRe
     reagendar é do chamador (`autonomy.sweep`/wiring), não deste
     verificador.
 
-    Recibo presente mas destino divergente: `REFUTADO` -- a mensagem
-    aparentemente saiu, mas não para quem devia; isso é um erro real
-    (destinatário errado), nunca "falta de evidência" -- não deve ser
-    tratado como pendente esperando mais dados, porque mais dados não vão
-    corrigir um destino já errado.
+    Recibo presente mas SEM destino confirmado (`None`/vazio/espaço em
+    branco): `PENDENTE`, não `REFUTADO` -- achado de revisão adversarial:
+    uma versão anterior tratava "destino confirmado ausente" e "destino
+    confirmado errado" como o MESMO caso (`REFUTADO`), mas são evidências
+    de natureza diferente. Um recibo que ainda não populou o campo de
+    destino é exatamente o mesmo tipo de lacuna que "sem provider message
+    id" alguns campos abaixo (mais dados PODEM chegar depois e preencher
+    isso) -- diferente de um destino que JÁ chegou preenchido e está
+    errado, caso em que nenhum dado adicional vai corrigir um destinatário
+    já incorreto (esse sim é `REFUTADO`, no bloco seguinte).
 
-    Recibo e destino corretos mas sem provider message ID: `PENDENTE` --
-    o worker confirma o efeito, mas sem o identificador do provedor não há
-    como correlacionar com um eventual ACK de entrega depois (a linha
-    seguinte da tabela da seção 4.6, fora do escopo desta sub-entrega)."""
+    Recibo presente, destino confirmado presente mas DIVERGENTE do
+    esperado: `REFUTADO` -- a mensagem aparentemente saiu, mas não para
+    quem devia; isso é um erro real (destinatário errado), nunca "falta de
+    evidência".
+
+    Recibo e destino corretos mas sem provider message ID (`None`/vazio/
+    espaço em branco -- `_em_branco`, ver topo do módulo): `PENDENTE` -- o
+    worker confirma o efeito, mas sem um identificador utilizável do
+    provedor não há como correlacionar com um eventual ACK de entrega
+    depois (a linha seguinte da tabela da seção 4.6, fora do escopo desta
+    sub-entrega)."""
     if not evidencia.recibo_do_worker:
         return VerificacaoResultado(
             ResultadoVerificacao.PENDENTE,
             motivo="sem recibo do worker -- aprovação, pending ou intenção de envio não comprovam envio real.",
         )
-    if not evidencia.destino_confirmado or evidencia.destino_confirmado != evidencia.destino_esperado:
+    if _em_branco(evidencia.destino_confirmado):
+        return VerificacaoResultado(
+            ResultadoVerificacao.PENDENTE,
+            motivo="recibo do worker presente, mas ainda sem destino confirmado -- pode chegar em recibo posterior.",
+        )
+    if evidencia.destino_confirmado != evidencia.destino_esperado:
         return VerificacaoResultado(
             ResultadoVerificacao.REFUTADO,
             motivo=(
@@ -402,7 +455,7 @@ def verificar_envio_whatsapp(evidencia: EvidenciaEnvioWhatsApp) -> VerificacaoRe
                 "destino_confirmado": evidencia.destino_confirmado,
             },
         )
-    if not evidencia.provider_message_id:
+    if _em_branco(evidencia.provider_message_id):
         return VerificacaoResultado(
             ResultadoVerificacao.PENDENTE,
             motivo="recibo do worker confirma o destino certo, mas sem provider message ID para correlacionar.",

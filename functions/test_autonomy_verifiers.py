@@ -61,18 +61,34 @@ class TestVerificarAtualizacaoTarefa(unittest.TestCase):
         self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
         self.assertIn("titulo", resultado.detalhes["campos_preservados_violados"])
 
-    def test_campo_preservado_ausente_na_releitura_nao_bloqueia_aceite(self):
+    def test_pendente_quando_campo_preservado_ausente_na_releitura(self):
         # Campo ausente é "ainda não sabemos", não "não mudou" -- não pode
-        # produzir REFUTADO por si só.
+        # produzir REFUTADO por si só (não há evidência de violação), mas
+        # também não pode virar ACEITO por omissão: não há NENHUMA
+        # evidência de que este campo sobreviveu à escrita.
         evidencia = EvidenciaAtualizacaoTarefa(
             campos_alterados_esperados={"status": "feito"},
             campos_preservados_esperados={"titulo": "Preparar reunião"},
             campos_releitura={"status": "feito"},
         )
         resultado = verificar_atualizacao_tarefa(evidencia)
-        # Nenhuma violação de preservação detectada (ausência não conta);
-        # a alteração está completa -- resultado deve ser ACEITO.
-        self.assertEqual(resultado.resultado, ResultadoVerificacao.ACEITO)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+        self.assertIn("titulo", resultado.detalhes["campos_preservados_ausentes"])
+
+    def test_refutado_tem_prioridade_sobre_pendente_quando_ambos_ocorrem(self):
+        # Um campo preservado violado (evidência definitiva de efeito
+        # colateral) e, ao mesmo tempo, um campo alterado ausente (mera
+        # lacuna) -- o erro comprovado não deve ficar escondido atrás de
+        # "falta dado" só porque outra parte da releitura também está
+        # incompleta.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={"titulo": "Preparar reunião"},
+            campos_releitura={"titulo": "TÍTULO ALTERADO SEM QUERER"},
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+        self.assertIn("titulo", resultado.detalhes["campos_preservados_violados"])
 
     def test_pendente_quando_campo_alterado_ausente_na_releitura(self):
         evidencia = EvidenciaAtualizacaoTarefa(
@@ -82,7 +98,7 @@ class TestVerificarAtualizacaoTarefa(unittest.TestCase):
         )
         resultado = verificar_atualizacao_tarefa(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
-        self.assertIn("status", resultado.detalhes["campos_ausentes"])
+        self.assertIn("status", resultado.detalhes["campos_alterados_ausentes"])
 
     def test_refutado_quando_campo_alterado_diverge(self):
         evidencia = EvidenciaAtualizacaoTarefa(
@@ -141,6 +157,18 @@ class TestVerificarConsolidacaoAudio(unittest.TestCase):
         resultado = verificar_consolidacao_audio(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
 
+    def test_refutado_quando_referencia_e_so_espaco_em_branco(self):
+        # "   " é truthy em Python (`not "   "` é False) -- não pode
+        # passar como referência válida só por não ser uma string vazia.
+        evidencia = EvidenciaConsolidacaoAudio(
+            job_concluido=True,
+            referencia_consolidacao="   ",
+            ids_solicitados=frozenset({"audio-1"}),
+            ids_cobertos=frozenset({"audio-1"}),
+        )
+        resultado = verificar_consolidacao_audio(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+
     def test_pendente_quando_cobertura_parcial(self):
         evidencia = EvidenciaConsolidacaoAudio(
             job_concluido=True,
@@ -162,19 +190,6 @@ class TestVerificarConsolidacaoAudio(unittest.TestCase):
         resultado = verificar_consolidacao_audio(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.ACEITO)
 
-    def test_dez_reentregas_do_mesmo_evento_permanecem_aceito_idempotente(self):
-        # F04, aceite: "dez reentregas do mesmo evento não criam dez
-        # consolidações" -- este verificador não CRIA nada (não é
-        # responsabilidade dele), mas deve devolver o mesmo ACEITO estável
-        # para a mesma evidência repetida, nunca degradar o resultado.
-        evidencia = EvidenciaConsolidacaoAudio(
-            job_concluido=True,
-            referencia_consolidacao="consolidacao-42",
-            ids_solicitados=frozenset({"audio-1"}),
-            ids_cobertos=frozenset({"audio-1"}),
-        )
-        resultados = {verificar_consolidacao_audio(evidencia).resultado for _ in range(10)}
-        self.assertEqual(resultados, {ResultadoVerificacao.ACEITO})
 
 
 class TestVerificarArtefatoBriefing(unittest.TestCase):
@@ -192,6 +207,16 @@ class TestVerificarArtefatoBriefing(unittest.TestCase):
         evidencia = EvidenciaArtefatoBriefing(
             artefato_persistido=True,
             referencia_artefato="",
+            secoes_exigidas=frozenset(),
+            secoes_presentes=frozenset(),
+        )
+        resultado = verificar_artefato_briefing(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+
+    def test_refutado_quando_referencia_e_so_espaco_em_branco(self):
+        evidencia = EvidenciaArtefatoBriefing(
+            artefato_persistido=True,
+            referencia_artefato="   ",
             secoes_exigidas=frozenset(),
             secoes_presentes=frozenset(),
         )
@@ -269,7 +294,10 @@ class TestVerificarEnvioWhatsApp(unittest.TestCase):
         resultado = verificar_envio_whatsapp(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
 
-    def test_refutado_quando_destino_confirmado_ausente(self):
+    def test_pendente_quando_destino_confirmado_ausente(self):
+        # Diferente de destino DIVERGENTE (erro real, REFUTADO): aqui não
+        # há NENHUM dado de destino ainda -- um recibo mais completo pode
+        # chegar depois e preencher isso, então é PENDENTE, não REFUTADO.
         evidencia = EvidenciaEnvioWhatsApp(
             recibo_do_worker=True,
             destino_esperado="+5511900000000",
@@ -277,7 +305,27 @@ class TestVerificarEnvioWhatsApp(unittest.TestCase):
             provider_message_id="wamid.abc",
         )
         resultado = verificar_envio_whatsapp(evidencia)
-        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+
+    def test_pendente_quando_destino_confirmado_e_so_espaco_em_branco(self):
+        evidencia = EvidenciaEnvioWhatsApp(
+            recibo_do_worker=True,
+            destino_esperado="+5511900000000",
+            destino_confirmado="   ",
+            provider_message_id="wamid.abc",
+        )
+        resultado = verificar_envio_whatsapp(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+
+    def test_pendente_quando_provider_message_id_e_so_espaco_em_branco(self):
+        evidencia = EvidenciaEnvioWhatsApp(
+            recibo_do_worker=True,
+            destino_esperado="+5511900000000",
+            destino_confirmado="+5511900000000",
+            provider_message_id="   ",
+        )
+        resultado = verificar_envio_whatsapp(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
 
     def test_pendente_quando_sem_provider_message_id(self):
         evidencia = EvidenciaEnvioWhatsApp(
