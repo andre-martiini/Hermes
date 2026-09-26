@@ -48,6 +48,7 @@ from autonomy.requests import (
     ESTADOS_TERMINAIS,
     Lease,
     RequestStatus,
+    _exigir_tz_aware,
     lease_expirada,
     lease_pertence_ao_apresentante,
     lease_valida_para_acao,
@@ -131,19 +132,37 @@ class PedidoDuravel:
     `registrar_resultado_observado` toleram isso e simplesmente não tocam o
     ciclo do run nesse caso, sem erro -- só a peça de ledger/status do pedido
     continua funcionando (mesmo espírito de tolerância a dados legados já
-    usado nos módulos irmãos)."""
+    usado nos módulos irmãos).
+
+    `tentativas` e `proximo_tentativa_em` (sub-entrega 6/N, `autonomy.sweep`,
+    passo 7 do pacote) contam quantas vezes uma lease venceu e, quando
+    aplicável, quando a próxima tentativa automática pode ser reivindicada.
+    Nenhuma função DESTE módulo incrementa `tentativas` -- só
+    `autonomy.sweep.varrer_lease_vencida` o faz;
+    `registrar_progresso`/`registrar_resultado_observado` só o preservam
+    via `dataclasses.replace`. `assumir_pedido` faz duas coisas com
+    `proximo_tentativa_em`: RECUSA reassumir enquanto ele ainda não chegou
+    (achado de revisão do Codex, PR #344 -- ver sua docstring) e, ao
+    reassumir com sucesso, limpa o campo (deixou de ser relevante fora de
+    `RETENTATIVA_AGENDADA`)."""
 
     request_id: str
     status: RequestStatus
     lease: Lease | None = None
     ledger_entry: LedgerEntry | None = None
     run: AgentRun | None = None
+    tentativas: int = 0
+    proximo_tentativa_em: datetime | None = None
 
     def __post_init__(self) -> None:
         request_id_limpo = str(self.request_id or "").strip()
         if not request_id_limpo:
             raise ValueError("request_id é obrigatório.")
         object.__setattr__(self, "request_id", request_id_limpo)
+        if self.tentativas < 0:
+            raise ValueError("tentativas não pode ser negativa.")
+        if self.proximo_tentativa_em is not None:
+            _exigir_tz_aware(self.proximo_tentativa_em, "proximo_tentativa_em")
 
 
 def _validar_fencing(pedido: PedidoDuravel, lease_token: str, generation: int, agora: datetime | None) -> None:
@@ -251,15 +270,49 @@ def assumir_pedido(
     isso, cada função resolveria seu próprio "agora" independentemente,
     deixando `lease.expires_at` e `run.iniciado_em` calculados a partir de
     dois instantes reais ligeiramente diferentes (só relevante quando
-    `agora` não é informado; produção sempre informa)."""
+    `agora` não é informado; produção sempre informa).
+
+    Também recusa reassumir um pedido `RETENTATIVA_AGENDADA` (sub-entrega
+    6/N, `autonomy.sweep`) antes de `pedido.proximo_tentativa_em` chegar --
+    achado de revisão do Codex (PR #344): a transição `RETENTATIVA_AGENDADA
+    -> RESERVADO` já é válida no grafo, e a lease antiga já está expirada
+    por construção (é assim que o pedido chegou a `RETENTATIVA_AGENDADA`),
+    então SEM esta checagem qualquer caminho que chame `assumir_pedido`
+    direto por `request_id` (sem passar primeiro por
+    `autonomy.sweep.promover_retentativa_pronta`) ignorava o backoff
+    inteiro e esgotava `tentativas` imediatamente. `pedido.proximo_tentativa_em
+    is None` é tolerado sem erro (pedido legado, ou construído sem passar
+    pelo sweep -- mesmo espírito de tolerância a dados legados do resto do
+    módulo).
+
+    A checagem exige `pedido.status == RETENTATIVA_AGENDADA` explicitamente,
+    não só `proximo_tentativa_em is not None` -- achado de uma rodada de
+    revisão adversarial sobre o próprio fix acima: nada em
+    `PedidoDuravel.__post_init__` impede um `proximo_tentativa_em` não-None
+    "perdido" num pedido que não está em `RETENTATIVA_AGENDADA` (ex.: um
+    wiring futuro com escrita não-atômica que atualize `status` para
+    `PENDENTE` sem limpar o campo antigo) -- sem esta restrição extra, um
+    pedido `PENDENTE` legítimo seria recusado com uma mensagem confusa de
+    "aguardando retentativa" em vez de ser aceito normalmente."""
     _transicionar(pedido, RequestStatus.RESERVADO)
-    if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora):
+    agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
+    if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora_resolvida):
         raise LeaseInvalida(
             f"lease anterior de '{pedido.lease.executor_id}' ainda válida "
             f"(expira em {pedido.lease.expires_at.isoformat()}) -- não é possível "
             "reassumir antes de expirar."
         )
-    agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
+    if (
+        pedido.status == RequestStatus.RETENTATIVA_AGENDADA
+        and pedido.proximo_tentativa_em is not None
+        and agora_resolvida < pedido.proximo_tentativa_em
+    ):
+        raise LeaseInvalida(
+            f"pedido '{pedido.request_id}' agendado para nova tentativa em "
+            f"{pedido.proximo_tentativa_em.isoformat()} -- ainda não chegou a hora "
+            "(autonomy.sweep.promover_retentativa_pronta decide isso; assumir_pedido "
+            "não reassume um retentativa_agendada antes do prazo, mesmo chamado direto)."
+        )
     generation_anterior = pedido.lease.generation if pedido.lease is not None else 0
     lease_nova = nova_lease(
         executor_id, generation_anterior, agora=agora_resolvida, duracao_segundos=duracao_segundos
@@ -272,7 +325,13 @@ def assumir_pedido(
         generation=lease_nova.generation,
         agora=agora_resolvida,
     )
-    return dataclasses.replace(pedido, status=RequestStatus.RESERVADO, lease=lease_nova, run=run_novo)
+    return dataclasses.replace(
+        pedido,
+        status=RequestStatus.RESERVADO,
+        lease=lease_nova,
+        run=run_novo,
+        proximo_tentativa_em=None,
+    )
 
 
 def renovar_pedido(
