@@ -137,11 +137,20 @@ class Servicos:
         """O bucket apaga `tmp/` em 30 dias: um checkpoint pode apontar para um objeto que sumiu."""
         raise NotImplementedError
 
+    def listar(self, prefixo_uri: str) -> list[str]:
+        """URIs `gs://` sob um prefixo — onde o Veo grava a saída de cada tentativa."""
+        raise NotImplementedError
+
     def publicar(self, nome: str, dados: bytes, mime: str) -> dict:
         """Publica um arquivo para o usuário ver (Drive) → {"id", "link"}."""
         raise NotImplementedError
 
+    def reescrever_prompt(self, prompt: str, motivo: str) -> str:
+        """Reescreve de forma neutra um prompt de vídeo barrado pelo filtro de segurança."""
+        raise NotImplementedError
 
+
+MODELO_TEXTO = "gemini-2.5-flash"
 BUCKET = "gestao-hermes-video"
 PASTA_DRIVE = "Hermes Vídeo"
 
@@ -156,15 +165,21 @@ def _passageiro(exc: Exception) -> bool:
     return codigo in (429, 503) or "RESOURCE_EXHAUSTED" in str(exc) or "UNAVAILABLE" in str(exc)
 
 
-def com_retentativa(chamada, *, esperas=ESPERAS_RETENTATIVA_S, dormir=None):
+def cota_esgotada(exc: Exception) -> bool:
+    codigo = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return codigo == 429 or "RESOURCE_EXHAUSTED" in str(exc)
+
+
+def com_retentativa(chamada, *, esperas=ESPERAS_RETENTATIVA_S, dormir=None, passageiro=None):
     import time
 
     dormir = dormir or time.sleep
+    passageiro = passageiro or _passageiro
     for espera in (*esperas, None):
         try:
             return chamada()
         except Exception as exc:  # noqa: BLE001
-            if espera is None or not _passageiro(exc):
+            if espera is None or not passageiro(exc):
                 raise
             dormir(espera)
 
@@ -236,11 +251,14 @@ class ServicosVertex(Servicos):
     def existe(self, uri: str) -> bool:
         return self._bkt().blob(self._caminho(uri)).exists()
 
+    def listar(self, prefixo_uri: str) -> list[str]:
+        return [f"gs://{BUCKET}/{b.name}" for b in self._bkt().list_blobs(prefix=self._caminho(prefixo_uri))]
+
     def _servico_drive(self):
         if self._drive is None:
-            from main import get_drive_service
+            from video.entrega import drive_do_dono
 
-            self._drive = get_drive_service()
+            self._drive = drive_do_dono(self._db)
         return self._drive
 
     def _pasta_drive(self):
@@ -273,9 +291,20 @@ class ServicosVertex(Servicos):
         pasta = self._pasta_drive()
         if pasta:
             corpo["parents"] = [pasta]
-        arq = svc.files().create(body=corpo, media_body=MediaIoBaseUpload(io.BytesIO(dados), mimetype=mime),
+        arq = svc.files().create(body=corpo, media_body=MediaIoBaseUpload(io.BytesIO(dados), mimetype=mime,
+                                                                          resumable=True),
                                  fields="id, webViewLink").execute()
         return {"id": arq["id"], "link": arq.get("webViewLink")}
+
+    def reescrever_prompt(self, prompt: str, motivo: str) -> str:
+        resp = com_retentativa(lambda: self._cli.models.generate_content(
+            model=MODELO_TEXTO,
+            contents=("Este prompt de geração de vídeo foi barrado pelo filtro de segurança "
+                      f"(motivo: {motivo}). Reescreva-o de forma neutra e descritiva, mantendo a mesma cena, "
+                      "o mesmo estilo e a mesma ação, sem nada que possa ser lido como pessoa real, marca, "
+                      "violência ou conteúdo sensível. Responda só com o prompt novo.\n\n" + prompt),
+        ))
+        return (resp.text or "").strip() or prompt
 
 
 class ServicosFalsos(Servicos):
@@ -327,6 +356,14 @@ class ServicosFalsos(Servicos):
     def existe(self, uri):
         return uri.removeprefix(f"gs://{BUCKET}/") in self.arquivos
 
+    def listar(self, prefixo_uri):
+        prefixo = prefixo_uri.removeprefix(f"gs://{BUCKET}/")
+        return [f"gs://{BUCKET}/{c}" for c in sorted(self.arquivos) if c.startswith(prefixo)]
+
     def publicar(self, nome, dados, mime):
         self.publicados.append(nome)
+        self.arquivos[f"drive/{nome}"] = dados
         return {"id": f"drive-{len(self.publicados)}", "link": f"https://drive.example/{nome}"}
+
+    def reescrever_prompt(self, prompt, motivo):
+        return "Versão neutra: " + prompt.replace("marca", "objeto")

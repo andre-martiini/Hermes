@@ -1,0 +1,15 @@
+firebase-admin>=6.5.0
+# Mesmas versões fixas das functions (functions/requirements.txt): grpcio e
+# grpcio-status idênticos e api-core fixo, pelos streams/transações do Firestore.
+google-cloud-firestore==2.28.0
+grpcio==1.83.0
+grpcio-status==1.83.0
+google-api-core==2.33.0
+google-cloud-storage>=2.14.0
+google-genai>=2.20.0
+google-api-python-client>=2.118.0
+google-auth>=2.28.0
+requests
+numpy>=1.20.0
+Pillow>=9.0.0
+imageio-ffmpeg>=0.5.1
