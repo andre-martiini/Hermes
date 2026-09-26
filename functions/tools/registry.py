@@ -161,6 +161,9 @@ _CATALOG: dict[str, str] = {
     "consultar_politica": "Consulta a política de autonomia vigente para um escopo: permissões, limites, versão e origem",
     "simular_politica": "Avalia um lote de pedidos hipotéticos contra a política de autonomia, sem aplicar nada",
     "preparar_politica": "Prepara uma proposta de mudança na política de autonomia contra uma versão base, devolvendo um diff explícito",
+    # Hermes Vídeo (functions/video/) — Fase 1: criar e consultar, sem custo.
+    "video_criar_projeto": "Cria um projeto de vídeo a partir do roteiro aprovado (cenas, narração, bíblia visual) e devolve a estimativa de custo; não gera nada pago",
+    "video_status": "Estado de um projeto de vídeo: etapa atual, cenas, progresso dos clipes, custo estimado e real, link do vídeo",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -231,6 +234,8 @@ _NEEDS_CONFIRMATION: set[str] = {
     # mutam estado (pedir e consumir); consultar e so leitura, fica de fora.
     "solicitar_autorizacao_argos",
     "consumir_autorizacao_argos",
+    # Grava o projeto de vídeo (custo zero; as tools pagas chegam na Fase 4).
+    "video_criar_projeto",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -278,6 +283,9 @@ _VOICE_EXCLUDED: set[str] = {
     # obrigatória, decisão de dono que voz não deveria facilitar por engano.
     "simular_politica",
     "preparar_politica",
+    # Roteiro de vídeo é uma estrutura de cenas com narração e bíblia visual —
+    # escrito e aprovado na conversa com o Claude, não ditado. Status continua falado.
+    "video_criar_projeto",
 }
 
 _schema_cache: dict[str, dict] = {}

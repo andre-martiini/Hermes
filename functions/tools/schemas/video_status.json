@@ -1,0 +1,14 @@
+{
+  "name": "video_status",
+  "description": "Estado de um projeto do Hermes Vídeo: etapa (roteiro, previa_gerando, aguardando_storyboard, renderizando, montando, concluido, erro, cancelado), cenas com duração e narração, progresso dos clipes por status, custo estimado, custo real até agora, orçamento (teto) e o link do vídeo quando pronto. Só leitura.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "projeto_id": {
+        "type": "string",
+        "description": "ID devolvido por video_criar_projeto."
+      }
+    },
+    "required": ["projeto_id"]
+  }
+}

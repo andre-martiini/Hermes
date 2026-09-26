@@ -1241,6 +1241,20 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum — o diff explicitamente exige um caminho de confirmação real que P04 ainda não implementa",
         nota="calcula diff contra uma versão base; não persiste nada",
     ),
+    # Hermes Vídeo — Fase 1 (functions/video/). Custo zero: nenhuma das duas chama o Veo.
+    "video_criar_projeto": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "video_status relê o projeto criado; roteiro inválido é recusado antes de qualquer escrita",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Não idempotente: video/projeto.py::criar_projeto usa document() com ID automático e grava "
+        "projeto + cenas num batch sem deduplicação -- repetir a chamada cria um SEGUNDO projeto. "
+        "Inofensivo em custo (nada pago acontece aqui) e reversível (projeto em 'roteiro' pode ser "
+        "cancelado).",
+    ),
+    "video_status": ToolInventoryEntry(
+        "video", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — só lê video_projetos/{id} e as subcoleções cenas/clipes",
+    ),
 }
 
 del _L, _R, _C
