@@ -348,7 +348,7 @@ def registrar_progresso(
     aqui o no-op é decidido pelo chamador, restrito a este caso
     específico).
 
-    Espelha a MESMA primeira transição em `pedido.run`, se houver
+    Espelha a mesma transição em `pedido.run`, se houver
     (`autonomy.runs.marcar_em_andamento` -- `INICIADO -> EM_ANDAMENTO`, sub-
     entrega 5/N): o fencing já validado acima contra `pedido.lease` sempre
     confere também contra `pedido.run` -- `assumir_pedido` cria os dois a
@@ -356,13 +356,28 @@ def registrar_progresso(
     outra função deste módulo muda um sem o outro. `pedido.run is None` é
     tolerado (pedido construído sem passar por `assumir_pedido`, ver
     docstring de `PedidoDuravel`) -- só a peça de ledger/status continua
-    funcionando nesse caso."""
+    funcionando nesse caso.
+
+    A chamada a `marcar_em_andamento` roda em TODA chamada com `pedido.run`
+    presente, não só na primeira (achado de revisão do Codex, PR #339):
+    um wiring futuro que persista `pedido`/`run` como dois documentos
+    separados pode, entre uma queda e uma retentativa, deixar o PEDIDO já
+    `EM_ANDAMENTO` mas o `run` ainda `INICIADO` (a escrita do pedido
+    terminou, a do run não). Se a chamada ao run ficasse restrita ao
+    `if pedido.status != EM_ANDAMENTO` (só a "primeira" transição do
+    pedido), uma retentativa que chega com o pedido JÁ `EM_ANDAMENTO`
+    nunca repararia esse run atrasado -- ele ficaria `INICIADO` para
+    sempre, incompleto nas métricas (exatamente o defeito que A02, e este
+    módulo, existem para evitar). `marcar_em_andamento` já é idempotente
+    (no-op, mesmo objeto devolvido, quando o run já está `EM_ANDAMENTO`),
+    então chamá-la sempre que houver run é seguro e repara esse caso sem
+    custo extra no caminho normal."""
     _validar_fencing(pedido, lease_token, generation, agora)
-    run_atualizado = pedido.run
     if pedido.status != RequestStatus.EM_ANDAMENTO:
         _transicionar(pedido, RequestStatus.EM_ANDAMENTO)
-        if run_atualizado is not None:
-            run_atualizado = _run_marcar_em_andamento(run_atualizado, lease_token, generation)
+    run_atualizado = pedido.run
+    if run_atualizado is not None:
+        run_atualizado = _run_marcar_em_andamento(run_atualizado, lease_token, generation)
     entrada = criar_ou_reusar_entrada(idempotency_key, payload, pedido.ledger_entry, agora=agora)
     entrada = adicionar_checkpoint(entrada, checkpoint_dados, agora=agora)
     return dataclasses.replace(

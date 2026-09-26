@@ -536,17 +536,11 @@ class TestPedidoRunWiring(unittest.TestCase):
         self.assertEqual(atualizado.run.run_id, "run-1")
 
     def test_registrar_progresso_repetido_nao_toca_o_run_de_novo(self):
-        # Achado de revisão adversarial sobre a versão anterior deste teste:
-        # o guarda de registrar_progresso (`if pedido.status !=
-        # EM_ANDAMENTO`) impede QUALQUER segunda chamada a
-        # autonomy.runs.marcar_em_andamento depois da primeira transição --
-        # a idempotência de marcar_em_andamento em si (já testada
-        # isoladamente em test_autonomy_runs.py) nunca chega a ser
-        # exercitada por este caminho; o run é só carregado sem mudança
-        # (mesma identidade de objeto) na segunda chamada. O nome/comentário
-        # anterior ("run já EM_ANDAMENTO é um no-op idempotente em
-        # marcar_em_andamento") sugeria testar essa idempotência, mas a
-        # asserção passava de forma vazia (o objeto nunca era tocado).
+        # Corrigido apos achado do Codex (PR #339): marcar_em_andamento roda
+        # em TODA chamada com pedido.run presente (nao so na "primeira",
+        # ver docstring de registrar_progresso), mas continua um no-op
+        # idempotente (mesma identidade de objeto devolvida, sem mudanca)
+        # quando o run ja esta EM_ANDAMENTO -- e o que este teste verifica.
         pedido = self._pedido_em_andamento()
         de_novo = registrar_progresso(
             pedido, pedido.lease.lease_token, pedido.lease.generation,
@@ -554,6 +548,26 @@ class TestPedidoRunWiring(unittest.TestCase):
         )
         self.assertIs(de_novo.run, pedido.run)
         self.assertEqual(de_novo.run.status, AgentRunStatus.EM_ANDAMENTO)
+
+    def test_registrar_progresso_repara_run_iniciado_quando_pedido_ja_em_andamento(self):
+        # Achado real de revisao adversarial (Codex, PR #339): um wiring
+        # futuro com escrita nao-atomica de pedido/run pode deixar o PEDIDO
+        # ja EM_ANDAMENTO enquanto o run correspondente ainda esta INICIADO
+        # (a escrita do pedido terminou, a do run nao, entre uma queda e uma
+        # retentativa). Simula essa inconsistencia diretamente e confirma
+        # que uma chamada seguinte de registrar_progresso REPARA o run para
+        # EM_ANDAMENTO, em vez de deixa-lo INICIADO para sempre (o defeito
+        # que A02/autonomy.runs existem para evitar).
+        pedido = assumir_pedido(_pedido_pendente(), "executor-a", "run-1", agora=T0)
+        run_ainda_iniciado = pedido.run
+        pedido_inconsistente = dataclasses.replace(
+            pedido, status=RequestStatus.EM_ANDAMENTO, run=run_ainda_iniciado
+        )
+        reparado = registrar_progresso(
+            pedido_inconsistente, pedido.lease.lease_token, pedido.lease.generation,
+            "op-1", {"acao": "x"}, {"passo": 1}, agora=T0 + timedelta(seconds=1),
+        )
+        self.assertEqual(reparado.run.status, AgentRunStatus.EM_ANDAMENTO)
 
     def test_registrar_progresso_sem_run_nao_quebra(self):
         # Pedido construído diretamente, sem passar por assumir_pedido --
