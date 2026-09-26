@@ -1,0 +1,9 @@
+# Build da imagem do hermes-video-worker a partir da raiz do repositório.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "services/video-worker/Dockerfile", "-t", "${_IMAGEM}", "."]
+images: ["${_IMAGEM}"]
+substitutions:
+  _IMAGEM: us-central1-docker.pkg.dev/gestao-hermes/hermes/hermes-video-worker:latest
+options:
+  logging: CLOUD_LOGGING_ONLY

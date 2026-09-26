@@ -133,12 +133,15 @@ class FakeVeoProvider(VeoProvider):
     """Provedor de teste: não chama rede e conta cada pedido (a trava de "não pagar duas vezes")."""
 
     def __init__(self, *, bloquear_prompts: set[str] | None = None, falhar: set[str] | None = None,
-                 consultas_ate_concluir: int = 1):
+                 consultas_ate_concluir: int = 1, gerar_mp4=None):
+        """`gerar_mp4(pedido) -> bytes` troca o vídeo de mentira por um MP4 de verdade
+        (os testes de renderização montam o vídeo final com ffmpeg)."""
         self.pedidos: list[PedidoClipe] = []
         self._ops: dict[str, dict] = {}
         self._bloquear = bloquear_prompts or set()
         self._falhar = falhar or set()
         self._consultas = consultas_ate_concluir
+        self._gerar_mp4 = gerar_mp4
 
     def gerar_clipe(self, pedido: PedidoClipe) -> str:
         self.pedidos.append(pedido)
@@ -156,6 +159,8 @@ class FakeVeoProvider(VeoProvider):
             return ResultadoOperacao(concluida=True, erro="falha simulada")
         if any(p in prompt for p in self._bloquear):
             return ResultadoOperacao(concluida=True, bloqueado=True, motivo_bloqueio="filtro simulado")
+        if self._gerar_mp4:
+            return ResultadoOperacao(concluida=True, video_bytes=self._gerar_mp4(op["pedido"]))
         return ResultadoOperacao(concluida=True, video_bytes=f"mp4:{nome}:{op['pedido'].duracao_s}s".encode())
 
     def baixar(self, resultado: ResultadoOperacao) -> bytes:

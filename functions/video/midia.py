@@ -141,7 +141,12 @@ class Servicos:
         """Publica um arquivo para o usuário ver (Drive) → {"id", "link"}."""
         raise NotImplementedError
 
+    def reescrever_prompt(self, prompt: str, motivo: str) -> str:
+        """Reescreve de forma neutra um prompt de vídeo barrado pelo filtro de segurança."""
+        raise NotImplementedError
 
+
+MODELO_TEXTO = "gemini-2.5-flash"
 BUCKET = "gestao-hermes-video"
 PASTA_DRIVE = "Hermes Vídeo"
 
@@ -238,9 +243,9 @@ class ServicosVertex(Servicos):
 
     def _servico_drive(self):
         if self._drive is None:
-            from main import get_drive_service
+            from video.entrega import drive_do_dono
 
-            self._drive = get_drive_service()
+            self._drive = drive_do_dono(self._db)
         return self._drive
 
     def _pasta_drive(self):
@@ -273,9 +278,20 @@ class ServicosVertex(Servicos):
         pasta = self._pasta_drive()
         if pasta:
             corpo["parents"] = [pasta]
-        arq = svc.files().create(body=corpo, media_body=MediaIoBaseUpload(io.BytesIO(dados), mimetype=mime),
+        arq = svc.files().create(body=corpo, media_body=MediaIoBaseUpload(io.BytesIO(dados), mimetype=mime,
+                                                                          resumable=True),
                                  fields="id, webViewLink").execute()
         return {"id": arq["id"], "link": arq.get("webViewLink")}
+
+    def reescrever_prompt(self, prompt: str, motivo: str) -> str:
+        resp = com_retentativa(lambda: self._cli.models.generate_content(
+            model=MODELO_TEXTO,
+            contents=("Este prompt de geração de vídeo foi barrado pelo filtro de segurança "
+                      f"(motivo: {motivo}). Reescreva-o de forma neutra e descritiva, mantendo a mesma cena, "
+                      "o mesmo estilo e a mesma ação, sem nada que possa ser lido como pessoa real, marca, "
+                      "violência ou conteúdo sensível. Responda só com o prompt novo.\n\n" + prompt),
+        ))
+        return (resp.text or "").strip() or prompt
 
 
 class ServicosFalsos(Servicos):
@@ -329,4 +345,8 @@ class ServicosFalsos(Servicos):
 
     def publicar(self, nome, dados, mime):
         self.publicados.append(nome)
+        self.arquivos[f"drive/{nome}"] = dados
         return {"id": f"drive-{len(self.publicados)}", "link": f"https://drive.example/{nome}"}
+
+    def reescrever_prompt(self, prompt, motivo):
+        return "Versão neutra: " + prompt.replace("marca", "objeto")
