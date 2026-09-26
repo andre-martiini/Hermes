@@ -189,6 +189,22 @@ class FormatTest(unittest.TestCase):
         self.assertIn("~1 dia de atraso", msg)
         self.assertIn("IA e Firestore = dia corrente, parcial", msg)
 
+    def test_build_message_escapa_html_de_servico_sku_e_function(self):
+        summary = {
+            "total_day": 1.0, "avg7": 1.0, "month_to_date": 1.0, "projection": 1.0, "monthly_budget": 200.0,
+            "top_services": [("A&B <svc>", 1.0)],
+            "top_skus": [("A&B <svc>", "sku <x> & y", 1.0)],
+            "spike": False, "over_budget": False,
+        }
+        msg = cr.build_message(
+            date(2026, 9, 8), summary, [{"function_name": "fn<1>&", "custo": 0.5}], None, None, None, 5.0,
+            today=date(2026, 9, 9),
+        )
+        self.assertIn("A&amp;B &lt;svc&gt; R$ 1,00", msg)
+        self.assertIn("sku &lt;x&gt; &amp; y: R$ 1,00", msg)
+        self.assertIn("fn&lt;1&gt;&amp;: R$ 0,50", msg)
+        self.assertNotIn("<svc>", msg)
+
     def test_build_message_without_gcp_data(self):
         msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, 5.0, gcp_error="permissão negada", today=date(2026, 9, 8))
         self.assertIn("sem dados do export para 08/09 (permissão negada)", msg)
@@ -197,6 +213,77 @@ class FormatTest(unittest.TestCase):
     def test_build_message_requires_today_keyword(self):
         with self.assertRaises(TypeError):
             cr.build_message(date(2026, 9, 8), None, None, None, None, None, 5.0)
+
+
+class SummaryTest(unittest.TestCase):
+    """Resumo curto enviado por padrão (26/09/2026)."""
+
+    def _summary(self, **over):
+        base = {
+            "total_day": 10.16, "avg7": 7.07, "month_to_date": 333.94, "projection": 400.73,
+            "monthly_budget": 200.0,
+            "top_services": [("Cloud Run Functions", 5.48), ("App Engine", 2.97), ("Gemini API", 0.83), ("Cloud Scheduler", 0.3)],
+            "top_skus": [], "spike": True, "over_budget": True,
+        }
+        base.update(over)
+        return base
+
+    def test_resumo_com_alertas(self):
+        msg = cr.build_summary(date(2026, 9, 25), self._summary(), ai_brl=0.28)
+        self.assertEqual(
+            msg,
+            "💰 <b>Custos do Gaspar — 25/09</b>\n"
+            "Ontem: R$ 10,16 (média 7d R$ 7,07) ⚠️ 1,4× acima\n"
+            "Mês: R$ 333,94 · projeção R$ 400,73 de R$ 200,00 ⚠️\n"
+            "Maiores: Functions R$ 5,48 · Firestore R$ 2,97 · Gemini R$ 0,83\n"
+            "IA hoje (parcial): R$ 0,28",
+        )
+
+    def test_resumo_sem_alertas_nao_tem_aviso(self):
+        msg = cr.build_summary(
+            date(2026, 9, 25), self._summary(total_day=7.0, spike=False, projection=150.0, over_budget=False), ai_brl=0.0,
+        )
+        self.assertNotIn("⚠️", msg)
+        self.assertIn("Ontem: R$ 7,00 (média 7d R$ 7,07)\n", msg)
+        self.assertIn("IA hoje (parcial): R$ 0,00", msg)
+
+    def test_resumo_sem_dados_gcp_mostra_motivo_curto_e_escapado(self):
+        erro = "403 <Forbidden> access denied " + "x" * 200 + "\nsegunda linha"
+        msg = cr.build_summary(date(2026, 9, 25), None, ai_brl=1.5, gcp_error=erro)
+        self.assertIn("☁️ GCP: sem dados de 25/09 (403 &lt;Forbidden&gt; access denied", msg)
+        self.assertNotIn("segunda linha", msg)
+        self.assertNotIn("Ontem:", msg)
+        self.assertIn("IA hoje (parcial): R$ 1,50", msg)
+        self.assertLess(len(msg), 300)
+
+    def test_resumo_sem_dados_gcp_e_sem_erro(self):
+        msg = cr.build_summary(date(2026, 9, 25), None, ai_brl=0.0)
+        self.assertIn("☁️ GCP: sem dados de 25/09\n", msg)
+
+    def test_ia_hoje_soma_gemini_openai_video_e_imagens(self):
+        total = cr.ai_today_brl(5.0, {"estimated_usd": 0.1}, None, {"estimated_usd": 0.2}, {"estimated_usd": 0.05})
+        self.assertAlmostEqual(total, 1.75)
+
+    def test_truncamento_corta_em_fim_de_linha(self):
+        texto = "\n".join(f"<b>linha {i}</b> " + "y" * 60 for i in range(200))
+        cortado = cr.truncate_for_telegram(texto)
+        self.assertLessEqual(len(cortado), 4096)
+        self.assertTrue(cortado.endswith("… (cortado)"))
+        corpo = cortado.rsplit("\n", 1)[0]
+        self.assertTrue(corpo.endswith("y"))  # a última linha mantida está inteira
+        self.assertEqual(corpo.count("<b>"), corpo.count("</b>"))
+        self.assertEqual(cr.truncate_for_telegram("curto"), "curto")
+
+    def test_callback_data_cabe_em_64_bytes_e_faz_ida_e_volta(self):
+        det = cr.summary_keyboard("2026-09-25")[0][0]["callback_data"]
+        res = cr.detail_keyboard("2026-09-25")[0][0]["callback_data"]
+        self.assertEqual(det, "custos:det:2026-09-25")
+        self.assertEqual(res, "custos:res:2026-09-25")
+        self.assertLessEqual(len(det.encode("utf-8")), 64)
+        self.assertEqual(cr.parse_callback(det), ("det", "2026-09-25"))
+        self.assertEqual(cr.parse_callback(res), ("res", "2026-09-25"))
+        self.assertIsNone(cr.parse_callback("custos:det:../../x"))
+        self.assertIsNone(cr.parse_callback("custos:xyz:2026-09-25"))
 
 
 class GerarRelatorioTest(unittest.TestCase):
@@ -264,6 +351,7 @@ class GerarRelatorioTest(unittest.TestCase):
                 dt_mock.now.return_value = now
                 dt_mock.side_effect = lambda *a, **k: datetime(*a, **k)
                 msg = cr.gerar_relatorio_custos(_DB(store), now=now, bq=_BQ())
+                textos = cr.gerar_relatorios_custos(_DB(store), now=now, bq=_BQ())
         finally:
             if saved is not None:
                 sys.modules["main"] = saved
@@ -278,6 +366,13 @@ class GerarRelatorioTest(unittest.TestCase):
         # system_usage/gemini/daily/2026-09-09 — não "sem uso registrado".
         self.assertIn("IA — 09/09 (parcial, até agora)", msg)
         self.assertIn("Gemini: US$ 0.50", msg)
+        # Resumo + detalhe: a função antiga devolve exatamente o detalhe.
+        self.assertEqual(textos["detalhe"], msg)
+        self.assertEqual(textos["dia"], "2026-09-08")
+        self.assertIn("Custos do Gaspar — 08/09</b>", textos["resumo"])
+        self.assertIn("Ontem: R$ 4,00", textos["resumo"])
+        self.assertIn("Maiores: Gemini R$ 4,00", textos["resumo"])
+        self.assertIn("IA hoje (parcial): R$ 2,50", textos["resumo"])  # US$ 0,50 × 5,0
 
 
 if __name__ == "__main__":

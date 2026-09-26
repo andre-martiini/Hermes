@@ -2985,6 +2985,10 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         os.environ.get("GCLOUD_PROJECT") or "gestao-hermes",
         config["secret_id"],
         password,
+        # Só apaga as versões antigas quando a senha nova foi comprovada contra o
+        # PDF/portal; com validation None (nenhum PDF protegido para testar) a
+        # antiga fica como rede de segurança.
+        destruir_anteriores=validation is True,
     )
 
     if unlockable_message_ids and config.get("kind") != "allcare_portal":
@@ -3671,9 +3675,12 @@ def _page_monitor_build_message(apelido: str, objetivo: str, url: str, resumo: s
 
 
 @scheduler_fn.on_schedule(
-    schedule="every 60 minutes",
+    # A cada 4h (antes: 1h) e 512 MB (antes: 1 GB) — decisão de custo de 26/09/2026.
+    # O monitor só faz GET via requests, extrai texto e hasheia; o Gemini só
+    # entra quando o hash muda. Não há navegador headless, 512 MB bastam.
+    schedule="every 4 hours",
     timeout_sec=540,
-    memory=options.MemoryOption.GB_1,
+    memory=options.MemoryOption.MB_512,
 )
 def scheduled_page_monitor(event: scheduler_fn.ScheduledEvent) -> None:
     """Verifica paginas monitoradas e envia alerta por Telegram quando o objetivo avancar."""
@@ -6761,8 +6768,8 @@ def _format_ai_profile_for_prompt(ai_profile: dict) -> str:
     if history:
         lines.append(f"- historico_deduzido: {json.dumps(history[:5], ensure_ascii=False)}")
 
-    # Perfil de personalidade destilado semanalmente a partir do diário pessoal
-    # (functions/personal_diary.py:consolidar_personalidade) — impressões, não fatos.
+    # Perfil de personalidade destilado a partir do diário pessoal pelo antigo
+    # job consolidar_personalidade (removido em 26/09/2026) — impressões, não fatos.
     personalidade = ai_profile.get("personalidade")
     if personalidade:
         lines.append(f"- personalidade (impressões, não fatos relatados): {json.dumps(personalidade, ensure_ascii=False)}")
@@ -7171,116 +7178,6 @@ def _fetch_usd_brl_rate(db) -> float:
         pass
 
     return FALLBACK_USD_BRL_RATE
-
-
-@scheduler_fn.on_schedule(
-    schedule="0 4 * * *",
-    timezone="America/Sao_Paulo",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=180,
-)
-def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
-    db = get_db()
-    try:
-        keys_doc = _cached_doc_get(db, "system", "api_keys")
-        gemini_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
-        if not gemini_key:
-            print("[Memoria] gemini_api_key indisponível; consolidação ignorada.")
-            return
-
-        client = get_genai_module().Client(api_key=gemini_key)
-        nodes = []
-        for snap in db.collection("knowledge_nodes").stream():
-            data = snap.to_dict() or {}
-            if data.get("tipo") not in MEMORY_NODE_TYPES:
-                continue
-            if data.get("memoria_status") == "consolidada":
-                continue
-            updated_at = data.get("data_atualizacao") or data.get("data_criacao") or ""
-            nodes.append({"id": snap.id, "data": data, "updated_at": updated_at})
-
-        processed_ids = set()
-        merges = 0
-        for current in nodes:
-            if current["id"] in processed_ids:
-                continue
-            current_text = (current["data"].get("texto_memoria") or current["data"].get("resumo") or "").strip()
-            if not current_text:
-                continue
-            similar = _find_similar_memory_nodes(db, current_text, gemini_key, limit=4)
-            merge_candidates = []
-            for candidate in similar:
-                if candidate["id"] == current["id"]:
-                    continue
-                if candidate["similarity"] < 0.975:
-                    continue
-                candidate_text = (candidate["data"].get("texto_memoria") or candidate["data"].get("resumo") or "").strip()
-                if not candidate_text:
-                    continue
-                merge_candidates.append({
-                    "id": candidate["id"],
-                    "tipo": candidate["data"].get("tipo") or current["data"].get("tipo") or "fato_isolado",
-                    "texto": candidate_text,
-                })
-
-            if not merge_candidates:
-                continue
-
-            group = [{
-                "id": current["id"],
-                "tipo": current["data"].get("tipo") or "fato_isolado",
-                "texto": current_text,
-            }] + merge_candidates[:2]
-
-            prompt = (
-                "Você é um curador cognitivo do Gaspar. Receberá memórias quase duplicadas.\n"
-                "Una as memórias em UMA versão consolidada, removendo redundância e preservando a regra/fato mais útil.\n"
-                "Retorne APENAS JSON válido no formato:\n"
-                "{\"titulo\":\"...\",\"texto_memoria\":\"...\",\"tipo\":\"regra_global|fato_isolado\",\"ids_fundidos\":[\"id1\",\"id2\"]}\n\n"
-                f"Memórias:\n{json.dumps(group, ensure_ascii=False)}"
-            )
-            response = client.models.generate_content(
-                model="gemini-3.5-flash-lite",
-                contents=prompt
-            )
-            raw_text = (response.text or "").strip()
-            json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-            merged = json.loads(json_match.group(0) if json_match else raw_text)
-            fused_ids = [mid for mid in merged.get("ids_fundidos", []) if isinstance(mid, str)]
-            if current["id"] not in fused_ids:
-                fused_ids.insert(0, current["id"])
-
-            keep_id = fused_ids[0]
-            merged_text = (merged.get("texto_memoria") or current_text).strip()
-            merged_tipo = _normalize_memory_category(merged.get("tipo"))
-            merged_title = (merged.get("titulo") or merged_text[:72] or "Memória global").strip()
-            merged_embedding = list(map(float, get_embedding(merged_text, api_key=gemini_key, task_type="RETRIEVAL_DOCUMENT")))
-
-            db.collection("knowledge_nodes").document(keep_id).set({
-                "titulo": merged_title[:80],
-                "tipo": merged_tipo,
-                "texto_memoria": merged_text,
-                "resumo": merged_text[:600],
-                "embedding": FsVector(merged_embedding),
-                "data_atualizacao": _iso_now_utc(),
-                "consolidado_em": firestore.SERVER_TIMESTAMP,
-                "origem_curadoria": "llm_cron",
-            }, merge=True)
-
-            for drop_id in fused_ids[1:]:
-                db.collection("knowledge_nodes").document(drop_id).set({
-                    "memoria_status": "consolidada",
-                    "consolidado_no_id": keep_id,
-                    "data_atualizacao": _iso_now_utc(),
-                }, merge=True)
-                processed_ids.add(drop_id)
-
-            processed_ids.add(keep_id)
-            merges += max(0, len(fused_ids) - 1)
-
-        print(f"[Memoria] Consolidação concluída. merges={merges}")
-    except Exception as exc:
-        print(f"[Memoria] Falha na consolidação: {exc}")
 
 
 def _resolve_telegram_chat_id_for_uid(db, uid: str | None):
@@ -13256,18 +13153,10 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     from google import genai
 
     _db = get_db()
-    _gemini_key = get_gemini_api_key()
-    _evo_client = genai.Client(api_key=_gemini_key)
 
-    # Recupera chave Tavily para consenso web
-    _tavily_key = ''
-    try:
-        _keys_doc = _cached_doc_get(_db, 'system', 'api_keys')
-        _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
-    except Exception as _key_err:
-        print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")
-
-    # Busca até 10 correções pendentes por ciclo
+    # Busca até 10 correções pendentes por ciclo. A fila fica vazia quase sempre:
+    # só depois de confirmar que há trabalho é que buscamos chaves e criamos o
+    # cliente Gemini (antes, o cliente nascia em toda execução horária à toa).
     try:
         _correcoes = list(
             _db.collection('correcoes_pendentes')
@@ -13282,6 +13171,17 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     if not _correcoes:
         print("[EvoEngine] Nenhuma correção pendente neste ciclo.")
         return
+
+    _gemini_key = get_gemini_api_key()
+    _evo_client = genai.Client(api_key=_gemini_key)
+
+    # Recupera chave Tavily para consenso web
+    _tavily_key = ''
+    try:
+        _keys_doc = _cached_doc_get(_db, 'system', 'api_keys')
+        _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
+    except Exception as _key_err:
+        print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")
 
     print(f"[EvoEngine] Processando {len(_correcoes)} correção(ões).")
 
@@ -14445,51 +14345,29 @@ from morning_summary import gerar_resumo_matinal, gerarResumoMatinal
 # Import monthly recurring actions job
 from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
-# Import daily AI notification planner job
-from ai_notification_planner import ai_notification_planner_daily
-
 # Import attention queue action detector job
 from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detectar_atencao_saude
 
 # Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 
-# Import weekly byproduct detector job
-import deteccao_subproduto
+# Jobs agendados removidos em 26/09/2026 (sem uso; ver docs/okf/operacoes/custos.md):
+# ai_notification_planner_daily, detectar_subproduto_semanal,
+# consolidar_memorias_copiloto, atualizar_modelos_pessoas, gerar_diario_pessoal e
+# consolidar_personalidade. O deploy com --force apaga as functions e os jobs do
+# Cloud Scheduler. Os módulos de apoio (deteccao_subproduto, ai_notification_planner,
+# modelo de pessoa) seguem importados por quem ainda os usa.
+
+# Import weekly agent retro job (mantido: alimenta as sugestões de promoção de
+# autonomia via promocao_autonomia — fluxo P04 em andamento)
+from retro_agente import retro_semanal_agente
 
 # Import weekly review batch rescheduling proposal job
 from revisao_semanal import revisar_semana_propor_reagendamento
 
-# Import weekly agent retro job
-from retro_agente import retro_semanal_agente
-
-
-@scheduler_fn.on_schedule(
-    # Domingo às 18h: a semana já aconteceu, e a sugestão chega antes de a próxima
-    # começar — quando ainda dá para caber a tarde que ela custa. Semanal, e não
-    # diária, porque "a ação ganhou corpo" não acontece todo dia e o teto é mensal.
-    schedule="0 18 * * 0",
-    timezone="America/Sao_Paulo",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=300,
-)
-def detectar_subproduto_semanal(event: scheduler_fn.ScheduledEvent) -> None:
-    """Procura, no trabalho já feito, o que rende um ativo com um passo a mais."""
-    from morning_summary import _coletar_acoes, _hoje_sp
-
-    db = get_db()
-    keys_doc = _cached_doc_get(db, "system", "api_keys")
-    gemini_key = (keys_doc.to_dict() or {}).get("gemini_api_key") if keys_doc.exists else None
-    if not gemini_key:
-        print("[Elevacao] gemini_api_key não configurada em system/api_keys; abortando.")
-        return
-
-    hoje = _hoje_sp()
-    deteccao_subproduto.rodar_deteccao(
-        db, hoje, _coletar_acoes(db, hoje).get("carga_semana") or [], gemini_key)
-
-# Import personal diary + weekly personality consolidation jobs
-from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal
+# Import personal diary edit callable (os jobs agendados do diário e da
+# personalidade foram removidos em 26/09/2026 — feature desligada)
+from personal_diary import ajustarDiarioPessoal
 
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
@@ -16437,22 +16315,3 @@ def executar_atualizacao_modelos_pessoas(db, client=None) -> dict:
             print(f"[MODELO PESSOA] Erro isolado na pessoa {p_id}: {p_err}")
 
     return stats
-
-
-@scheduler_fn.on_schedule(
-    schedule="30 5 * * *",  # Todos os dias às 5:30 (horário de Brasília)
-    timezone="America/Sao_Paulo",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=300,
-)
-def atualizar_modelos_pessoas(event: scheduler_fn.ScheduledEvent) -> None:
-    """Job diário que sintetiza e mantém perfil_pessoas.modelo_interacao
-    para contatos com whatsapp_chat_id e sinal de interação suficiente."""
-    try:
-        db = get_db()
-        stats = executar_atualizacao_modelos_pessoas(db)
-        print(f"[MODELO PESSOA] Job finalizado com sucesso: {stats}")
-    except Exception as exc:
-        print(f"[MODELO PESSOA] Erro no job atualizar_modelos_pessoas: {exc}")
-
-

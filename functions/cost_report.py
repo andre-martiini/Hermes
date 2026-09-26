@@ -30,11 +30,22 @@ roda (19h BRT), ainda em andamento. ``build_message`` rotula cada bloco com a
 sua própria data (``day`` para o GCP, ``today`` para IA/Firestore) para deixar
 isso explícito — um relatório anterior rotulava tudo só com a data do GCP
 (``yesterday``), fazendo dados parciais de hoje parecerem fechados de ontem.
+
+RESUMO + "VER DETALHES" (26/09/2026): a mensagem enviada passou a ser um resumo
+curto (``build_summary``: ontem vs. média 7d, mês e projeção, 3 maiores serviços,
+IA de hoje) com o botão "📋 Ver detalhes", que edita a mesma mensagem para o
+relatório completo (``build_message``) e oferece "↩️ Resumo" para voltar. Os
+dois textos são gravados em ``system_reports/custos_{YYYY-MM-DD}`` (dia do bloco
+GCP) no envio, para o botão funcionar dias depois. O callback
+(``custos:det:<dia>`` / ``custos:res:<dia>``) é tratado em
+``telegram_callbacks_custos.py``.
 """
 
 from __future__ import annotations
 
+import html
 import os
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -46,6 +57,10 @@ BILLING_TABLE_PREFIX = "gcp_billing_export"
 DEFAULT_MONTHLY_BUDGET_BRL = 200.0
 SPIKE_FACTOR = 1.3
 BQ_ENDPOINT = "https://bigquery.googleapis.com/bigquery/v2"
+TELEGRAM_MAX_CHARS = 4096
+REPORTS_COLLECTION = "system_reports"
+CALLBACK_PREFIX = "custos:"
+_CALLBACK_RE = re.compile(r"^custos:(det|res):(\d{4}-\d{2}-\d{2})$")
 
 
 # --------------------------------------------------------------------------- #
@@ -223,15 +238,15 @@ def format_gcp_block(summary: dict[str, Any], day: date, cpu_rows: list[dict[str
         f"Mês: {brl(summary['month_to_date'])} de {brl(summary['monthly_budget'])} | projeção: {brl(summary['projection'])}",
     ]
     if summary["top_services"]:
-        lines.append("Serviços: " + " · ".join(f"{_service_label(s)} {brl(v)}" for s, v in summary["top_services"]))
+        lines.append("Serviços: " + " · ".join(f"{html.escape(_service_label(s))} {brl(v)}" for s, v in summary["top_services"]))
     if summary["top_skus"]:
         lines.append("Top SKUs:")
         for _svc, sku, v in summary["top_skus"]:
-            lines.append(f"  • {_short(sku)}: {brl(v)}")
+            lines.append(f"  • {html.escape(_short(sku))}: {brl(v)}")
     if cpu_rows:
         lines.append("Functions (Cloud Run) por serviço:")
         for r in cpu_rows[:6]:
-            lines.append(f"  • {r['function_name']}: {brl(float(r['custo'] or 0.0))}")
+            lines.append(f"  • {html.escape(str(r['function_name'] or '?'))}: {brl(float(r['custo'] or 0.0))}")
     return lines
 
 
@@ -332,7 +347,7 @@ def build_message(
     if gcp_summary:
         lines.extend(format_gcp_block(gcp_summary, day, cpu_rows))
     else:
-        lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({gcp_error})" if gcp_error else ""))
+        lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({html.escape(gcp_error)})" if gcp_error else ""))
     lines.append("")
     lines.extend(format_ai_block(gemini, openai, usd_brl, today, video=video, imagens=imagens))
     if firestore_lines:
@@ -346,6 +361,86 @@ def build_message(
         "OpenAI/Groq/Tavily/Twilio não entram na fatura GCP."
     )
     return "\n".join(lines)
+
+
+def _fmt_factor(value: float) -> str:
+    return f"{value:.1f}".replace(".", ",")
+
+
+def ai_today_brl(usd_brl: float, *usage_docs: dict[str, Any] | None) -> float:
+    """Soma o ``estimated_usd`` dos documentos de telemetria de IA do dia, em BRL."""
+    total_usd = sum(float((d or {}).get("estimated_usd") or 0.0) for d in usage_docs)
+    return total_usd * usd_brl
+
+
+def build_summary(
+    day: date,
+    gcp_summary: dict[str, Any] | None,
+    ai_brl: float,
+    gcp_error: str | None = None,
+    top_n: int = 3,
+) -> str:
+    """Resumo curto enviado por padrão (o detalhe fica atrás do botão).
+
+    Alertas aparecem inline com ⚠️ só quando disparam: dia acima de
+    ``SPIKE_FACTOR``× a média de 7 dias e projeção do mês acima do orçamento.
+    """
+    lines = [f"💰 <b>Custos do Gaspar — {day.strftime('%d/%m')}</b>"]
+    if gcp_summary:
+        total = gcp_summary["total_day"]
+        avg7 = gcp_summary["avg7"]
+        ontem = f"Ontem: {brl(total)} (média 7d {brl(avg7)})"
+        if gcp_summary.get("spike") and avg7 > 0:
+            ontem += f" ⚠️ {_fmt_factor(total / avg7)}× acima"
+        lines.append(ontem)
+        mes = (
+            f"Mês: {brl(gcp_summary['month_to_date'])} · projeção {brl(gcp_summary['projection'])} "
+            f"de {brl(gcp_summary['monthly_budget'])}"
+        )
+        if gcp_summary.get("over_budget"):
+            mes += " ⚠️"
+        lines.append(mes)
+        top = [(svc, v) for svc, v in (gcp_summary.get("top_services") or []) if v > 0][:top_n]
+        if top:
+            lines.append("Maiores: " + " · ".join(f"{html.escape(_service_label(svc))} {brl(v)}" for svc, v in top))
+    else:
+        motivo = ((gcp_error or "").strip().splitlines() or [""])[0][:80]
+        lines.append(
+            f"☁️ GCP: sem dados de {day.strftime('%d/%m')}" + (f" ({html.escape(motivo)})" if motivo else "")
+        )
+    lines.append(f"IA hoje (parcial): {brl(ai_brl)}")
+    return "\n".join(lines)
+
+
+def truncate_for_telegram(text: str, limit: int = TELEGRAM_MAX_CHARS) -> str:
+    """Corta em fim de linha para caber no limite do Telegram sem partir uma tag
+    HTML ao meio (as tags do relatório nunca atravessam linhas)."""
+    if len(text) <= limit:
+        return text
+    suffix = "\n… (cortado)"
+    cut = text[: limit - len(suffix)]
+    nl = cut.rfind("\n")
+    if nl > 0:
+        cut = cut[:nl]
+    return cut + suffix
+
+
+def summary_keyboard(report_day: str) -> list[list[dict[str, str]]]:
+    return [[{"text": "📋 Ver detalhes", "callback_data": f"{CALLBACK_PREFIX}det:{report_day}"}]]
+
+
+def detail_keyboard(report_day: str) -> list[list[dict[str, str]]]:
+    return [[{"text": "↩️ Resumo", "callback_data": f"{CALLBACK_PREFIX}res:{report_day}"}]]
+
+
+def parse_callback(data: str) -> tuple[str, str] | None:
+    """``custos:det:2026-09-25`` → ``("det", "2026-09-25")``; None se não for válido."""
+    m = _CALLBACK_RE.match((data or "").strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
+def report_doc_id(report_day: str) -> str:
+    return f"custos_{report_day}"
 
 
 # --------------------------------------------------------------------------- #
@@ -369,7 +464,15 @@ def _usage_doc(db, provider: str, day: str) -> dict[str, Any] | None:
 
 
 def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | None = None) -> str:
-    """Núcleo do relatório (sem envio). Separado para teste e para regeneração manual."""
+    """Relatório detalhado (sem envio). Mantido por compatibilidade: devolve só o
+    texto completo — ver ``gerar_relatorios_custos`` para resumo + detalhe."""
+    return gerar_relatorios_custos(db, now=now, bq=bq)["detalhe"]
+
+
+def gerar_relatorios_custos(db, now: datetime | None = None, bq: BigQueryRest | None = None) -> dict[str, str]:
+    """Núcleo do relatório (sem envio). Devolve ``{"dia", "resumo", "detalhe"}``:
+    ``dia`` é o dia do bloco GCP (``YYYY-MM-DD``, chave do botão), ``resumo`` o
+    texto curto enviado por padrão e ``detalhe`` o relatório completo (≤ 4096)."""
     from main import _cached_doc_get, _fetch_usd_brl_rate
 
     now = now or datetime.now(TZ)
@@ -435,8 +538,35 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     except Exception:
         usd_brl = 5.30
 
-    return build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error,
-                         today=today, video=video, imagens=imagens)
+    detalhe = build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error,
+                            today=today, video=video, imagens=imagens)
+    resumo = build_summary(yesterday, gcp_summary, ai_today_brl(usd_brl, gemini, openai, video, imagens), gcp_error)
+    return {
+        "dia": yesterday.isoformat(),
+        "resumo": truncate_for_telegram(resumo),
+        "detalhe": truncate_for_telegram(detalhe),
+    }
+
+
+def salvar_relatorio(db, textos: dict[str, str]) -> None:
+    """Grava resumo e detalhe para o botão "Ver detalhes" funcionar dias depois."""
+    from firebase_admin import firestore
+
+    db.collection(REPORTS_COLLECTION).document(report_doc_id(textos["dia"])).set({
+        "tipo": "custos",
+        "dia": textos["dia"],
+        "resumo": textos["resumo"],
+        "detalhe": textos["detalhe"],
+        "created_at": firestore.SERVER_TIMESTAMP,
+    })
+
+
+def carregar_relatorio(db, report_day: str) -> dict[str, Any] | None:
+    snap = db.collection(REPORTS_COLLECTION).document(report_doc_id(report_day)).get()
+    if not getattr(snap, "exists", False):
+        return None
+    data = snap.to_dict() or {}
+    return data if data.get("resumo") and data.get("detalhe") else None
 
 
 @scheduler_fn.on_schedule(
@@ -446,19 +576,33 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     timeout_sec=120,
 )
 def relatorio_diario_custos(event: scheduler_fn.ScheduledEvent = None) -> None:
-    """19h BRT — custos GCP (BigQuery) + IA + Firestore por function no Telegram."""
+    """19h BRT — resumo de custos no Telegram, com botão para o detalhe
+    (GCP via BigQuery + IA + Firestore por function)."""
     from main import get_db, _resolve_default_telegram_chat_id
-    from telegram_utils import _get_telegram_token, _send_telegram_message
+    from telegram_utils import _get_telegram_token, _send_telegram_message, _send_telegram_message_with_keyboard
 
     db = get_db()
     try:
-        message = gerar_relatorio_custos(db)
+        textos = gerar_relatorios_custos(db)
     except Exception as exc:
         print(f"[CustosHermes] Falha ao montar relatório: {exc}")
         return
-    print(f"[CustosHermes] {message}")
+    print(f"[CustosHermes] {textos['detalhe']}")
+
+    salvo = True
+    try:
+        salvar_relatorio(db, textos)
+    except Exception as exc:
+        salvo = False
+        print(f"[CustosHermes] Falha ao gravar relatório em {REPORTS_COLLECTION}: {exc}")
+
     chat_id = _resolve_default_telegram_chat_id(db)
     if not chat_id:
         print("[CustosHermes] Nenhum chat_id do Telegram configurado; relatório apenas nos logs.")
         return
-    _send_telegram_message(_get_telegram_token(db), chat_id, message)  # parse_mode HTML
+    token = _get_telegram_token(db)
+    if salvo:
+        _send_telegram_message_with_keyboard(token, chat_id, textos["resumo"], summary_keyboard(textos["dia"]))
+    else:
+        # Sem o documento gravado o botão não teria o que mostrar: manda o detalhe direto.
+        _send_telegram_message(token, chat_id, textos["detalhe"])  # parse_mode HTML

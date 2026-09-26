@@ -364,7 +364,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
       <div className={cardClass}>
         <ToggleRow
           label="Diário pessoal"
-          desc="Todo dia às 21h30, gera um diário em primeira pessoa a partir das suas ações, saúde, finanças, agenda e conversas — entregue no Telegram para leitura e ajuste."
+          desc="A geração automática diária (21h30) foi desligada em 26/09/2026. Este interruptor só libera o ajuste dos diários já gravados."
           enabled={data.personal_diary.enabled}
           onToggle={() => toggle('personal_diary')}
         />
