@@ -1,9 +1,9 @@
 """
 Resumo Matinal — Camada 1: coletor prospectivo determinístico.
 
-Par simétrico de `personal_diary._collect_diary_material`: mesmo princípio de
-varrer todas as superfícies do Hermes num único coletor, mas apontado para
-frente — o diário das 21h30 fecha o dia, este abre.
+Nasceu como par simétrico do antigo coletor do diário pessoal (removido em
+26/09/2026): mesmo princípio de varrer todas as superfícies do Hermes num
+único coletor, mas apontado para frente — para abrir o dia.
 
 Regra de arquitetura, a mesma de `health_weekly_report.py`: **a conta é feita
 em Python**. Não há nenhuma chamada de LLM neste módulo. O que ele devolve já
@@ -147,7 +147,7 @@ def _data_valida(valor) -> str:
 
 
 def _query_por_prefixo_de_data(db, collection: str, field: str, date_str: str) -> list:
-    """Mesma técnica de `personal_diary._query_by_date_range`: comparação lexicográfica
+    """Comparação lexicográfica
     de strings ISO, que funciona tanto para datas puras quanto para datetimes completos."""
     try:
         return list(
@@ -1112,8 +1112,9 @@ def _coletar_ontem(db, ontem: str) -> dict:
 
 
 def _coletar_perfil(db) -> dict | None:
-    """`ai_profile.personalidade` — o "estado atual" que `consolidar_personalidade`
-    já destila dos diários todo domingo. Aqui só é lido, nunca recalculado."""
+    """`ai_profile.personalidade` — o "estado atual" que o antigo job
+    `consolidar_personalidade` destilava dos diários (removido em 26/09/2026;
+    o último perfil gravado continua valendo). Aqui só é lido, nunca recalculado."""
     try:
         from personal_diary import _resolve_default_uid
         uid = _resolve_default_uid(db)

@@ -4,7 +4,7 @@ title: Custos do Gaspar — diagnóstico e atribuição
 description: Composição real da fatura do projeto gestao-hermes, como atribuir leituras de Firestore e CPU por function, e as consultas BigQuery usadas pelo relatório diário de custos.
 resource: https://console.cloud.google.com/billing
 tags: [hermes, okf, custos, billing, firestore, bigquery, cloud-functions]
-timestamp: 2026-09-08T21:00:00-03:00
+timestamp: 2026-09-26T21:00:00-03:00
 ---
 
 # Custos do Gaspar — diagnóstico e atribuição
@@ -91,7 +91,7 @@ Permissão necessária para a function do relatório: `roles/bigquery.jobUser` n
 - `scheduled_sync` (30 min, 1 GB, 540 s): lê `tarefas` inteira + 11 outros `.stream()` sem filtro; reescreve tarefas → cada escrita dispara 6 triggers; `log_to_firestore` grava linha a linha em `system/sync`.
 - `check_and_send_reminders` (1 min, 1 GB → 0,583 vCPU): 43.200 execuções/mês.
 - Frontend: 110 listeners `onSnapshot` sobre coleções inteiras; cada aba aberta relê tudo.
-- `monitorar_acervo_global` (15 min), `detectar_atencao_acoes` (30 min), `vencer_promessas` (15 min), `scheduled_page_monitor` (30 min), `scheduledSipacSync` Node (2 h).
+- `monitorar_acervo_global` (15 min), `detectar_atencao_acoes` (30 min), `vencer_promessas` (15 min), `scheduled_page_monitor` (4 h, 512 MB desde 26/09/2026), `scheduledSipacSync` Node (2 h).
 
 ## 4. Roteiro da demanda
 
@@ -103,3 +103,31 @@ Permissão necessária para a function do relatório: `roles/bigquery.jobUser` n
 | 3 | Cortes guiados pelos dados (sync só grava diff; reminders 256 MB; listeners por view; cadências; Secret Manager 1 região; limpeza do Artifact Registry) | após 3–5 dias de medição |
 
 Meta: fatura GCP do Gaspar ≤ R$ 150/mês sem remover funcionalidade.
+
+## 5. Cortes de 26/09/2026 — jobs sem uso, monitor de páginas, segredos e relatório resumido
+
+Decisão do André (26/09/2026). Estimativas, a conferir no relatório das 19h das semanas seguintes.
+
+**Jobs agendados removidos** (o deploy com `--force` apaga a function e o job do Cloud Scheduler — mesmo caminho da PR #282, cujo deploy registrou "Successful delete operation" para as functions removidas):
+
+| Function | Cadência | O que fazia |
+|---|---|---|
+| `atualizar_modelos_pessoas` | diário 5h30 | Gemini sintetizava `perfil_pessoas.modelo_interacao` |
+| `consolidar_memorias_copiloto` | diário 4h | varria `knowledge_nodes` e fundia memórias quase duplicadas (embeddings + Gemini) |
+| `ai_notification_planner_daily` | diário 6h30 | agente Gemini propunha até 3 notificações/dia |
+| `detectar_subproduto_semanal` | domingo 18h | detector de subprodutos (elevações) |
+| `retro_semanal_agente` | domingo 20h | retrospectiva semanal de `agent_runs`/`mcp_audit_log` |
+| `gerar_diario_pessoal` | diário 21h30 | diário pessoal (feature desligada em `system/settings.personal_diary`) |
+| `consolidar_personalidade` | domingo 22h | perfil de personalidade a partir dos diários (idem) |
+
+O código de apoio que ainda tem uso fica: `ajustarDiarioPessoal` (ajuste de diários antigos), `_reserve_and_create_notification` e o despacho de `scheduled_notifications` (usados pela fila `atencao` e por `check_and_send_reminders`), `deteccao_subproduto` (tools de elevação), `retro_agente.executar_retro_semanal` e `executar_atualizacao_modelos_pessoas` (sob demanda/testes). Saíram só os pontos de entrada e o que ficou morto com eles (coletor e prompt do diário, ferramentas e persona do planejador).
+
+**Outros ajustes:**
+
+- `scheduled_page_monitor`: a cada 4 h (antes 1 h) e 512 MB (antes 1 GB). Só faz GET via `requests`, extrai texto e hasheia; Gemini só quando a página muda. 4× menos execuções e metade da memória por execução.
+- `processar_correcoes_pendentes` (1 h): a chave e o cliente Gemini só são criados depois de confirmar que a fila `correcoes_pendentes` tem item.
+- Secret Manager: `bill_pdf_passwords.save_password_secret` destrói as versões anteriores do segredo depois de gravar a nova (a leitura usa sempre `versions/latest`). Cada save acumulava uma versão ativa cobrada. Falha ao listar/destruir só vai para o log, sem derrubar o save. Requer `secretmanager.versions.destroy` na SA das functions; sem a permissão, o comportamento é o de antes. As versões já acumuladas saem no próximo save de cada senha.
+
+**Economia estimada:** ~R$ 10–20/mês somando CPU/memória dos 7 jobs, do monitor de páginas (de ~720 para ~180 execuções/mês a 1/2 da memória) e as chamadas Gemini que deixam de acontecer, mais ~R$ 0,30–0,40/mês por versão de segredo que deixa de acumular. Cloud Scheduler: 7 jobs a menos (US$ 0,10/job/mês acima dos 3 gratuitos).
+
+**Relatório das 19h resumido:** `relatorio_diario_custos` passa a mandar um resumo curto (ontem vs. média 7d, mês e projeção contra o orçamento, 3 maiores serviços, IA de hoje; ⚠️ inline só quando o alerta dispara) com o botão "📋 Ver detalhes", que edita a mesma mensagem para o relatório completo; "↩️ Resumo" volta. Os dois textos ficam em `system_reports/custos_{YYYY-MM-DD}` (dia do bloco GCP), gravados no envio, e o callback (`custos:det:<dia>`/`custos:res:<dia>`, em `telegram_callbacks_custos.py`) só lê esse documento — o botão funciona dias depois sem nova consulta ao BigQuery. Se a gravação falhar, o detalhe é enviado direto, como antes.

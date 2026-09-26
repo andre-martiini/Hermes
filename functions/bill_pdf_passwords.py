@@ -82,7 +82,49 @@ def save_password_secret(project_id: str, secret_id: str, password: str, client:
 
     secret_client = client or secretmanager.SecretManagerServiceClient()
     parent = f"projects/{project_id}/secrets/{secret_id}"
-    secret_client.add_secret_version(
+    new_version = secret_client.add_secret_version(
         parent=parent,
         payload={"data": password.encode("utf-8")},
     )
+    destroy_previous_secret_versions(secret_client, parent, getattr(new_version, "name", None))
+
+
+def _version_state_name(version: Any) -> str:
+    state = getattr(version, "state", None)
+    return str(getattr(state, "name", state) or "").upper()
+
+
+def destroy_previous_secret_versions(secret_client: Any, parent: str, keep_version_name: str | None) -> int:
+    """Destrói as versões antigas do segredo, mantendo só a recém-criada.
+
+    O Secret Manager cobra por versão ativa (habilitada ou desabilitada) e cada
+    save acrescentava uma versão nova sem apagar as anteriores. A leitura usa
+    sempre `versions/latest`, então as antigas não servem para nada.
+
+    Melhor esforço: a senha nova já foi gravada, então qualquer falha aqui só é
+    registrada no log e nunca derruba o save. Sem o nome da versão nova não
+    destruímos nada — não dá para garantir que ela ficaria de fora.
+    Devolve quantas versões foram destruídas.
+    """
+    if not keep_version_name:
+        print(f"[BillPdfPasswords] Versão nova sem nome em {parent}; versões antigas mantidas.")
+        return 0
+    try:
+        versions = list(secret_client.list_secret_versions(request={"parent": parent}))
+    except Exception as exc:
+        print(f"[BillPdfPasswords] Falha ao listar versões de {parent}: {exc}")
+        return 0
+
+    destroyed = 0
+    for version in versions:
+        name = getattr(version, "name", None)
+        if not name or name == keep_version_name:
+            continue
+        if _version_state_name(version) == "DESTROYED":
+            continue
+        try:
+            secret_client.destroy_secret_version(request={"name": name})
+            destroyed += 1
+        except Exception as exc:
+            print(f"[BillPdfPasswords] Falha ao destruir {name}: {exc}")
+    return destroyed
