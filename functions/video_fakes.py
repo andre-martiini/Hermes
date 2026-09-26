@@ -82,28 +82,37 @@ class Batch:
 
 
 class Transacao:
+    """Como no Firestore real, as escritas ficam no buffer e só valem no commit;
+    se a função levantar, o decorador faz rollback e nada é gravado."""
+
     def __init__(self, db):
         self._db = db
         self._read_only = False
         self._id = None
         self._max_attempts = 5
+        self._ops = []
 
     def get(self, ref):
         return ref.get(transaction=self)
 
     def update(self, ref, data):
-        ref.update(data)
+        self._ops.append(("update", ref, data, False))
 
     def set(self, ref, data, merge=False):
-        ref.set(data, merge=merge)
+        self._ops.append(("set", ref, data, merge))
 
     def _begin(self, retry_id=None):
         self._id = retry_id or b"tx"
+        self._ops = []
 
     def _commit(self):
+        for op, ref, data, merge in self._ops:
+            ref.update(data) if op == "update" else ref.set(data, merge=merge)
+        self._ops = []
         return []
 
     def _rollback(self):
+        self._ops = []
         self._id = None
 
     def _clean_up(self):

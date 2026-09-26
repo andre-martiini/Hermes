@@ -116,7 +116,8 @@ def estimar(duracoes_s: list[int], *, modo: str = "padrao", resolucao: str = "72
     custo_tts = n_cenas * float(precos["tts_por_cena"])
     base = custo_video + custo_quadros + custo_tts
     com_margem = base * float(precos["margem_retrabalho"])
-    teto = min(com_margem * float(precos["fator_teto_projeto"]), float(precos["teto_projeto_usd"]))
+    teto_com_folga = com_margem * float(precos["fator_teto_projeto"])
+    teto = min(teto_com_folga, float(precos["teto_projeto_usd"]))
     return {
         "modelo_video": modelo,
         "resolucao": resolucao,
@@ -128,5 +129,7 @@ def estimar(duracoes_s: list[int], *, modo: str = "padrao", resolucao: str = "72
         "custo_previa_usd": round(custo_quadros + custo_tts, 2),
         "custo_estimado_usd": round(com_margem, 2),
         "teto_projeto_usd": round(teto, 2),
+        # O teto absoluto cortou parte da folga de refações (1,5× a estimativa).
+        "folga_teto_reduzida": teto < teto_com_folga,
         "tempo_renderizacao_min": math.ceil(n_cenas * LATENCIA_CLIPE_S / 60) if n_cenas else 0,
     }

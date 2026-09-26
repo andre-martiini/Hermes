@@ -81,6 +81,10 @@ class VertexVeoProvider(VeoProvider):
         if pedido.imagem_fim:
             cfg["last_frame"] = _png(pedido.imagem_fim)
         if pedido.referencias:
+            # NÃO TESTADO contra o Veo: a Fase 0 só usou image + lastFrame. A
+            # documentação sugere restrições para imagens de referência (clipe de
+            # 8 s, 16:9, talvez incompatível com quadro inicial ou com o Lite).
+            # Validar com um spike antes de a Fase 3 depender disto.
             cfg["reference_images"] = [
                 types.VideoGenerationReferenceImage(image=_png(r), reference_type="asset")
                 for r in pedido.referencias[:3]

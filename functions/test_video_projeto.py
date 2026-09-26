@@ -87,6 +87,79 @@ class TestCriarProjeto(unittest.TestCase):
         self.assertEqual(res["estimativa"]["custo_estimado_usd"], 0.7)  # 14 s × 0,05
 
 
+def cenas_de(n, palavras):
+    return [{"narracao": " ".join(["p"] * palavras), "descricao_visual": f"cena {i}"} for i in range(n)]
+
+
+class TestAchadosDaRevisao(unittest.TestCase):
+    """Achados da revisão adversária da Fase 1 (26/09/2026)."""
+
+    def setUp(self):
+        self.db = FakeDb()
+
+    def test_estimativa_acima_do_teto_do_projeto_e_recusada(self):
+        # Modo final, 15 × 8 s: ~US$ 24 > teto de US$ 20 — o worker pararia no meio.
+        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(15, 18)))
+        self.assertEqual(res["status"], "invalido")
+        self.assertTrue(any("teto por projeto" in e and "modo padrão" in e for e in res["erros"]))
+        self.assertEqual(self.db.docs, {})
+
+    def test_teto_que_corta_a_folga_de_refacao_gera_aviso(self):
+        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(10, 18)))
+        self.assertEqual(res["status"], "ok")
+        self.assertTrue(res["estimativa"]["folga_teto_reduzida"])
+        self.assertTrue(any("folga" in a for a in res["avisos"]))
+
+    def test_previa_acima_do_teto_por_previa_e_recusada(self):
+        res = vp.criar_projeto(self.db, "uid", roteiro(cenas=cenas_de(20, 3)))
+        self.assertEqual(res["status"], "invalido")
+        self.assertTrue(any("teto por prévia" in e for e in res["erros"]))
+
+    def test_sem_usuario_nao_cria_projeto(self):
+        self.assertEqual(vp.criar_projeto(self.db, None, roteiro())["status"], "erro")
+        self.assertEqual(vp.criar_projeto(self.db, "  ", roteiro())["status"], "erro")
+        self.assertEqual(self.db.docs, {})
+
+    def test_id_com_barra_nao_alcanca_subdocumento_de_outro_usuario(self):
+        pid = vp.criar_projeto(self.db, "uid-a", roteiro())["projeto_id"]
+        self.assertEqual(vp.obter_status(self.db, f"{pid}/cenas/01", "uid-b")["status"], "nao_encontrado")
+        self.assertEqual(vp.obter_status(self.db, f"{pid}/cenas/01", "uid-a")["status"], "nao_encontrado")
+
+    def test_status_falha_fechado_sem_uid_ou_projeto_sem_dono(self):
+        pid = vp.criar_projeto(self.db, "uid-a", roteiro())["projeto_id"]
+        self.assertEqual(vp.obter_status(self.db, pid, None)["status"], "nao_encontrado")
+        self.db.docs[f"video_projetos/{pid}"]["uid"] = None
+        self.assertEqual(vp.obter_status(self.db, pid, "uid-b")["status"], "nao_encontrado")
+
+    def test_personagens_como_texto_e_legenda_como_string(self):
+        r, erros, _ = vp.validar_roteiro(roteiro(
+            biblia={"estilo": "flat", "personagens": "Ana, 30 anos"}, legenda="false"))
+        self.assertEqual(erros, [])
+        self.assertEqual(r["biblia"]["personagens"], ["Ana, 30 anos"])
+        self.assertFalse(r["legenda"])
+        self.assertTrue(vp.validar_roteiro(roteiro(legenda="true"))[0]["legenda"])
+
+    def test_transicao_invalida_nao_e_value_error(self):
+        # O Firestore levanta ValueError quando as retentativas da transação acabam.
+        self.assertFalse(issubclass(vp.TransicaoInvalida, ValueError))
+        self.assertTrue(issubclass(vp.TransicaoInvalida, vp.ErroVideo))
+
+    def test_transacao_que_levanta_depois_de_escrever_nao_grava(self):
+        from firebase_admin import firestore
+
+        self.db.docs["x/1"] = {"v": 1}
+        ref = self.db.collection("x").document("1")
+
+        @firestore.transactional
+        def escreve_e_falha(tx):
+            tx.update(ref, {"v": 2})
+            raise RuntimeError("falhou depois de escrever")
+
+        with self.assertRaises(RuntimeError):
+            escreve_e_falha(self.db.transaction())
+        self.assertEqual(self.db.docs["x/1"], {"v": 1})
+
+
 class TestMaquinaDeEstados(unittest.TestCase):
     def setUp(self):
         self.db = FakeDb()
@@ -151,6 +224,17 @@ class TestExecucaoUnica(unittest.TestCase):
     def test_lease_vencido_libera_para_outra_execucao(self):
         vp.reivindicar_execucao(self.db, self.pid, "exec-a", agora=self.t0)
         self.assertTrue(vp.reivindicar_execucao(self.db, self.pid, "exec-b", agora=self.t0 + timedelta(minutes=16)))
+
+    def test_renovar_mantem_o_projeto_numa_renderizacao_longa(self):
+        vp.reivindicar_execucao(self.db, self.pid, "exec-a", agora=self.t0)
+        self.assertTrue(vp.renovar_execucao(self.db, self.pid, "exec-a", agora=self.t0 + timedelta(minutes=14)))
+        # 20 min depois do início o lease original teria vencido; renovado, não venceu.
+        self.assertFalse(vp.reivindicar_execucao(self.db, self.pid, "exec-b", agora=self.t0 + timedelta(minutes=20)))
+
+    def test_execucao_que_perdeu_o_projeto_nao_renova(self):
+        vp.reivindicar_execucao(self.db, self.pid, "exec-a", agora=self.t0)
+        vp.reivindicar_execucao(self.db, self.pid, "exec-b", agora=self.t0 + timedelta(minutes=16))
+        self.assertFalse(vp.renovar_execucao(self.db, self.pid, "exec-a", agora=self.t0 + timedelta(minutes=17)))
 
     def test_liberar_so_a_propria_execucao(self):
         vp.reivindicar_execucao(self.db, self.pid, "exec-a", agora=self.t0)

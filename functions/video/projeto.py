@@ -53,15 +53,21 @@ MAX_CENAS = 30
 LEASE_EXECUCAO = timedelta(minutes=15)
 
 
-class TransicaoInvalida(ValueError):
+class ErroVideo(Exception):
+    """Base das falhas do Hermes Vídeo. Não herda de ValueError de propósito: o
+    Firestore levanta ValueError quando as retentativas de uma transação se
+    esgotam, e um `except ValueError` confundiria disputa com transição inválida."""
+
+
+class TransicaoInvalida(ErroVideo):
     pass
 
 
-class ProjetoNaoEncontrado(LookupError):
+class ProjetoNaoEncontrado(ErroVideo):
     pass
 
 
-class SemSuporteTransacao(RuntimeError):
+class SemSuporteTransacao(ErroVideo):
     pass
 
 
@@ -75,6 +81,19 @@ def transicao_valida(de: str, para: str) -> bool:
 
 def _texto(valor) -> str:
     return str(valor or "").strip()
+
+
+def _booleano(valor) -> bool:
+    """`bool("false")` é True; aceita só o que claramente significa sim."""
+    if isinstance(valor, bool):
+        return valor
+    return str(valor or "").strip().lower() in {"true", "1", "sim", "yes"}
+
+
+def id_projeto_valido(projeto_id: str) -> bool:
+    # Barra no id faz o Firestore descer para uma subcoleção:
+    # document("OUTRO/cenas/01") vira video_projetos/OUTRO/cenas/01.
+    return bool(projeto_id) and "/" not in projeto_id
 
 
 def validar_roteiro(dados: dict, precos: dict | None = None) -> tuple[dict | None, list[str], list[str]]:
@@ -100,10 +119,15 @@ def validar_roteiro(dados: dict, precos: dict | None = None) -> tuple[dict | Non
         erros.append(f"modo deve ser 'padrao' ou 'final' (veio {modo!r}).")
 
     biblia_in = dados.get("biblia") if isinstance(dados.get("biblia"), dict) else {}
+    # O MCP só valida o tipo dos campos de primeiro nível: `personagens` pode chegar
+    # como texto solto, e iterar uma string viraria uma lista de letras.
+    personagens_in = biblia_in.get("personagens") or []
+    if isinstance(personagens_in, str):
+        personagens_in = [personagens_in]
     biblia = {
         "estilo": _texto(biblia_in.get("estilo")),
         "paleta": _texto(biblia_in.get("paleta")),
-        "personagens": [_texto(p) for p in (biblia_in.get("personagens") or []) if _texto(p)],
+        "personagens": [_texto(p) for p in personagens_in if _texto(p)] if isinstance(personagens_in, list) else [],
         "evitar": _texto(biblia_in.get("evitar")),
     }
     if not biblia["estilo"]:
@@ -112,7 +136,7 @@ def validar_roteiro(dados: dict, precos: dict | None = None) -> tuple[dict | Non
     voz_in = dados.get("voz") if isinstance(dados.get("voz"), dict) else {}
     voz = {"nome": _texto(voz_in.get("nome")) or "Kore", "estilo": _texto(voz_in.get("estilo")) or "neutro e claro"}
     musica = _texto(dados.get("musica")) or "nenhuma"
-    legenda = bool(dados.get("legenda", False))
+    legenda = _booleano(dados.get("legenda"))
 
     cenas_in = dados.get("cenas") if isinstance(dados.get("cenas"), list) else []
     if not cenas_in:
@@ -185,6 +209,9 @@ def id_cena(ordem: int) -> str:
 
 def criar_projeto(db, uid: str | None, dados: dict, precos: dict | None = None) -> dict:
     """Valida e grava projeto + cenas num único batch. Custo zero (nenhuma chamada paga)."""
+    if not _texto(uid):
+        # Projeto sem dono seria legível por qualquer um em `obter_status`.
+        return {"status": "erro", "erro": "Usuário não identificado; projeto não criado."}
     precos = precos or estimativa.carregar_precos(db)
     roteiro, erros, avisos = validar_roteiro(dados, precos)
     if erros:
@@ -192,6 +219,26 @@ def criar_projeto(db, uid: str | None, dados: dict, precos: dict | None = None) 
 
     est = estimativa.estimar([c["duracao_s"] for c in roteiro["cenas"]], modo=roteiro["modo"],
                              resolucao=roteiro["resolucao"], precos=precos)
+    # Com a estimativa acima do teto, o worker pararia no meio de uma renderização
+    # que o usuário aprovou pelo valor maior.
+    if est["custo_estimado_usd"] > float(precos["teto_projeto_usd"]):
+        erros.append(
+            f"Estimativa de US$ {est['custo_estimado_usd']:.2f} passa do teto por projeto "
+            f"(US$ {float(precos['teto_projeto_usd']):.2f}). Encurte o vídeo"
+            + (" ou use o modo padrão." if roteiro["modo"] == "final" else ".")
+        )
+    if est["custo_previa_usd"] > float(precos["teto_previa_usd"]):
+        erros.append(
+            f"A prévia custaria US$ {est['custo_previa_usd']:.2f}, acima do teto por prévia "
+            f"(US$ {float(precos['teto_previa_usd']):.2f}). Use menos cenas."
+        )
+    if erros:
+        return {"status": "invalido", "erros": erros, "avisos": avisos, "estimativa": est}
+    if est["folga_teto_reduzida"]:
+        avisos.append(
+            f"O teto do projeto (US$ {est['teto_projeto_usd']:.2f}) deixa menos que a folga usual de "
+            f"{float(precos['fator_teto_projeto']):.1f}× para refazer cenas."
+        )
     ref = db.collection(COLECAO).document()
     projeto = {k: v for k, v in roteiro.items() if k != "cenas"}
     projeto.update({
@@ -264,6 +311,10 @@ def reivindicar_execucao(db, projeto_id: str, execucao_id: str, *, agora: dateti
 
     Reivindica se não há execução registrada, se ela é a mesma (retomada da
     própria execução) ou se o lease expirou (worker derrubado no meio).
+
+    O lease (15 min) é menor que uma renderização longa (30 cenas × ~55 s): o
+    worker precisa chamar `renovar_execucao` a cada clipe. Sem isso, outra
+    execução assume o projeto e paga de novo pelos clipes em andamento.
     """
     agora = agora or datetime.now(timezone.utc)
     ref = db.collection(COLECAO).document(projeto_id)
@@ -279,6 +330,26 @@ def reivindicar_execucao(db, projeto_id: str, execucao_id: str, *, agora: dateti
         if atual.get("id") and atual.get("id") != execucao_id and isinstance(expira, datetime) and expira > agora:
             return False
         tx.update(ref, {"worker_execucao": {"id": execucao_id, "desde": agora, "expira_em": agora + LEASE_EXECUCAO}})
+        return True
+
+    return _txn(transaction)
+
+
+def renovar_execucao(db, projeto_id: str, execucao_id: str, *, agora: datetime | None = None) -> bool:
+    """Estende o lease da execução que já é dona do projeto. `False` = perdeu o
+    projeto para outra execução (o lease tinha vencido): o worker deve parar
+    antes de enviar o próximo clipe."""
+    agora = agora or datetime.now(timezone.utc)
+    ref = db.collection(COLECAO).document(projeto_id)
+    transaction = _transacional(db)
+
+    @firestore.transactional
+    def _txn(tx):
+        snap = ref.get(transaction=tx)
+        atual = ((snap.to_dict() or {}).get("worker_execucao") or {}) if snap.exists else {}
+        if atual.get("id") != execucao_id:
+            return False
+        tx.update(ref, {"worker_execucao": {**atual, "expira_em": agora + LEASE_EXECUCAO}})
         return True
 
     return _txn(transaction)
@@ -311,12 +382,16 @@ def obter_status(db, projeto_id: str, uid: str | None) -> dict:
     projeto_id = _texto(projeto_id)
     if not projeto_id:
         return {"status": "erro", "erro": "projeto_id é obrigatório."}
+    nao_encontrado = {"status": "nao_encontrado", "erro": f"Projeto {projeto_id!r} não encontrado."}
+    if not id_projeto_valido(projeto_id) or not _texto(uid):
+        return nao_encontrado
     ref = db.collection(COLECAO).document(projeto_id)
     snap = ref.get()
-    dados = snap.to_dict() or {} if snap.exists else {}
-    # Projeto de outro usuário responde igual a inexistente: não confirma que o id existe.
-    if not snap.exists or (dados.get("uid") and uid and dados.get("uid") != uid):
-        return {"status": "nao_encontrado", "erro": f"Projeto {projeto_id!r} não encontrado."}
+    dados = (snap.to_dict() or {}) if snap.exists else {}
+    # Falha fechada: projeto de outro usuário (ou sem dono) responde igual a
+    # inexistente, sem confirmar que o id existe.
+    if not snap.exists or dados.get("uid") != uid:
+        return nao_encontrado
 
     cenas = sorted((c.to_dict() or {} for c in ref.collection("cenas").stream()), key=lambda c: c.get("ordem", 0))
     clipes = [c.to_dict() or {} for c in ref.collection("clipes").stream()]
