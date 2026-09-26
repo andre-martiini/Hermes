@@ -11,7 +11,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from autonomy.execution import PedidoDuravel, assumir_pedido, registrar_progresso
-from autonomy.requests import RequestStatus
+from autonomy.requests import BACKOFF_BASE_SEGUNDOS, RequestStatus
 from autonomy.runs import AgentRunStatus
 from autonomy.sweep import (
     DiagnosticoPedido,
@@ -20,6 +20,15 @@ from autonomy.sweep import (
 )
 
 T0 = datetime(2026, 9, 26, 12, 0, 0, tzinfo=timezone.utc)
+
+
+class _SemJitter:
+    """Fake de `rng` para `autonomy.requests.calcular_backoff_segundos` --
+    `.uniform(a, b)` sempre devolve 0.0, isolando o patamar EXATO escolhido
+    (`BACKOFF_BASE_SEGUNDOS[indice]`) do jitter aleatório de +-20%."""
+
+    def uniform(self, a: float, b: float) -> float:
+        return 0.0
 
 
 def _pedido_pendente(request_id: str = "req-1") -> PedidoDuravel:
@@ -83,8 +92,12 @@ class TestVarrerLeaseVencidaReservado(unittest.TestCase):
         resultado = varrer_lease_vencida(pedido, agora=agora)
         self.assertEqual(resultado.pedido.status, RequestStatus.PENDENTE)
         self.assertIsNone(resultado.diagnostico)
-        # Nenhum progresso foi feito -- não conta como tentativa esgotada.
-        self.assertEqual(resultado.pedido.tentativas, 0)
+        # Nenhum progresso foi feito, mas ainda CONTA como tentativa (achado
+        # de revisão adversarial: sem contar aqui, um executor que trava
+        # logo após cada reserva nunca esgotaria o limite -- ver docstring
+        # de varrer_lease_vencida).
+        self.assertEqual(resultado.pedido.tentativas, 1)
+        self.assertIsNone(resultado.pedido.proximo_tentativa_em)
 
     def test_reservado_fecha_run_por_timeout(self):
         pedido = _pedido_reservado()
@@ -92,6 +105,20 @@ class TestVarrerLeaseVencidaReservado(unittest.TestCase):
         resultado = varrer_lease_vencida(pedido, agora=agora)
         self.assertEqual(resultado.pedido.run.status, AgentRunStatus.TIMEOUT)
         self.assertEqual(resultado.pedido.run.finalizado_em, agora)
+
+    def test_reservado_esgota_tentativas_cancela_com_diagnostico(self):
+        # Executor que trava/cai IMEDIATAMENTE após cada reserva, sem nunca
+        # progredir -- o ciclo PENDENTE -> RESERVADO -> (lease morre) -> ...
+        # precisa de um teto, mesmo sem nenhum efeito parcial nunca ter
+        # ocorrido (achado de revisão adversarial, 1a rodada).
+        pedido = _pedido_reservado(tentativas=2)  # próxima seria a 3a (== max default)
+        agora = T0 + timedelta(minutes=10)
+        resultado = varrer_lease_vencida(pedido, agora=agora, max_tentativas=3)
+        self.assertEqual(resultado.pedido.status, RequestStatus.CANCELADO)
+        self.assertIsNone(resultado.pedido.proximo_tentativa_em)
+        self.assertIsInstance(resultado.diagnostico, DiagnosticoPedido)
+        self.assertEqual(resultado.diagnostico.tentativas, 3)
+        self.assertEqual(resultado.diagnostico.status_anterior, RequestStatus.RESERVADO)
 
 
 class TestVarrerLeaseVencidaEmAndamento(unittest.TestCase):
@@ -123,16 +150,25 @@ class TestVarrerLeaseVencidaEmAndamento(unittest.TestCase):
         self.assertEqual(resultado.diagnostico.status_anterior, RequestStatus.EM_ANDAMENTO)
         self.assertEqual(resultado.diagnostico.registrado_em, agora)
 
-    def test_backoff_cresce_com_tentativas(self):
+    def test_usa_o_patamar_de_backoff_da_tentativa_pos_incremento(self):
+        # Achado de revisão adversarial (1a rodada): um teste anterior aqui
+        # só verificava "delta > 60s", o que passaria mesmo se o código
+        # (erradamente) passasse pedido.tentativas (valor ANTES do
+        # incremento) para calcular_backoff_segundos em vez de
+        # tentativas_novas (valor DEPOIS) -- com jitter, o patamar de 60s
+        # errado ainda podia superar 60s exatos. Este teste usa um rng SEM
+        # jitter (uniform sempre 0.0) e compara contra o patamar EXATO
+        # esperado para tentativas_novas=2 (índice 1 de BACKOFF_BASE_SEGUNDOS,
+        # 300s) -- se o código usasse o valor errado (tentativa=1, 60s),
+        # esta asserção falharia.
         pedido = _pedido_em_andamento(tentativas=1)
         agora = T0 + timedelta(minutes=10)
         resultado = varrer_lease_vencida(
-            pedido, agora=agora, max_tentativas=5, rng=random.Random(0)
+            pedido, agora=agora, max_tentativas=5, rng=_SemJitter()
         )
-        # 2a tentativa usa o patamar de 5 minutos (+-20% de jitter) --
-        # sempre maior que o patamar de 1 minuto usado na 1a tentativa.
         delta_segundos = (resultado.pedido.proximo_tentativa_em - agora).total_seconds()
-        self.assertGreater(delta_segundos, 60.0)
+        esperado = BACKOFF_BASE_SEGUNDOS[1]  # tentativas_novas=2 -> índice 1 (300s)
+        self.assertAlmostEqual(delta_segundos, esperado, places=6)
 
     def test_diagnostico_registrado_em_precisa_ser_tz_aware(self):
         with self.assertRaises(ValueError):

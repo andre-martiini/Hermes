@@ -32,7 +32,13 @@ passo 7 do pacote:
   já passou, liberando o pedido para `assumir_pedido` reivindicar de novo.
 - "Falha final": tratado aqui como o desfecho de `varrer_lease_vencida`
   quando `tentativas` esgota `max_tentativas` -- inclui uma entrada de
-  `DiagnosticoPedido` ("fila de diagnóstico").
+  `DiagnosticoPedido` ("fila de diagnóstico"). Para `EM_ANDAMENTO` isso é
+  `FALHA_FINAL`; para `RESERVADO` (nenhuma aresta direta para
+  `FALHA_FINAL` no grafo) é `CANCELADO` -- ver docstring de
+  `varrer_lease_vencida` para o raciocínio completo, incluindo o achado de
+  revisão adversarial que motivou tratar também o caso de reserva repetida
+  sem nunca progredir (sem isso, esse caso específico nunca esgotava e
+  nunca alcançava a fila de diagnóstico).
 - "Resultado desconhecido": FORA de escopo desta fatia -- `autonomy.requests`
   já modela `RESULTADO_DESCONHECIDO` como um estado que sai por reconciliação
   (`VERIFICANDO`) ou nova tentativa/falha, mas decidir SE/QUANDO uma
@@ -124,8 +130,21 @@ def varrer_lease_vencida(
     `RESERVADO`: nenhum efeito foi produzido ainda (a reserva nunca chegou a
     `registrar_progresso`) -- "lease expira ou é liberada sem efeito: volta
     para a fila" (seção 4.5, comentário da própria aresta em
-    `autonomy.requests._TRANSICOES_PERMITIDAS`). Não conta como tentativa
-    esgotada: volta direto para `PENDENTE`, `tentativas` inalterada.
+    `autonomy.requests._TRANSICOES_PERMITIDAS`). Ainda assim, `tentativas`
+    CONTA aqui (achado de revisão adversarial, 1a rodada: um executor que
+    trava/cai imediatamente após CADA reserva, sem nunca progredir, senão
+    ficaria num ciclo `PENDENTE -> RESERVADO -> PENDENTE -> ...` indefinido,
+    sem nunca alcançar um estado terminal nem a fila de diagnóstico -- o
+    critério de aceite do pacote, "nenhum pedido fica indefinidamente ...
+    sem próxima ação", não se sustentaria para este caso). Se
+    `tentativas+1 < max_tentativas`, volta para `PENDENTE` SEM backoff
+    (`proximo_tentativa_em` não é usado aqui -- nenhum efeito ocorreu, não
+    há motivo para esperar antes de reivindicar de novo). Caso contrário,
+    desiste -- mas `RESERVADO` não tem aresta direta para `FALHA_FINAL` no
+    grafo (só `EM_ANDAMENTO`/`PENDENTE`/`CANCELADO`), então o desfecho aqui
+    é `CANCELADO` (já mapeado para `AgentRunStatus.FALHA` em
+    `autonomy.execution._REQUEST_STATUS_PARA_AGENT_RUN_STATUS`), com a
+    mesma `DiagnosticoPedido` de qualquer desistência.
 
     `EM_ANDAMENTO`: efeito parcial pode já ter ocorrido -- conta como uma
     tentativa. Se `tentativas+1 < max_tentativas`, agenda nova tentativa
@@ -133,7 +152,14 @@ def varrer_lease_vencida(
     `autonomy.requests.calcular_backoff_segundos`, mesmo backoff com jitter
     de 1/5/20 minutos já usado no resto do pacote). Caso contrário, desiste
     (`FALHA_FINAL`) e devolve uma `DiagnosticoPedido` -- a "fila de
-    diagnóstico" do passo 7."""
+    diagnóstico" do passo 7.
+
+    `tentativas` é um contador ÚNICO por pedido, compartilhado entre os dois
+    ramos -- representa "quantas vezes a lease deste pedido morreu", não
+    "quantas vezes morreu em EM_ANDAMENTO especificamente". Um pedido que
+    morre uma vez em `RESERVADO` e depois em `EM_ANDAMENTO` soma as duas
+    para o mesmo limite `max_tentativas`, deliberadamente -- é o mesmo
+    pedido problemático de qualquer forma."""
     if pedido.status not in _STATUS_LEASE_VENCIDA_TRATADOS:
         raise ValueError(
             f"pedido '{pedido.request_id}' está em '{pedido.status.value}', que não é "
@@ -158,14 +184,60 @@ def varrer_lease_vencida(
             run_atualizado, lease_expirada=True, agora=agora_resolvido
         )
 
+    tentativas_novas = pedido.tentativas + 1
+
     if pedido.status == RequestStatus.RESERVADO:
+        # Nenhum efeito foi produzido ainda (nunca chegou a
+        # `registrar_progresso`) -- mas um executor que trava/cai
+        # IMEDIATAMENTE após cada reserva, sem nunca progredir, ainda
+        # precisa de um teto: sem isto, o pedido ficaria preso num ciclo
+        # `PENDENTE -> RESERVADO -> (lease morre) -> PENDENTE -> ...`
+        # indefinido, sem nunca alcançar um estado terminal nem a fila de
+        # diagnóstico -- exatamente o que a seção 4.5 do plano e o
+        # critério de aceite do pacote ("nenhum pedido fica indefinidamente
+        # ... sem próxima ação") existem para evitar. Achado de revisão
+        # adversarial (1a rodada, sub-entrega 6/N).
+        #
+        # Por isso `tentativas` CONTA aqui também, mas sem backoff (volta
+        # direto para `PENDENTE`, reivindicável de novo imediatamente) --
+        # diferente de `EM_ANDAMENTO`, onde já houve efeito parcial e faz
+        # sentido esperar antes de tentar de novo. `RESERVADO` só tem duas
+        # saídas terminais no grafo de `autonomy.requests`
+        # (`CANCELADO`/via `PENDENTE`, nunca `FALHA_FINAL` diretamente) --
+        # `CANCELADO` é o desfecho aqui ao esgotar tentativas: já é o
+        # status que representa "pedido encerrado sem crédito ao
+        # executor", e `autonomy.execution._REQUEST_STATUS_PARA_AGENT_RUN_STATUS`
+        # já mapeia `CANCELADO` para `AgentRunStatus.FALHA` por esse mesmo
+        # motivo.
+        if tentativas_novas >= max_tentativas:
+            ok, motivo = validar_transicao(pedido.status, RequestStatus.CANCELADO)
+            if not ok:
+                raise ValueError(motivo)
+            pedido_novo = dataclasses.replace(
+                pedido,
+                status=RequestStatus.CANCELADO,
+                run=run_atualizado,
+                tentativas=tentativas_novas,
+            )
+            diagnostico = DiagnosticoPedido(
+                request_id=pedido.request_id,
+                motivo=(
+                    f"lease vencida em 'reservado' (sem nenhum progresso registrado) "
+                    f"por {tentativas_novas} vez(es) seguida(s) (limite {max_tentativas}) "
+                    "-- possível executor que trava/cai imediatamente após reservar; "
+                    "pedido cancelado, requer atenção manual."
+                ),
+                status_anterior=pedido.status,
+                tentativas=tentativas_novas,
+                registrado_em=agora_resolvido,
+            )
+            return ResultadoSweepLeaseVencida(pedido=pedido_novo, diagnostico=diagnostico)
         pedido_novo = dataclasses.replace(
-            pedido, status=RequestStatus.PENDENTE, run=run_atualizado
+            pedido, status=RequestStatus.PENDENTE, run=run_atualizado, tentativas=tentativas_novas
         )
         return ResultadoSweepLeaseVencida(pedido=pedido_novo, diagnostico=None)
 
     # EM_ANDAMENTO daqui em diante.
-    tentativas_novas = pedido.tentativas + 1
     if tentativas_novas >= max_tentativas:
         ok, motivo = validar_transicao(pedido.status, RequestStatus.FALHA_FINAL)
         if not ok:
