@@ -176,6 +176,10 @@ _TOOLS_LONGAS: set[str] = {
     # Devolvem texto JSON no sucesso (o `resultado` de `consultar_job` é string).
     "video_gerar_previa",
     "video_ajustar",
+    # Imagens (GPT Image): de dezenas de segundos a ~2 min em qualidade alta.
+    # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
+    "gerar_imagem",
+    "editar_imagem",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60
@@ -243,6 +247,9 @@ _INSTRUCTIONS = (
     "por outro conector: base64 gerado por modelo chega truncado e grava "
     "sem erro. `conteudo_base64` existe so para arquivo minusculo e exige "
     "sha256 do arquivo de origem.\n"
+    "- Imagens (`gerar_imagem`, `editar_imagem`): siga o `consultar_job` ate "
+    "`done` sem perguntar; o resultado traz a imagem para voce ver e o "
+    "`link_download` do original para slides e artefatos.\n"
     "- Para ATUALIZAR um arquivo do Drive que ja existe (por exemplo um "
     "Google Doc que voce criou antes), use `atualizar_arquivo_drive` com o "
     "mesmo `file_id`: mantem ID, link e permissoes, e a versao anterior "
@@ -1335,6 +1342,14 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # desta fatia pequena; ver docs/autonomia/execucao.md.
     if estruturado is not None:
         envelope["structuredContent"] = estruturado
+    # Imagem pronta: a previa entra como bloco `image` para o cliente VER a
+    # imagem sem baixar nada. So acrescenta itens a `content`; o texto e o
+    # `structuredContent` (contrato em cache no cliente) ficam iguais.
+    if (name == "consultar_job" and not is_error and isinstance(result, dict)
+            and result.get("status") == "done" and result.get("tool") in ("gerar_imagem", "editar_imagem")):
+        from imagens_geradas import blocos_de_previa
+
+        envelope["content"].extend(blocos_de_previa(result.get("resultado")))
     return envelope
 
 

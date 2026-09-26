@@ -732,17 +732,25 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     ),
     "gerar_imagem": ToolInventoryEntry(
         "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
-        "nenhum — não confere se a imagem corresponde ao prompt nem se a URL segue acessível",
-        rede_servico="Gemini (geração) + Google Cloud Storage (upload)",
+        "nenhum automático — a prévia volta anexada ao resultado para quem pediu conferir a imagem",
+        rede_servico="OpenAI (GPT Image) ou Gemini (opção e plano B) + Cloud Storage + Google Drive",
         dominio_rede=DominioRede.FECHADO,
         idempotencia=_I.NAO_IDEMPOTENTE,
-        nota="upload permanente no bucket público; sem tool de exclusão. Não idempotente (P03 sub-entrega "
-        "19/N): `tools/hermes_tools.py::gerar_imagem` nomeia o blob com `uuid4().hex[:8]` e faz "
-        "`upload_from_string` incondicional a cada chamada -- repetir o MESMO prompt gera uma SEGUNDA "
-        "imagem persistida com URL distinta. Efeito adicional a mais, sem relação com o upload: "
-        "`check_and_increment_limit` (gemini_cost_controls.py) incrementa um contador diário de cota ANTES "
-        "da geração, em toda chamada que passa da checagem -- outro estado que muda a cada repetição, mesmo "
-        "que a imagem em si falhasse depois.",
+        nota="gasto em dólar por chamada (teto diário em config/imagens.teto_diario_usd ou "
+        "HERMES_IMAGE_DAILY_USD_CAP, conferido antes de chamar o provedor). Não idempotente: "
+        "`imagens_geradas.executar` gera id novo (`uuid4().hex[:12]`) e grava original, prévia, arquivo no "
+        "Drive e registro em imagens_geradas a cada chamada -- repetir o MESMO prompt paga e persiste uma "
+        "segunda imagem. Com task_id, também acrescenta item ao pool e duas linhas ao diário (ArrayUnion).",
+    ),
+    "editar_imagem": ToolInventoryEntry(
+        "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.PREPARACAO_INTERNA,
+        "nenhum automático — a prévia volta anexada ao resultado para quem pediu conferir a imagem",
+        rede_servico="OpenAI (GPT Image) + Cloud Storage + Google Drive; Gmail API ou URL arbitrária conforme a origem da referência",
+        dados_sensiveis_categoria="imagens de referência podem mostrar pessoas reais; são enviadas à OpenAI",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="mesmo pipeline e mesmo teto diário de gerar_imagem (`imagens_geradas.executar`, modo editar); "
+        "lê as referências pelas vias de anexar_arquivo (drive_file_id, upload_token, url, gmail_message_id). "
+        "Não idempotente pelo mesmo motivo: cada chamada paga e grava uma imagem nova com id novo.",
     ),
     "preparar_reagendamento_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA,

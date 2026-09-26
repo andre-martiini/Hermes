@@ -85,7 +85,8 @@ _CATALOG: dict[str, str] = {
     "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
     "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
-    "gerar_imagem": "Gera uma imagem a partir de uma descricao textual e devolve a URL publica",
+    "gerar_imagem": "Gera imagem (GPT Image da OpenAI) a partir de uma descricao; devolve a imagem visivel, o link de download e o do Drive, e anexa a acao com task_id",
+    "editar_imagem": "Cria imagem a partir de imagens de referencia (Drive, upload, url ou Gmail) e uma instrucao: trocar fundo, usar logotipo, refazer num estilo",
     "preparar_reagendamento_em_lote": "Prepara reagendamento de varias acoes redistribuidas por dias uteis, sem gravar",
     "preparar_remocao_horarios_em_lote": "Prepara a remocao de horarios de varias acoes em lote, sem gravar",
     "criar_objetivo_estrategico": "Cria um objetivo estrategico com pilar, meta, diretrizes, indicadores e marcos",
@@ -205,6 +206,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "excluir_objetivo_estrategico",
     "acompanhar_processo_sipac",
     "gerar_imagem",
+    "editar_imagem",
     # Escrita direta, para canais sem card de confirmacao.
     "anexar_arquivo",
     "atualizar_arquivo_drive",
@@ -260,6 +262,9 @@ _ASYNC_TOOLS: set[str] = {
     # Hermes Vídeo: narração + quadros-chave + folha de contato levam minutos.
     "video_gerar_previa",
     "video_ajustar",
+    # Imagens: de dezenas de segundos a ~2 min em qualidade alta.
+    "gerar_imagem",
+    "editar_imagem",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -281,6 +286,7 @@ def _mcp_enabled() -> set[str]:
 _VOICE_EXCLUDED: set[str] = {
     "gerar_rascunho_formulario",
     "gerar_imagem",
+    "editar_imagem",
     "gerar_relatorio",
     "preparar_edicao_em_lote",
     "preparar_reagendamento_em_lote",
