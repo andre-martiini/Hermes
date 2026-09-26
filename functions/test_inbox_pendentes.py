@@ -1,8 +1,27 @@
 import sys
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 sys.path.insert(0, '.')
+
+
+# Classificador LLM desligado por padrão em todo o módulo. Sem isto,
+# `_get_llm_client` cai em `main.get_gemini_api_key()`, que numa máquina com
+# credencial padrão do Google Cloud (ADC) lê a chave REAL em `system/api_keys`
+# do Firestore de produção e faz chamadas pagas ao Gemini — que classificava
+# "Mensagem." e aviso do SIG como informativos e derrubava dois testes só
+# localmente (no CI não há credencial e o cliente vira None). Os testes que
+# exercitam o classificador fazem o próprio `mock.patch`, que vale por cima deste.
+_sem_llm = mock.patch('inbox_pendentes._get_llm_client', return_value=None)
+
+
+def setUpModule():
+    _sem_llm.start()
+
+
+def tearDownModule():
+    _sem_llm.stop()
 
 from inbox_pendentes import (
     DISPENSA_COLLECTION,
