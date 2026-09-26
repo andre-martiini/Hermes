@@ -133,9 +133,11 @@ class FakeVeoProvider(VeoProvider):
     """Provedor de teste: não chama rede e conta cada pedido (a trava de "não pagar duas vezes")."""
 
     def __init__(self, *, bloquear_prompts: set[str] | None = None, falhar: set[str] | None = None,
-                 consultas_ate_concluir: int = 1, gerar_mp4=None):
+                 consultas_ate_concluir: int = 1, gerar_mp4=None, gravar_saida=None):
         """`gerar_mp4(pedido) -> bytes` troca o vídeo de mentira por um MP4 de verdade
-        (os testes de renderização montam o vídeo final com ffmpeg)."""
+        (os testes de renderização montam o vídeo final com ffmpeg). `gravar_saida(uri,
+        bytes)` simula a Vertex gravando o MP4 em `saida_gcs` (devolve só a URI)."""
+        self._gravar = gravar_saida
         self.pedidos: list[PedidoClipe] = []
         self._ops: dict[str, dict] = {}
         self._bloquear = bloquear_prompts or set()
@@ -160,7 +162,14 @@ class FakeVeoProvider(VeoProvider):
         if any(p in prompt for p in self._bloquear):
             return ResultadoOperacao(concluida=True, bloqueado=True, motivo_bloqueio="filtro simulado")
         if self._gerar_mp4:
-            return ResultadoOperacao(concluida=True, video_bytes=self._gerar_mp4(op["pedido"]))
+            dados = self._gerar_mp4(op["pedido"])
+            if self._gravar and op["pedido"].saida_gcs:
+                uri = f"{op['pedido'].saida_gcs}{nome.rsplit('-', 1)[-1]}/sample_0.mp4"
+                if not op.get("gravado"):
+                    self._gravar(uri, dados)
+                    op["gravado"] = True
+                return ResultadoOperacao(concluida=True, video_uri=uri)
+            return ResultadoOperacao(concluida=True, video_bytes=dados)
         return ResultadoOperacao(concluida=True, video_bytes=f"mp4:{nome}:{op['pedido'].duracao_s}s".encode())
 
     def baixar(self, resultado: ResultadoOperacao) -> bytes:

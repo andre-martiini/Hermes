@@ -137,6 +137,10 @@ class Servicos:
         """O bucket apaga `tmp/` em 30 dias: um checkpoint pode apontar para um objeto que sumiu."""
         raise NotImplementedError
 
+    def listar(self, prefixo_uri: str) -> list[str]:
+        """URIs `gs://` sob um prefixo — onde o Veo grava a saída de cada tentativa."""
+        raise NotImplementedError
+
     def publicar(self, nome: str, dados: bytes, mime: str) -> dict:
         """Publica um arquivo para o usuário ver (Drive) → {"id", "link"}."""
         raise NotImplementedError
@@ -161,15 +165,21 @@ def _passageiro(exc: Exception) -> bool:
     return codigo in (429, 503) or "RESOURCE_EXHAUSTED" in str(exc) or "UNAVAILABLE" in str(exc)
 
 
-def com_retentativa(chamada, *, esperas=ESPERAS_RETENTATIVA_S, dormir=None):
+def cota_esgotada(exc: Exception) -> bool:
+    codigo = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return codigo == 429 or "RESOURCE_EXHAUSTED" in str(exc)
+
+
+def com_retentativa(chamada, *, esperas=ESPERAS_RETENTATIVA_S, dormir=None, passageiro=None):
     import time
 
     dormir = dormir or time.sleep
+    passageiro = passageiro or _passageiro
     for espera in (*esperas, None):
         try:
             return chamada()
         except Exception as exc:  # noqa: BLE001
-            if espera is None or not _passageiro(exc):
+            if espera is None or not passageiro(exc):
                 raise
             dormir(espera)
 
@@ -240,6 +250,9 @@ class ServicosVertex(Servicos):
 
     def existe(self, uri: str) -> bool:
         return self._bkt().blob(self._caminho(uri)).exists()
+
+    def listar(self, prefixo_uri: str) -> list[str]:
+        return [f"gs://{BUCKET}/{b.name}" for b in self._bkt().list_blobs(prefix=self._caminho(prefixo_uri))]
 
     def _servico_drive(self):
         if self._drive is None:
@@ -342,6 +355,10 @@ class ServicosFalsos(Servicos):
 
     def existe(self, uri):
         return uri.removeprefix(f"gs://{BUCKET}/") in self.arquivos
+
+    def listar(self, prefixo_uri):
+        prefixo = prefixo_uri.removeprefix(f"gs://{BUCKET}/")
+        return [f"gs://{BUCKET}/{c}" for c in sorted(self.arquivos) if c.startswith(prefixo)]
 
     def publicar(self, nome, dados, mime):
         self.publicados.append(nome)

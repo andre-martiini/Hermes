@@ -44,7 +44,14 @@ def credenciais_do_dono(db):
                         client_id=d.get("client_id"), client_secret=d.get("client_secret"),
                         scopes=d.get("scopes"), expiry=_expiracao(d.get("expiry_date") or d.get("expiry")))
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except Exception as exc:
+            # Mesmo tratamento do main: autorização revogada pede nova autorização ao dono.
+            if "invalid_grant" in str(exc):
+                ref.set({"auth_status": "reauth_required", "auth_error": "invalid_grant",
+                         "updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+            raise
         ref.update({"token": creds.token, "expiry_date": creds.expiry, "updated_at": firestore.SERVER_TIMESTAMP})
     return creds
 
@@ -78,6 +85,11 @@ def _chat_id(db) -> str | None:
     chaves = db.collection("system").document("api_keys").get()
     dados = (chaves.to_dict() or {}) if chaves.exists else {}
     for campo in ("telegram_chat_id", "telegram_allowed_chat_id", "allowed_telegram_chat_id"):
+        if str(dados.get(campo) or "").strip():
+            return str(dados[campo]).strip()
+    geral = db.collection("configuracoes").document("geral").get()
+    dados = (geral.to_dict() or {}) if geral.exists else {}
+    for campo in ("telegram_chat_id", "telegram_allowed_chat_id"):
         if str(dados.get(campo) or "").strip():
             return str(dados[campo]).strip()
     return None

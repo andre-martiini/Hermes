@@ -2,6 +2,7 @@
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from video import midia, montagem, previa, renderizacao
@@ -44,6 +45,14 @@ class Base(unittest.TestCase):
 
     def doc(self, sub=""):
         return self.db.docs[f"video_projetos/{self.pid}{sub}"]
+
+    def clipes(self, ordem):
+        prefixo = f"video_projetos/{self.pid}/clipes/{ordem:02d}_"
+        return [v for k, v in self.db.docs.items() if k.startswith(prefixo)]
+
+    def clipe(self, ordem):
+        """O clipe da cena com a tentativa mais recente (o id leva a assinatura, não um número)."""
+        return max(self.clipes(ordem), key=lambda c: c.get("tentativas") or 0)
 
     def render(self, execucao="exec-1", **kw):
         kw.setdefault("veo", self.veo)
@@ -99,7 +108,7 @@ class TestRetomadaENaoPagarDuasVezes(Base):
         self.veo = FakeVeoProvider(gerar_mp4=mp4_de, consultas_ate_concluir=3)
         r = self.render(relogio=Relogio(passo=10_000))  # estoura a espera logo na 1ª consulta
         self.assertEqual(r["status"], "erro")
-        self.assertEqual(self.doc("/clipes/01_v1")["status"], "submetido")
+        self.assertEqual(self.clipe(1)["status"], "submetido")
         vp.transicionar(self.db, self.pid, vp.RENDERIZANDO)  # erro → renderizando (retomar)
         r2 = self.render(execucao="exec-2")
         self.assertEqual(r2["status"], "ok", r2)
@@ -145,7 +154,7 @@ class TestFiltroEFalhas(Base):
         r = self.render()
         self.assertEqual(r["status"], "ok", r)
         self.assertEqual(len(self.veo.pedidos), 4)  # cena 3 enviada 2× (a barrada não é cobrada)
-        self.assertTrue(self.doc("/clipes/03_v1")["reescrito"])
+        self.assertTrue(self.clipe(3)["reescrito"])
         self.assertAlmostEqual(self.doc()["custo_render_usd"], 14 * 0.05)
 
     def test_barrado_de_novo_vira_bloqueado_com_motivo(self):
@@ -153,14 +162,152 @@ class TestFiltroEFalhas(Base):
         self.db.docs[f"video_projetos/{self.pid}/cenas/03"]["descricao_visual"] = "cartaz proibido"
         r = self.render()
         self.assertEqual(r["status"], "erro")
-        self.assertEqual(self.doc("/clipes/03_v1")["status"], "bloqueado")
+        self.assertEqual(self.clipe(3)["status"], "bloqueado")
         self.assertIn("Ajuste a descrição visual", self.doc()["erro"])
 
     def test_veo_falhando_duas_vezes_para(self):
         self.veo = FakeVeoProvider(gerar_mp4=mp4_de, falhar={"tela do sistema"})
         r = self.render()
         self.assertEqual(r["status"], "erro")
-        self.assertEqual(self.doc("/clipes/02_v1")["tentativas"], 2)
+        self.assertEqual(self.clipe(2)["tentativas"], 2)
+
+
+class TestAchadosDaRevisaoFase3(Base):
+    """Achados da revisão adversária da Fase 3 (26/09/2026), um teste por achado."""
+
+    def veo_com_bucket(self, **kw):
+        return FakeVeoProvider(gerar_mp4=mp4_de, gravar_saida=lambda uri, dados: self.srv.arquivos.__setitem__(
+            uri.removeprefix(f"gs://{midia.BUCKET}/"), dados), **kw)
+
+    def test_registro_da_operacao_perdido_nao_paga_de_novo(self):
+        self.veo = self.veo_com_bucket()
+        original = renderizacao.midia.com_retentativa
+        chamadas = {"n": 0}
+
+        def falha_ao_gravar_operacao(fn, **kw):
+            chamadas["n"] += 1
+            if chamadas["n"] == 2:  # 1ª = envio ao Veo; 2ª = gravar o operation_name
+                raise RuntimeError("Firestore DEADLINE_EXCEEDED")
+            return original(fn, **kw)
+
+        with unittest.mock.patch.object(renderizacao.midia, "com_retentativa", side_effect=falha_ao_gravar_operacao):
+            r = self.render()
+        self.assertEqual(r["status"], "erro")
+        self.assertEqual(len(self.veo.pedidos), 1)
+        self.veo.consultar_operacao("operations/fake-1")  # a Vertex termina e grava no bucket
+        vp.transicionar(self.db, self.pid, vp.RENDERIZANDO)
+        r2 = self.render(execucao="exec-2")
+        self.assertEqual(r2["status"], "ok", r2)
+        self.assertEqual(len(self.veo.pedidos), 3)  # cena 1 adotada do bucket, não reenviada
+        self.assertAlmostEqual(self.doc()["custo_render_usd"], 14 * 0.05)
+
+    def test_envio_recente_sem_operacao_espera_em_vez_de_reenviar(self):
+        from datetime import datetime, timezone
+
+        agora = datetime.now(timezone.utc)
+        cid = f"01_{renderizacao.assinatura(self.doc(), self.doc('/cenas/01'), self._quadros(), None)}"
+        self.db.docs[f"video_projetos/{self.pid}/clipes/{cid}"] = {"status": "enviando", "tentativas": 1,
+                                                                   "enviado_em": agora, "prompt": "p"}
+        r = self.render()
+        self.assertEqual(r["status"], "erro")
+        self.assertIn("pode estar gerando", r["erro"])
+        self.assertEqual(self.veo.pedidos, [])
+
+    def _quadros(self):
+        return {int(q["indice"]): q for k, q in self.db.docs.items() if "/keyframes/" in k}
+
+    def test_storyboard_ajustado_depois_de_erro_refaz_a_cena_e_as_seguintes(self):
+        self.veo = FakeVeoProvider(gerar_mp4=mp4_de, falhar={"logotipo do Ifes"})
+        self.assertEqual(self.render()["status"], "erro")  # cenas 1 e 2 prontas; a 3 falha
+        previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[
+            {"ordem": 1, "narracao": "Uma frase bem mais longa que a anterior para mudar a duração da cena."},
+            {"ordem": 3, "descricao_visual": "prédio do campus"}])
+        vp.transicionar(self.db, self.pid, vp.RENDERIZANDO)
+        self.veo = FakeVeoProvider(gerar_mp4=mp4_de)
+        r = self.render(execucao="exec-2")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertEqual(len(self.veo.pedidos), 3)  # cena 1 mudou → 2 começa em outro quadro → 3 mudou
+        final = self.srv.arquivos["drive/RSC.mp4"]
+        cenas = [self.doc(f"/cenas/0{i}")["duracao_s"] for i in (1, 2, 3)]
+        self.assertAlmostEqual(montagem.duracao(final), sum(cenas) - 2 / 24, delta=1 / 24 + 0.03)
+
+    def test_cena_bloqueada_com_descricao_corrigida_usa_prompt_novo(self):
+        self.veo = FakeVeoProvider(gerar_mp4=mp4_de, bloquear_prompts={"cartaz proibido"})
+        self.db.docs[f"video_projetos/{self.pid}/cenas/03"]["descricao_visual"] = "cartaz proibido"
+        self.assertEqual(self.render()["status"], "erro")
+        previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[{"ordem": 3, "descricao_visual": "parede lisa"}])
+        vp.transicionar(self.db, self.pid, vp.RENDERIZANDO)
+        r = self.render(execucao="exec-2")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertIn("parede lisa", self.veo.pedidos[-1].prompt)
+        self.assertNotIn("Versão neutra", self.veo.pedidos[-1].prompt)
+
+    def test_cancelado_durante_a_espera_nao_envia_a_reescrita(self):
+        self.veo = FakeVeoProvider(gerar_mp4=mp4_de, bloquear_prompts={"servidora lendo"})
+        original = self.veo.consultar_operacao
+
+        def cancela_e_consulta(nome):
+            vp.transicionar(self.db, self.pid, vp.CANCELADO)
+            return original(nome)
+
+        self.veo.consultar_operacao = cancela_e_consulta
+        r = self.render()
+        self.assertEqual(r["status"], "interrompido")
+        self.assertEqual(len(self.veo.pedidos), 1)
+
+    def test_lease_perdido_durante_a_espera_para(self):
+        from unittest import mock
+
+        with mock.patch.object(renderizacao.vp, "renovar_execucao", side_effect=[True, False]):
+            self.veo = FakeVeoProvider(gerar_mp4=mp4_de, consultas_ate_concluir=3)
+            r = self.render()
+        self.assertEqual(r["status"], "interrompido")
+        self.assertEqual(len(self.veo.pedidos), 1)
+
+    def test_acao_inexistente_nao_derruba_a_entrega_nem_duplica_no_drive(self):
+        def anexar(acao_id, **kw):
+            raise KeyError("tarefas/acao-1 não existe")
+
+        self.avisos.anexar = anexar
+        r = self.render()
+        self.assertEqual(r["status"], "ok", r)
+        self.assertTrue(any("Não consegui anexar" in a for a in r["avisos"]))
+        self.assertEqual(self.srv.publicados.count("RSC.mp4"), 1)
+
+    def test_retomada_da_montagem_nao_publica_de_novo(self):
+        from unittest import mock
+
+        real = vp.transicionar
+
+        def morre_antes_de_concluir(db, pid, para, **kw):
+            if para == vp.CONCLUIDO:
+                raise SystemExit("worker morto depois de publicar")
+            return real(db, pid, para, **kw)
+
+        with mock.patch.object(renderizacao.vp, "transicionar", side_effect=morre_antes_de_concluir):
+            with self.assertRaises(SystemExit):
+                self.render()
+        self.assertEqual(self.doc()["status"], vp.MONTANDO)
+        r = self.render(execucao="exec-2")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertEqual(self.srv.publicados.count("RSC.mp4"), 1)
+
+    def test_projeto_nao_renderizavel_e_recusado_sem_gastar(self):
+        self.db.docs[f"video_projetos/{self.pid}/cenas/02"]["dividir"] = True
+        r = self.render()
+        self.assertEqual(r["status"], "recusado")
+        self.assertIn("não cabe em 8 s", r["erro"])
+        self.assertEqual(self.veo.pedidos, [])
+
+    def test_clipe_ja_contado_nao_conta_de_novo(self):
+        self.render()
+        antes = self.doc()["custo_real_usd"]
+        ctx = renderizacao._Contexto(self.db, self.db.collection("video_projetos").document(self.pid), self.pid,
+                                     "exec-1", self.veo, self.srv, lambda s: None, Relogio(), None)
+        doc = self.db.collection(f"video_projetos/{self.pid}/clipes").document(
+            next(k.rsplit("/", 1)[-1] for k in self.db.docs if "/clipes/01_" in k))
+        renderizacao._concluir(ctx, doc, "gs://x", 0.2, 1, None)
+        self.assertEqual(self.doc()["custo_real_usd"], antes)
 
 
 class TestMusica(Base):
