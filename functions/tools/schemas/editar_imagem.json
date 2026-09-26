@@ -1,6 +1,6 @@
 {
   "name": "editar_imagem",
-  "description": "Cria uma imagem nova a partir de 1 ou mais imagens de referência e uma instrução (ex.: 'mantenha estas pessoas e troque o fundo', 'use este logotipo', 'refaça no estilo desta imagem'). Modelo padrão sunburst, feito para edição controlada. No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download e o link do Drive. As referências vêm por origem, nunca em base64 pela conversa. Não envie fotos ou documentos com dados de terceiros sem pedido explícito do usuário.",
+  "description": "Cria uma imagem nova a partir de 1 ou mais imagens de referência e uma instrução (ex.: 'mantenha estas pessoas e troque o fundo', 'use este logotipo', 'refaça no estilo desta imagem'); também corrige uma imagem recém-gerada. Modelo padrão sunburst, feito para edição controlada. No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download e o link do Drive. As referências vêm por origem, nunca em base64 pela conversa. Não envie fotos ou documentos com dados de terceiros sem pedido explícito do usuário. Guia completo: skill gaspar-imagem.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -22,7 +22,7 @@
       },
       "prompt": {
         "type": "string",
-        "description": "O que fazer com as referências: o que manter, o que mudar e o estilo"
+        "description": "Instrução completa escrita por você: identifique cada referência pela ordem e papel ('Imagem 1: foto da equipe — sujeito; Imagem 2: logotipo — canto superior direito, pequeno'); diga o que muda ('mude apenas X') e liste o que fica igual (rostos, proporções, roupas, enquadramento, luz, cores, texto); peça luz, escala e sombras coerentes; uma mudança por vez."
       },
       "mascara": {
         "type": "object",
