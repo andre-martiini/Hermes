@@ -6982,8 +6982,8 @@ def _format_ai_profile_for_prompt(ai_profile: dict) -> str:
     if history:
         lines.append(f"- historico_deduzido: {json.dumps(history[:5], ensure_ascii=False)}")
 
-    # Perfil de personalidade destilado a partir do diário pessoal pelo antigo
-    # job consolidar_personalidade (removido em 26/09/2026) — impressões, não fatos.
+    # Perfil de personalidade destilado semanalmente a partir do diário pessoal
+    # (functions/personal_diary.py:consolidar_personalidade) — impressões, não fatos.
     personalidade = ai_profile.get("personalidade")
     if personalidade:
         lines.append(f"- personalidade (impressões, não fatos relatados): {json.dumps(personalidade, ensure_ascii=False)}")
@@ -14567,9 +14567,10 @@ from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 
 # Jobs agendados removidos em 26/09/2026 (sem uso; ver docs/okf/operacoes/custos.md):
 # ai_notification_planner_daily, detectar_subproduto_semanal,
-# consolidar_memorias_copiloto, atualizar_modelos_pessoas, gerar_diario_pessoal e
-# consolidar_personalidade. O deploy com --force apaga as functions e os jobs do
-# Cloud Scheduler. Os módulos de apoio (deteccao_subproduto, ai_notification_planner,
+# consolidar_memorias_copiloto e atualizar_modelos_pessoas. O deploy com --force
+# apaga as functions e os jobs do Cloud Scheduler. (gerar_diario_pessoal e
+# consolidar_personalidade voltaram no mesmo dia, a pedido do André — abaixo.)
+# Os módulos de apoio (deteccao_subproduto, ai_notification_planner,
 # modelo de pessoa) seguem importados por quem ainda os usa.
 
 # Import weekly agent retro job (mantido: alimenta as sugestões de promoção de
@@ -14579,9 +14580,9 @@ from retro_agente import retro_semanal_agente
 # Import weekly review batch rescheduling proposal job
 from revisao_semanal import revisar_semana_propor_reagendamento
 
-# Import personal diary edit callable (os jobs agendados do diário e da
-# personalidade foram removidos em 26/09/2026 — feature desligada)
-from personal_diary import ajustarDiarioPessoal
+# Import personal diary + weekly personality consolidation jobs (restaurados em
+# 26/09/2026; seguem atrás de system/settings.personal_diary.enabled, padrão off)
+from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal
 
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude

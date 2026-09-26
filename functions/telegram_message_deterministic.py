@@ -16,6 +16,7 @@ mesmo padrao documentado em telegram_utils.py.
 """
 import html
 import re
+from datetime import datetime, timedelta, timezone
 
 from telegram_utils import (
     _RESET_CONFIRM_KEYBOARD,
@@ -40,6 +41,22 @@ from telegram_utils import (
     _send_telegram_session_message,
     _try_register_walk_block,
 )
+
+PERFIL_AJUSTE_VALIDADE_HORAS = 24
+
+
+def _perfil_ajuste_ainda_valido(marcador, agora=None) -> bool:
+    """`pending_perfil_ajuste` guarda o ISO de quando "✏️ Corrigir" foi tocado.
+    Valor sem data legível (ex.: True) conta como válido."""
+    try:
+        desde = datetime.fromisoformat(str(marcador))
+    except (TypeError, ValueError):
+        return True
+    if desde.tzinfo is None:
+        desde = desde.replace(tzinfo=timezone.utc)
+    agora = agora or datetime.now(timezone.utc)
+    return agora - desde <= timedelta(hours=PERFIL_AJUSTE_VALIDADE_HORAS)
+
 
 def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, response_mode, voice_profile, perf_state, _persist_turn_to_copilot) -> bool:
     """Tenta responder sem LLM (caminhada, edicao de diario/outbox pendente, /entrar,
@@ -68,6 +85,27 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
         _persist_turn_to_copilot(text, diary_reply)
         _send_telegram_session_message(db, token, chat_id, diary_reply, session=session)
         return True
+
+    # --- Correção do perfil pessoal pendente (botão "✏️ Corrigir" do espelho
+    # semanal) — mesmo padrão do diário acima: a próxima mensagem livre vira a
+    # correção, gravada para a próxima consolidação de domingo. Marcador com
+    # mais de PERFIL_AJUSTE_VALIDADE_HORAS é descartado e a mensagem segue o
+    # fluxo normal (o dono tocou no botão e desistiu). ---
+    pending_perfil = session.get("pending_perfil_ajuste")
+    if pending_perfil and text and not text.startswith("/"):
+        session.pop("pending_perfil_ajuste", None)
+        _save_session(db, chat_id, session)
+        if _perfil_ajuste_ainda_valido(pending_perfil):
+            from personal_diary import registrar_ajuste_personalidade
+            try:
+                perfil_reply = registrar_ajuste_personalidade(db, text)
+            except Exception as exc:
+                print(f"[Personalidade] Falha ao gravar correção do perfil: {exc}")
+                perfil_reply = "⚠️ Não consegui anotar a correção agora. Tente novamente mais tarde."
+            _persist_turn_to_copilot(text, perfil_reply)
+            _send_telegram_session_message(db, token, chat_id, perfil_reply, session=session)
+            return True
+        print("[Personalidade] Marcador de correção do perfil expirado; mensagem segue o fluxo normal.")
 
     # --- Ajuste de rascunho de outbox WhatsApp pendente (botão "✏️ Editar") ---
     pending_outbox_id = session.get("pending_outbox_edit")
