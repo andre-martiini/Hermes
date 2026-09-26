@@ -1,9 +1,7 @@
 """Retrospectiva semanal de execuções do agente e auditoria de tools MCP.
 
 Analisa agent_runs e mcp_audit_log dos últimos 7 dias corridos.
-O agendamento semanal (retro_semanal_agente, domingo 20h) foi removido em
-26/09/2026 por não ser usado; `executar_retro_semanal` segue disponível para
-rodar sob demanda.
+Executado aos domingos às 20h via Cloud Scheduler.
 Propõe ajuste de POP via correcoes_pendentes se houver padrão concreto repetido.
 Nunca aplica nada diretamente — a validação e consolidação ocorrem no Motor de Evolução.
 """
@@ -19,6 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
+from firebase_functions import options, scheduler_fn
 from google import genai
 from google.genai import types
 
@@ -482,3 +481,15 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
         "resumo": resumo,
         "telegram_sent": telegram_sent,
     }
+
+
+@scheduler_fn.on_schedule(
+    schedule="0 20 * * 0",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=180,
+)
+def retro_semanal_agente(event: scheduler_fn.ScheduledEvent) -> None:
+    """Retrospectiva semanal de execuções do agente e ferramentas MCP aos domingos às 20h."""
+    db = firestore.client()
+    executar_retro_semanal(db)

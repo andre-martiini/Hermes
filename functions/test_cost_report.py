@@ -189,6 +189,22 @@ class FormatTest(unittest.TestCase):
         self.assertIn("~1 dia de atraso", msg)
         self.assertIn("IA e Firestore = dia corrente, parcial", msg)
 
+    def test_build_message_escapa_html_de_servico_sku_e_function(self):
+        summary = {
+            "total_day": 1.0, "avg7": 1.0, "month_to_date": 1.0, "projection": 1.0, "monthly_budget": 200.0,
+            "top_services": [("A&B <svc>", 1.0)],
+            "top_skus": [("A&B <svc>", "sku <x> & y", 1.0)],
+            "spike": False, "over_budget": False,
+        }
+        msg = cr.build_message(
+            date(2026, 9, 8), summary, [{"function_name": "fn<1>&", "custo": 0.5}], None, None, None, 5.0,
+            today=date(2026, 9, 9),
+        )
+        self.assertIn("A&amp;B &lt;svc&gt; R$ 1,00", msg)
+        self.assertIn("sku &lt;x&gt; &amp; y: R$ 1,00", msg)
+        self.assertIn("fn&lt;1&gt;&amp;: R$ 0,50", msg)
+        self.assertNotIn("<svc>", msg)
+
     def test_build_message_without_gcp_data(self):
         msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, 5.0, gcp_error="permissão negada", today=date(2026, 9, 8))
         self.assertIn("sem dados do export para 08/09 (permissão negada)", msg)

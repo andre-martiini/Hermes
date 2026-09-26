@@ -2897,6 +2897,10 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         os.environ.get("GCLOUD_PROJECT") or "gestao-hermes",
         config["secret_id"],
         password,
+        # Só apaga as versões antigas quando a senha nova foi comprovada contra o
+        # PDF/portal; com validation None (nenhum PDF protegido para testar) a
+        # antiga fica como rede de segurança.
+        destruir_anteriores=validation is True,
     )
 
     if unlockable_message_ids and config.get("kind") != "allcare_portal":
@@ -14125,11 +14129,15 @@ from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detecta
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 
 # Jobs agendados removidos em 26/09/2026 (sem uso; ver docs/okf/operacoes/custos.md):
-# ai_notification_planner_daily, detectar_subproduto_semanal, retro_semanal_agente,
+# ai_notification_planner_daily, detectar_subproduto_semanal,
 # consolidar_memorias_copiloto, atualizar_modelos_pessoas, gerar_diario_pessoal e
 # consolidar_personalidade. O deploy com --force apaga as functions e os jobs do
-# Cloud Scheduler. Os módulos de apoio (deteccao_subproduto, retro_agente,
-# ai_notification_planner, modelo de pessoa) seguem importados por quem ainda os usa.
+# Cloud Scheduler. Os módulos de apoio (deteccao_subproduto, ai_notification_planner,
+# modelo de pessoa) seguem importados por quem ainda os usa.
+
+# Import weekly agent retro job (mantido: alimenta as sugestões de promoção de
+# autonomia via promocao_autonomia — fluxo P04 em andamento)
+from retro_agente import retro_semanal_agente
 
 # Import weekly review batch rescheduling proposal job
 from revisao_semanal import revisar_semana_propor_reagendamento

@@ -80,7 +80,7 @@ class TestSavePasswordSecretVersions(unittest.TestCase):
 
     def test_destroi_versoes_anteriores_e_mantem_a_nova(self):
         client = self._client([self._version(3), self._version(2), self._version(1, "DISABLED")])
-        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client)
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
 
         client.add_secret_version.assert_called_once()
         self.assertEqual(client.add_secret_version.call_args.kwargs["parent"], self.PARENT)
@@ -89,13 +89,13 @@ class TestSavePasswordSecretVersions(unittest.TestCase):
 
     def test_ignora_versoes_ja_destruidas(self):
         client = self._client([self._version(3), self._version(2, "DESTROYED")])
-        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client)
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
         client.destroy_secret_version.assert_not_called()
 
     def test_falha_ao_listar_nao_derruba_o_save(self):
         client = self._client([])
         client.list_secret_versions.side_effect = RuntimeError("sem permissão")
-        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client)
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
         client.add_secret_version.assert_called_once()
         client.destroy_secret_version.assert_not_called()
 
@@ -109,9 +109,38 @@ class TestSavePasswordSecretVersions(unittest.TestCase):
     def test_sem_nome_da_versao_nova_nao_destroi_nada(self):
         client = self._client([self._version(2)])
         client.add_secret_version.return_value = SimpleNamespace()
-        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client)
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
         client.list_secret_versions.assert_not_called()
         client.destroy_secret_version.assert_not_called()
+
+    def test_sem_validacao_positiva_nao_destroi_por_padrao(self):
+        # saveBillPdfPassword com validation None (nenhum PDF protegido para testar)
+        # não passa destruir_anteriores=True: a versão antiga fica.
+        client = self._client([self._version(3), self._version(2)])
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client)
+        client.add_secret_version.assert_called_once()
+        client.list_secret_versions.assert_not_called()
+        client.destroy_secret_version.assert_not_called()
+
+    def test_nunca_destroi_versao_mais_nova_de_save_concorrente(self):
+        # Save concorrente gravou a versão 4 depois da nossa (3): ela fica.
+        client = self._client([self._version(4), self._version(3), self._version(2), self._version(10, "DISABLED")], new_num=3)
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
+        destruidas = [c.kwargs["request"]["name"] for c in client.destroy_secret_version.call_args_list]
+        self.assertEqual(destruidas, [f"{self.PARENT}/versions/2"])
+
+    def test_versao_nova_sem_numero_nao_destroi_nada(self):
+        client = self._client([self._version(2)])
+        client.add_secret_version.return_value = SimpleNamespace(name=f"{self.PARENT}/versions/latest")
+        save_password_secret("p", "bill-pdf-password-tim", "segredo", client=client, destruir_anteriores=True)
+        client.destroy_secret_version.assert_not_called()
+
+    def test_chamador_so_destroi_com_validacao_positiva(self):
+        # Checagem estrutural: saveBillPdfPassword (main.py) liga a destruição
+        # apenas quando a senha foi comprovada (validation is True).
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py"), encoding="utf-8") as fh:
+            fonte = fh.read()
+        self.assertIn("destruir_anteriores=validation is True", fonte)
 
     def test_senha_invalida_nao_toca_no_secret_manager(self):
         client = self._client([])

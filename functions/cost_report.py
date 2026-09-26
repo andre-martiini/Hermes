@@ -238,15 +238,15 @@ def format_gcp_block(summary: dict[str, Any], day: date, cpu_rows: list[dict[str
         f"Mês: {brl(summary['month_to_date'])} de {brl(summary['monthly_budget'])} | projeção: {brl(summary['projection'])}",
     ]
     if summary["top_services"]:
-        lines.append("Serviços: " + " · ".join(f"{_service_label(s)} {brl(v)}" for s, v in summary["top_services"]))
+        lines.append("Serviços: " + " · ".join(f"{html.escape(_service_label(s))} {brl(v)}" for s, v in summary["top_services"]))
     if summary["top_skus"]:
         lines.append("Top SKUs:")
         for _svc, sku, v in summary["top_skus"]:
-            lines.append(f"  • {_short(sku)}: {brl(v)}")
+            lines.append(f"  • {html.escape(_short(sku))}: {brl(v)}")
     if cpu_rows:
         lines.append("Functions (Cloud Run) por serviço:")
         for r in cpu_rows[:6]:
-            lines.append(f"  • {r['function_name']}: {brl(float(r['custo'] or 0.0))}")
+            lines.append(f"  • {html.escape(str(r['function_name'] or '?'))}: {brl(float(r['custo'] or 0.0))}")
     return lines
 
 

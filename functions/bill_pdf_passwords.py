@@ -72,7 +72,13 @@ def password_secret_exists(project_id: str, secret_id: str, client: Any = None) 
         return False
 
 
-def save_password_secret(project_id: str, secret_id: str, password: str, client: Any = None) -> None:
+def save_password_secret(
+    project_id: str,
+    secret_id: str,
+    password: str,
+    client: Any = None,
+    destruir_anteriores: bool = False,
+) -> None:
     from google.cloud import secretmanager
 
     if not isinstance(password, str) or not password or len(password) > 128:
@@ -86,7 +92,16 @@ def save_password_secret(project_id: str, secret_id: str, password: str, client:
         parent=parent,
         payload={"data": password.encode("utf-8")},
     )
-    destroy_previous_secret_versions(secret_client, parent, getattr(new_version, "name", None))
+    if destruir_anteriores:
+        destroy_previous_secret_versions(secret_client, parent, getattr(new_version, "name", None))
+
+
+def _version_number(name: str | None) -> int | None:
+    """``projects/p/secrets/s/versions/7`` → 7; None se não terminar em número."""
+    tail = str(name or "").rsplit("/versions/", 1)
+    if len(tail) != 2 or not tail[1].isdigit():
+        return None
+    return int(tail[1])
 
 
 def _version_state_name(version: Any) -> str:
@@ -101,13 +116,17 @@ def destroy_previous_secret_versions(secret_client: Any, parent: str, keep_versi
     save acrescentava uma versão nova sem apagar as anteriores. A leitura usa
     sempre `versions/latest`, então as antigas não servem para nada.
 
+    Só destrói versões de número MENOR que a nova: se outro save concorrente
+    gravou uma versão mais nova nesse meio-tempo, ela é preservada.
+
     Melhor esforço: a senha nova já foi gravada, então qualquer falha aqui só é
-    registrada no log e nunca derruba o save. Sem o nome da versão nova não
+    registrada no log e nunca derruba o save. Sem o número da versão nova não
     destruímos nada — não dá para garantir que ela ficaria de fora.
     Devolve quantas versões foram destruídas.
     """
-    if not keep_version_name:
-        print(f"[BillPdfPasswords] Versão nova sem nome em {parent}; versões antigas mantidas.")
+    keep_number = _version_number(keep_version_name)
+    if keep_number is None:
+        print(f"[BillPdfPasswords] Versão nova sem número em {parent}; versões antigas mantidas.")
         return 0
     try:
         versions = list(secret_client.list_secret_versions(request={"parent": parent}))
@@ -118,7 +137,8 @@ def destroy_previous_secret_versions(secret_client: Any, parent: str, keep_versi
     destroyed = 0
     for version in versions:
         name = getattr(version, "name", None)
-        if not name or name == keep_version_name:
+        number = _version_number(name)
+        if number is None or number >= keep_number:
             continue
         if _version_state_name(version) == "DESTROYED":
             continue
