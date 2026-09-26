@@ -135,14 +135,16 @@ class PedidoDuravel:
     usado nos módulos irmãos).
 
     `tentativas` e `proximo_tentativa_em` (sub-entrega 6/N, `autonomy.sweep`,
-    passo 7 do pacote) contam quantas vezes uma lease venceu com efeito
-    parcial em curso (`EM_ANDAMENTO`) e, quando aplicável, quando a próxima
-    tentativa automática pode ser reivindicada. Nenhuma função DESTE módulo
-    incrementa `tentativas` -- só `autonomy.sweep.varrer_lease_vencida` o
-    faz; `assumir_pedido`/`registrar_progresso`/`registrar_resultado_observado`
-    só o preservam via `dataclasses.replace`, exceto `assumir_pedido`, que
-    limpa `proximo_tentativa_em` ao reassumir (deixou de ser relevante fora
-    de `RETENTATIVA_AGENDADA`)."""
+    passo 7 do pacote) contam quantas vezes uma lease venceu e, quando
+    aplicável, quando a próxima tentativa automática pode ser reivindicada.
+    Nenhuma função DESTE módulo incrementa `tentativas` -- só
+    `autonomy.sweep.varrer_lease_vencida` o faz;
+    `registrar_progresso`/`registrar_resultado_observado` só o preservam
+    via `dataclasses.replace`. `assumir_pedido` faz duas coisas com
+    `proximo_tentativa_em`: RECUSA reassumir enquanto ele ainda não chegou
+    (achado de revisão do Codex, PR #344 -- ver sua docstring) e, ao
+    reassumir com sucesso, limpa o campo (deixou de ser relevante fora de
+    `RETENTATIVA_AGENDADA`)."""
 
     request_id: str
     status: RequestStatus
@@ -268,15 +270,35 @@ def assumir_pedido(
     isso, cada função resolveria seu próprio "agora" independentemente,
     deixando `lease.expires_at` e `run.iniciado_em` calculados a partir de
     dois instantes reais ligeiramente diferentes (só relevante quando
-    `agora` não é informado; produção sempre informa)."""
+    `agora` não é informado; produção sempre informa).
+
+    Também recusa reassumir um pedido `RETENTATIVA_AGENDADA` (sub-entrega
+    6/N, `autonomy.sweep`) antes de `pedido.proximo_tentativa_em` chegar --
+    achado de revisão do Codex (PR #344): a transição `RETENTATIVA_AGENDADA
+    -> RESERVADO` já é válida no grafo, e a lease antiga já está expirada
+    por construção (é assim que o pedido chegou a `RETENTATIVA_AGENDADA`),
+    então SEM esta checagem qualquer caminho que chame `assumir_pedido`
+    direto por `request_id` (sem passar primeiro por
+    `autonomy.sweep.promover_retentativa_pronta`) ignorava o backoff
+    inteiro e esgotava `tentativas` imediatamente. `pedido.proximo_tentativa_em
+    is None` é tolerado sem erro (pedido legado, ou construído sem passar
+    pelo sweep -- mesmo espírito de tolerância a dados legados do resto do
+    módulo)."""
     _transicionar(pedido, RequestStatus.RESERVADO)
-    if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora):
+    agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
+    if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora_resolvida):
         raise LeaseInvalida(
             f"lease anterior de '{pedido.lease.executor_id}' ainda válida "
             f"(expira em {pedido.lease.expires_at.isoformat()}) -- não é possível "
             "reassumir antes de expirar."
         )
-    agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
+    if pedido.proximo_tentativa_em is not None and agora_resolvida < pedido.proximo_tentativa_em:
+        raise LeaseInvalida(
+            f"pedido '{pedido.request_id}' agendado para nova tentativa em "
+            f"{pedido.proximo_tentativa_em.isoformat()} -- ainda não chegou a hora "
+            "(autonomy.sweep.promover_retentativa_pronta decide isso; assumir_pedido "
+            "não reassume um retentativa_agendada antes do prazo, mesmo chamado direto)."
+        )
     generation_anterior = pedido.lease.generation if pedido.lease is not None else 0
     lease_nova = nova_lease(
         executor_id, generation_anterior, agora=agora_resolvida, duracao_segundos=duracao_segundos

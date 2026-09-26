@@ -137,7 +137,7 @@ def varrer_lease_vencida(
     sem nunca alcançar um estado terminal nem a fila de diagnóstico -- o
     critério de aceite do pacote, "nenhum pedido fica indefinidamente ...
     sem próxima ação", não se sustentaria para este caso). Se
-    `tentativas+1 < max_tentativas`, volta para `PENDENTE` SEM backoff
+    `tentativas+1 <= max_tentativas`, volta para `PENDENTE` SEM backoff
     (`proximo_tentativa_em` não é usado aqui -- nenhum efeito ocorreu, não
     há motivo para esperar antes de reivindicar de novo). Caso contrário,
     desiste -- mas `RESERVADO` não tem aresta direta para `FALHA_FINAL` no
@@ -147,12 +147,23 @@ def varrer_lease_vencida(
     mesma `DiagnosticoPedido` de qualquer desistência.
 
     `EM_ANDAMENTO`: efeito parcial pode já ter ocorrido -- conta como uma
-    tentativa. Se `tentativas+1 < max_tentativas`, agenda nova tentativa
+    tentativa. Se `tentativas+1 <= max_tentativas`, agenda nova tentativa
     (`RETENTATIVA_AGENDADA`, `proximo_tentativa_em` calculado por
     `autonomy.requests.calcular_backoff_segundos`, mesmo backoff com jitter
     de 1/5/20 minutos já usado no resto do pacote). Caso contrário, desiste
     (`FALHA_FINAL`) e devolve uma `DiagnosticoPedido` -- a "fila de
     diagnóstico" do passo 7.
+
+    O corte é `tentativas_novas > max_tentativas` (estritamente maior),
+    NÃO `>=` -- achado de revisão do Codex (PR #344): com `max_tentativas`
+    padrão de 3 (seção 4.5: "máximo de 3 tentativas automáticas ... backoff
+    ... em torno de 1, 5 e 20 minutos"), as 3 tentativas automáticas
+    correspondem exatamente aos 3 patamares de
+    `autonomy.requests.calcular_backoff_segundos` -- `>=` desistia na 3a
+    morte sem nunca conceder o patamar de 20 minutos, usando só 2 dos 3
+    patamares documentados. Com `>`, as `max_tentativas` retentativas são
+    todas concedidas antes de desistir na morte seguinte (a
+    `max_tentativas+1`-ésima).
 
     `tentativas` é um contador ÚNICO por pedido, compartilhado entre os dois
     ramos -- representa "quantas vezes a lease deste pedido morreu", não
@@ -209,7 +220,17 @@ def varrer_lease_vencida(
         # executor", e `autonomy.execution._REQUEST_STATUS_PARA_AGENT_RUN_STATUS`
         # já mapeia `CANCELADO` para `AgentRunStatus.FALHA` por esse mesmo
         # motivo.
-        if tentativas_novas >= max_tentativas:
+        #
+        # `tentativas_novas > max_tentativas` (estritamente maior), NÃO
+        # `>=` -- achado de revisão do Codex (PR #344): "máximo de 3
+        # tentativas automáticas" (seção 4.5 do plano) significa 3
+        # RETENTATIVAS concedidas, uma para cada patamar de
+        # `calcular_backoff_segundos` (1/5/20 min) -- com `>=`, a 3a morte
+        # já desistia sem nunca agendar o patamar de 20 minutos, usando só
+        # 2 dos 3 patamares documentados. Desiste só na (max_tentativas+1)-
+        # ésima morte, depois que as `max_tentativas` retentativas já
+        # foram concedidas.
+        if tentativas_novas > max_tentativas:
             ok, motivo = validar_transicao(pedido.status, RequestStatus.CANCELADO)
             if not ok:
                 raise ValueError(motivo)
@@ -237,8 +258,12 @@ def varrer_lease_vencida(
         )
         return ResultadoSweepLeaseVencida(pedido=pedido_novo, diagnostico=None)
 
-    # EM_ANDAMENTO daqui em diante.
-    if tentativas_novas >= max_tentativas:
+    # EM_ANDAMENTO daqui em diante. Mesma correção de off-by-one do ramo
+    # RESERVADO acima (achado de revisão do Codex, PR #344): `>`, não
+    # `>=` -- desiste só depois que as `max_tentativas` retentativas
+    # (todos os patamares de backoff, incluindo o de 20 minutos) já
+    # foram concedidas.
+    if tentativas_novas > max_tentativas:
         ok, motivo = validar_transicao(pedido.status, RequestStatus.FALHA_FINAL)
         if not ok:
             raise ValueError(motivo)

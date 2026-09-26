@@ -10,7 +10,7 @@ import random
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from autonomy.execution import PedidoDuravel, assumir_pedido, registrar_progresso
+from autonomy.execution import LeaseInvalida, PedidoDuravel, assumir_pedido, registrar_progresso
 from autonomy.requests import BACKOFF_BASE_SEGUNDOS, RequestStatus
 from autonomy.runs import AgentRunStatus
 from autonomy.sweep import (
@@ -110,14 +110,17 @@ class TestVarrerLeaseVencidaReservado(unittest.TestCase):
         # Executor que trava/cai IMEDIATAMENTE após cada reserva, sem nunca
         # progredir -- o ciclo PENDENTE -> RESERVADO -> (lease morre) -> ...
         # precisa de um teto, mesmo sem nenhum efeito parcial nunca ter
-        # ocorrido (achado de revisão adversarial, 1a rodada).
-        pedido = _pedido_reservado(tentativas=2)  # próxima seria a 3a (== max default)
+        # ocorrido (achado de revisão adversarial, 1a rodada). Com
+        # max_tentativas=3, as 3 tentativas automáticas já foram concedidas
+        # (tentativas=3 de entrada) -- esta é a 4a morte, que desiste
+        # (achado do Codex, PR #344: o corte é `>`, não `>=`).
+        pedido = _pedido_reservado(tentativas=3)
         agora = T0 + timedelta(minutes=10)
         resultado = varrer_lease_vencida(pedido, agora=agora, max_tentativas=3)
         self.assertEqual(resultado.pedido.status, RequestStatus.CANCELADO)
         self.assertIsNone(resultado.pedido.proximo_tentativa_em)
         self.assertIsInstance(resultado.diagnostico, DiagnosticoPedido)
-        self.assertEqual(resultado.diagnostico.tentativas, 3)
+        self.assertEqual(resultado.diagnostico.tentativas, 4)
         self.assertEqual(resultado.diagnostico.status_anterior, RequestStatus.RESERVADO)
 
 
@@ -139,16 +142,43 @@ class TestVarrerLeaseVencidaEmAndamento(unittest.TestCase):
         self.assertEqual(resultado.pedido.run.status, AgentRunStatus.TIMEOUT)
 
     def test_esgota_tentativas_vai_para_falha_final_com_diagnostico(self):
-        pedido = _pedido_em_andamento(tentativas=2)  # próxima seria a 3a (== max default)
+        # Com max_tentativas=3, as 3 tentativas automáticas (e seus 3
+        # patamares de backoff) já foram concedidas (tentativas=3 de
+        # entrada) -- esta é a 4a morte, que desiste (achado do Codex, PR
+        # #344: o corte é `>`, não `>=` -- ver
+        # test_terceira_tentativa_ainda_agenda_retentativa_com_patamar_de_20min
+        # para a cobertura direta do caso que a versão anterior deste
+        # teste, com tentativas=2, teria deixado passar sem detectar).
+        pedido = _pedido_em_andamento(tentativas=3)
         agora = T0 + timedelta(minutes=10)
         resultado = varrer_lease_vencida(pedido, agora=agora, max_tentativas=3)
         self.assertEqual(resultado.pedido.status, RequestStatus.FALHA_FINAL)
         self.assertIsNone(resultado.pedido.proximo_tentativa_em)
         self.assertIsInstance(resultado.diagnostico, DiagnosticoPedido)
         self.assertEqual(resultado.diagnostico.request_id, pedido.request_id)
-        self.assertEqual(resultado.diagnostico.tentativas, 3)
+        self.assertEqual(resultado.diagnostico.tentativas, 4)
         self.assertEqual(resultado.diagnostico.status_anterior, RequestStatus.EM_ANDAMENTO)
         self.assertEqual(resultado.diagnostico.registrado_em, agora)
+
+    def test_terceira_tentativa_ainda_agenda_retentativa_com_patamar_de_20min(self):
+        # Achado de revisão do Codex (PR #344): com o corte antigo (`>=`),
+        # a 3a morte (tentativas_novas == max_tentativas == 3) já desistia
+        # sem nunca conceder o patamar de 20 minutos de
+        # calcular_backoff_segundos -- usando só 2 dos 3 patamares
+        # documentados na seção 4.5 do plano. Este teste fixa exatamente
+        # esse caso-limite: tentativas=2 de entrada -> tentativas_novas=3
+        # == max_tentativas=3 -> deve AINDA agendar retentativa (não
+        # desistir), usando o patamar de 1200s (20 min).
+        pedido = _pedido_em_andamento(tentativas=2)
+        agora = T0 + timedelta(minutes=10)
+        resultado = varrer_lease_vencida(
+            pedido, agora=agora, max_tentativas=3, rng=_SemJitter()
+        )
+        self.assertEqual(resultado.pedido.status, RequestStatus.RETENTATIVA_AGENDADA)
+        self.assertIsNone(resultado.diagnostico)
+        self.assertEqual(resultado.pedido.tentativas, 3)
+        delta_segundos = (resultado.pedido.proximo_tentativa_em - agora).total_seconds()
+        self.assertAlmostEqual(delta_segundos, BACKOFF_BASE_SEGUNDOS[2], places=6)
 
     def test_usa_o_patamar_de_backoff_da_tentativa_pos_incremento(self):
         # Achado de revisão adversarial (1a rodada): um teste anterior aqui
@@ -227,6 +257,39 @@ class TestReassumirAposSweepLimpaProximaTentativa(unittest.TestCase):
         reassumido = assumir_pedido(
             pronto, "executor-b", "run-2", agora=resultado.pedido.proximo_tentativa_em
         )
+        self.assertIsNone(reassumido.proximo_tentativa_em)
+        self.assertEqual(reassumido.tentativas, 1)
+
+    def test_assumir_pedido_recusa_retentativa_agendada_antes_do_prazo(self):
+        # Achado de revisão do Codex (PR #344): RETENTATIVA_AGENDADA ->
+        # RESERVADO já é uma aresta válida no grafo de autonomy.requests, e
+        # a lease antiga já está expirada por construção -- sem esta
+        # checagem em assumir_pedido, chamar assumir_pedido DIRETO (sem
+        # passar por promover_retentativa_pronta primeiro) ignorava o
+        # backoff inteiro.
+        pedido = _pedido_em_andamento()
+        resultado = varrer_lease_vencida(
+            pedido, agora=T0 + timedelta(minutes=10), rng=random.Random(1)
+        )
+        retentativa_agendada = resultado.pedido
+        self.assertEqual(retentativa_agendada.status, RequestStatus.RETENTATIVA_AGENDADA)
+        antes_do_prazo = retentativa_agendada.proximo_tentativa_em - timedelta(seconds=1)
+        with self.assertRaises(LeaseInvalida):
+            assumir_pedido(retentativa_agendada, "executor-b", "run-2", agora=antes_do_prazo)
+
+    def test_assumir_pedido_aceita_retentativa_agendada_direto_na_hora_certa(self):
+        # Mesmo cenário acima, mas SEM passar por promover_retentativa_pronta
+        # -- assumir_pedido deve aceitar sozinho assim que a hora chega,
+        # já que a promoção para PENDENTE é uma conveniência de fila, não
+        # um pré-requisito de correção (a checagem real mora aqui).
+        pedido = _pedido_em_andamento()
+        resultado = varrer_lease_vencida(
+            pedido, agora=T0 + timedelta(minutes=10), rng=random.Random(1)
+        )
+        retentativa_agendada = resultado.pedido
+        na_hora = retentativa_agendada.proximo_tentativa_em
+        reassumido = assumir_pedido(retentativa_agendada, "executor-b", "run-2", agora=na_hora)
+        self.assertEqual(reassumido.status, RequestStatus.RESERVADO)
         self.assertIsNone(reassumido.proximo_tentativa_em)
         self.assertEqual(reassumido.tentativas, 1)
 
