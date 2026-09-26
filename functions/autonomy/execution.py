@@ -48,6 +48,7 @@ from autonomy.requests import (
     ESTADOS_TERMINAIS,
     Lease,
     RequestStatus,
+    _exigir_tz_aware,
     lease_expirada,
     lease_pertence_ao_apresentante,
     lease_valida_para_acao,
@@ -131,19 +132,35 @@ class PedidoDuravel:
     `registrar_resultado_observado` toleram isso e simplesmente não tocam o
     ciclo do run nesse caso, sem erro -- só a peça de ledger/status do pedido
     continua funcionando (mesmo espírito de tolerância a dados legados já
-    usado nos módulos irmãos)."""
+    usado nos módulos irmãos).
+
+    `tentativas` e `proximo_tentativa_em` (sub-entrega 6/N, `autonomy.sweep`,
+    passo 7 do pacote) contam quantas vezes uma lease venceu com efeito
+    parcial em curso (`EM_ANDAMENTO`) e, quando aplicável, quando a próxima
+    tentativa automática pode ser reivindicada. Nenhuma função DESTE módulo
+    incrementa `tentativas` -- só `autonomy.sweep.varrer_lease_vencida` o
+    faz; `assumir_pedido`/`registrar_progresso`/`registrar_resultado_observado`
+    só o preservam via `dataclasses.replace`, exceto `assumir_pedido`, que
+    limpa `proximo_tentativa_em` ao reassumir (deixou de ser relevante fora
+    de `RETENTATIVA_AGENDADA`)."""
 
     request_id: str
     status: RequestStatus
     lease: Lease | None = None
     ledger_entry: LedgerEntry | None = None
     run: AgentRun | None = None
+    tentativas: int = 0
+    proximo_tentativa_em: datetime | None = None
 
     def __post_init__(self) -> None:
         request_id_limpo = str(self.request_id or "").strip()
         if not request_id_limpo:
             raise ValueError("request_id é obrigatório.")
         object.__setattr__(self, "request_id", request_id_limpo)
+        if self.tentativas < 0:
+            raise ValueError("tentativas não pode ser negativa.")
+        if self.proximo_tentativa_em is not None:
+            _exigir_tz_aware(self.proximo_tentativa_em, "proximo_tentativa_em")
 
 
 def _validar_fencing(pedido: PedidoDuravel, lease_token: str, generation: int, agora: datetime | None) -> None:
@@ -272,7 +289,13 @@ def assumir_pedido(
         generation=lease_nova.generation,
         agora=agora_resolvida,
     )
-    return dataclasses.replace(pedido, status=RequestStatus.RESERVADO, lease=lease_nova, run=run_novo)
+    return dataclasses.replace(
+        pedido,
+        status=RequestStatus.RESERVADO,
+        lease=lease_nova,
+        run=run_novo,
+        proximo_tentativa_em=None,
+    )
 
 
 def renovar_pedido(
