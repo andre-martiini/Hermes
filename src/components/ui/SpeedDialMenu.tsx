@@ -171,7 +171,7 @@ export const SpeedDialMenu = ({
       code: 'ID-007',
       label: 'Gestor de POPs',
       title: 'Gestor de POPs',
-      desc: 'Procedimentos Operacionais Padrão do Hermes.',
+      desc: 'Procedimentos Operacionais Padrão do Gaspar.',
       color: 'text-blue-600',
       bgColor: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
       badge: null as React.ReactNode,
@@ -246,8 +246,8 @@ export const SpeedDialMenu = ({
     {
       code: 'SYS-002',
       label: isSyncing ? 'Sincronizando…' : 'Sincronizar',
-      title: 'Sincronização Hermes',
-      desc: 'Sincronize dados locais e nuvem do Hermes.',
+      title: 'Sincronização Gaspar',
+      desc: 'Sincronize dados locais e nuvem do Gaspar.',
       color: 'text-sky-600',
       bgColor: 'bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400',
       badge: isSyncing

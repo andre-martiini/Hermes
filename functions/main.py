@@ -2878,7 +2878,7 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message=(
                 (
-                    "O Portal Allcare bloqueou a conexão do servidor Hermes antes "
+                    "O Portal Allcare bloqueou a conexão do servidor Gaspar antes "
                     "de avaliar a senha. A credencial não foi rejeitada."
                     if str(portal_validation_error or "").startswith("portal_http_400_")
                     else (
@@ -3586,7 +3586,7 @@ def _should_mirror_notification_to_telegram(notif: dict) -> bool:
 
 
 def _build_telegram_notification_message(notif: dict) -> str:
-    title = str(notif.get('title') or 'Hermes').strip()
+    title = str(notif.get('title') or 'Gaspar').strip()
     message = str(notif.get('message') or '').strip()
     n_type = str(notif.get('type') or 'info').strip()
     link = str(notif.get('link') or '').strip()
@@ -3598,7 +3598,7 @@ def _build_telegram_notification_message(notif: dict) -> str:
         'info': '🔔',
         'expense': '💸',
     }
-    lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
+    lines = [f"{icons.get(n_type, '🔔')} Gaspar - {title}"]
     assunto = str(notif.get('assunto') or '').strip()
     if assunto:
         lines.extend(["", f"📝 <b>Assunto Detalhado:</b> {assunto}"])
@@ -3622,7 +3622,7 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
     if not notif: return
 
-    title = notif.get('title', 'Hermes')
+    title = notif.get('title', 'Gaspar')
 
     message = notif.get('message', '')
 
@@ -3816,7 +3816,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
                             "Lembrete Personalizado",
 
-                            cn.get('message', 'Notificação Hermes'),
+                            cn.get('message', 'Notificação Gaspar'),
 
                             'info'
 
@@ -3858,7 +3858,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
         if telegram_chat_id:
             title = (reminder.get("title") or "Lembrete de saúde").strip()
-            message = (reminder.get("message") or "André, lembrete de saúde configurado no Hermes.").strip()
+            message = (reminder.get("message") or "André, lembrete de saúde configurado no Gaspar.").strip()
             keyboard = None
             if reminder.get("category") == "checkin_morning":
                 keyboard = [[{"text": "▶️ Iniciar check-in", "callback_data": f"health_checkin:{today_str}:morning"}]]
@@ -4513,7 +4513,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
 
     # Prompt enriquecido com todos os contextos disponíveis
     prompt = f"""
-    Você é o HERMES IA, consultor de produtividade avançada do André.
+    Você é o GASPAR IA, consultor de produtividade avançada do André.
     Seu objetivo é transformar um fragmento de informação (WhatsApp, Áudio ou Texto) em uma estrutura de Deep Work (Tarefa Planejada) de altíssima qualidade.
 
     --- BASE DE CONHECIMENTO PRINCIPAL (RAG) ---
@@ -6756,7 +6756,7 @@ def _classify_memory_candidate(api_key: str, fato: str, categoria: str) -> dict:
     try:
         client = get_genai_module().Client(api_key=api_key)
         prompt = (
-            "Você é um filtro de retenção cognitiva do Hermes.\n"
+            "Você é um filtro de retenção cognitiva do Gaspar.\n"
             "Decida se um fato deve ser salvo como memória global de longo prazo.\n"
             "Salve APENAS itens duráveis: regras de negócio, preferências operacionais estáveis, convenções permanentes ou fatos reutilizáveis.\n"
             "NÃO salve: small talk, confirmações momentâneas, contexto transitório, conteúdo efêmero de uma conversa, mensagens vagas ou ruído.\n"
@@ -7010,7 +7010,7 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
             }] + merge_candidates[:2]
 
             prompt = (
-                "Você é um curador cognitivo do Hermes. Receberá memórias quase duplicadas.\n"
+                "Você é um curador cognitivo do Gaspar. Receberá memórias quase duplicadas.\n"
                 "Una as memórias em UMA versão consolidada, removendo redundância e preservando a regra/fato mais útil.\n"
                 "Retorne APENAS JSON válido no formato:\n"
                 "{\"titulo\":\"...\",\"texto_memoria\":\"...\",\"tipo\":\"regra_global|fato_isolado\",\"ids_fundidos\":[\"id1\",\"id2\"]}\n\n"
@@ -7195,7 +7195,7 @@ def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None, 
         except Exception:
             reminder_label = str(reminder_iso)
 
-    lines = [f"⚠️ Hermes - Lembrete: {title}"]
+    lines = [f"⚠️ Gaspar - Lembrete: {title}"]
 
     note = (note or '').strip()
     if note:
@@ -8014,7 +8014,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 print(f"Erro ao extrair contexto do grafo de conhecimento: {e}")
 
         system_instruction = (
-            "Você é o HERMES, copiloto de execução de tarefas do André. "
+            "Você é o GASPAR, copiloto de execução de tarefas do André. "
             "Você tem acesso a: (1) o contexto completo da ação (título, descrição, plano e diário), "
             "(2) bases de conhecimento RAG personalizadas, "
             "(3) documentos extras carregados para esta ação, "
@@ -8629,7 +8629,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20, status: str = None):
             """
-            Busca tarefas reais no banco de dados do Hermes por texto, area, prazo e/ou status.
+            Busca tarefas reais no banco de dados do Gaspar por texto, area, prazo e/ou status.
             Retorna somente dados oficiais — nao mistura com RAG ou procedimentos.
             Use status para filtrar (ex: 'em andamento', 'concluido', 'cancelado').
             Use data_limite_inicio e data_limite_fim (YYYY-MM-DD) para filtrar por prazo.
@@ -8878,7 +8878,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "consultar_processo_sipac", {"numero_processo": numero_processo}, _ctx())
         def acompanhar_processo_sipac_copiloto(numero_processo: str, acompanhar: bool = True):
             """
-            Ativa ou desativa o monitoramento/acompanhamento automático de um processo SIPAC no Hermes.
+            Ativa ou desativa o monitoramento/acompanhamento automático de um processo SIPAC no Gaspar.
             Ao ativar, o sistema fará verificações periódicas em background e notificará
             o usuário no Telegram sempre que houver alguma alteração ou novos documentos.
             Parâmetros:
@@ -9417,7 +9417,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def salvar_memoria_global(fato: str, categoria: str):
             """
-            Ferramenta de retenção de memória global do Copiloto Hermes.
+            Ferramenta de retenção de memória global do Copiloto Gaspar.
             Use apenas para fatos duráveis, preferências estáveis do ambiente ou regras de negócio
             que possam ser úteis em conversas futuras. Nunca use para ruído transitório.
             """
@@ -9680,7 +9680,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def agendar_lembrete_acao(data: str, horario: str, task_id: str = None, texto: str = ""):
             """
-            Agenda um lembrete para uma acao do Hermes.
+            Agenda um lembrete para uma acao do Gaspar.
             data: Data do lembrete no formato YYYY-MM-DD.
             horario: Horario do lembrete no formato HH:MM.
             task_id: ID da acao. Opcional quando ja existe uma acao em contexto.
@@ -9753,7 +9753,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             intervalo_semanas_recorrencia: int = None,
         ):
             """
-            Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
+            Cria uma nova ação/tarefa no sistema Gaspar após confirmação explícita do usuário.
             Use APENAS depois que o usuário confirmar o draft apresentado.
             Parâmetros:
             - titulo: título obrigatório da ação
@@ -9856,7 +9856,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     return (f"ERRO|A alteração apagaria as {len(plano_atual)} etapa(s) do "
                             "plano e nada foi gravado. Envie as etapas em `novo_plano`.")
 
-                nota = f"[Copiloto Hermes] Plano de ação atualizado: {justificativa_diario}"
+                nota = f"[Copiloto Gaspar] Plano de ação atualizado: {justificativa_diario}"
                 avisos = subtarefas.inconsistencias(plano_final, task_data.get('prazo_final'))
                 if avisos:
                     nota += "\n⚠️ " + "; ".join(avisos)
@@ -10005,7 +10005,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "",
                     f"**Tipo:** Relatório {tipo_label}  ",
                     f"**Data:** {data_hoje}  ",
-                    f"**Gerado por:** Hermes Copiloto  ",
+                    f"**Gerado por:** Gaspar Copiloto  ",
                     "",
                     "---",
                     "",
@@ -10390,7 +10390,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if copilot_mode == "finance":
             mode_context = (
                 "## MODO FINANCEIRO ATIVO\n"
-                "Você está atuando como Copiloto Financeiro do Hermes. Priorize fluxo de caixa, gastos, reserva de emergência, metas, obrigações, orçamento mensal e dúvidas educacionais sobre investimentos.\n"
+                "Você está atuando como Copiloto Financeiro do Gaspar. Priorize fluxo de caixa, gastos, reserva de emergência, metas, obrigações, orçamento mensal e dúvidas educacionais sobre investimentos.\n"
                 "Para qualquer número financeiro interno, use consultar_financas_v2 antes de concluir. Não use categorias de lançamentos como base analítica enquanto a classificação estiver em revisão.\n"
                 "Você pode explicar tipos de investimento em caráter educativo, mas não deve prometer rentabilidade, recomendar compra/venda específica ou tratar isso como consultoria financeira regulada.\n"
                 "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie ações, metas ou lançamentos sem confirmação explícita.\n\n"
@@ -10399,7 +10399,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         elif copilot_mode == "saude":
             mode_context = (
                 "## MODO COPILOTO DE SAUDE ATIVO\n"
-                "Voce esta atuando como Copiloto de Saude do Hermes. Priorize leitura e interpretacao operacional de peso, caminhada/passos, calorias, sono e sinais de dor.\n"
+                "Voce esta atuando como Copiloto de Saude do Gaspar. Priorize leitura e interpretacao operacional de peso, caminhada/passos, calorias, sono e sinais de dor.\n"
                 "Para qualquer metrica de saude atual, use consultar_saude antes de concluir. Nao trate habitos diarios, treino de forca, rotina lombar, flexoes, barras, prancha, ponte, bird-dog ou agachamentos como parte ativa do sistema.\n"
                 "Quando sugerir proximos passos, escreva como proposta para o usuario avaliar; nao crie registros, metas ou logs sem confirmacao explicita.\n\n"
                 "## CONTEXTO CLINICO PESSOAL DO USUARIO\n"
@@ -10460,7 +10460,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             mode_context = (
                 "## MODO ESTRATÉGIA ATIVO\n"
-                "Você foi aberto a partir do módulo de Estratégia do Hermes. Seu foco EXCLUSIVO nesta conversa é a estratégia pessoal do usuário: "
+                "Você foi aberto a partir do módulo de Estratégia do Gaspar. Seu foco EXCLUSIVO nesta conversa é a estratégia pessoal do usuário: "
                 "objetivos macro, pilares, diretrizes, indicadores de sucesso e marcos. Converse sobre coerência de longo prazo, prioridades, trade-offs e progresso.\n"
                 "Você tem ferramentas de escrita disponíveis SOMENTE neste modo: criar_objetivo_estrategico, editar_objetivo_estrategico, gerenciar_item_estrategico e excluir_objetivo_estrategico.\n"
                 "REGRAS DE OPERAÇÃO:\n"
@@ -10475,7 +10475,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             )
 
         system_instruction_nucleo = (
-            "Você é o Copiloto Hermes, estrategista sênior de processos."
+            "Você é o Copiloto Gaspar, estrategista sênior de processos."
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
             "## PERSONALIDADE DINÂMICA ATUAL\n"
@@ -11372,7 +11372,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                 "- elementos_chave: liste de 3 a 8 elementos centrais percebidos.\n"
                                 "- evidencias: liste fatos observáveis que sustentam sua leitura.\n"
                                 "- relacao_com_acao: explique como a imagem se conecta com a tarefa em foco. Se não houver contexto suficiente, diga isso explicitamente.\n"
-                                "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
+                                "- utilidade_pratica: diga como o Gaspar deve usar esta imagem para apoiar a ação.\n"
                                 f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                             )
                         elif local_extracted_text:
@@ -11386,7 +11386,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                 "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
                                 "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
                                 "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
-                                "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                                "- utilidade_pratica: diga como o Gaspar deve usar este arquivo para apoiar a ação\n"
                                 f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}\n\n"
                                 f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_extraction_metadata or {}, ensure_ascii=False)}\n\n"
                                 f"TEXTO EXTRAÍDO:\n{local_extracted_text[:120000]}"
@@ -11407,7 +11407,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                 "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
                                 "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
                                 "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
-                                "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                                "- utilidade_pratica: diga como o Gaspar deve usar este arquivo para apoiar a ação\n"
                                 f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                             )
                         if is_image_file or not local_extracted_text:
@@ -11518,7 +11518,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             }
                             diary_entry = {
                                 'data': now_iso,
-                                'nota': f"📎 [Copiloto] Arquivo '{titulo_doc}' ({natureza_doc}) carregado via Copiloto Hermes e indexado no acervo global."
+                                'nota': f"📎 [Copiloto] Arquivo '{titulo_doc}' ({natureza_doc}) carregado via Copiloto Gaspar e indexado no acervo global."
                             }
                             db.collection('tarefas').document(task_id).update({
                                 'pool_dados': firestore.ArrayUnion([pool_item]),
@@ -12320,7 +12320,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
         campos_desc = ', '.join(k for k in updates if k not in ('data_atualizacao', 'data_conclusao'))
         diary_entry = {
             'data': now_iso,
-            'nota': f"[Copiloto Hermes] Ação editada via card de confirmação. Campos alterados: {campos_desc}."
+            'nota': f"[Copiloto Gaspar] Ação editada via card de confirmação. Campos alterados: {campos_desc}."
         }
 
         task_ref.update({
@@ -12367,7 +12367,7 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
     session_id = data.get('sessionId')
     message_id = data.get('messageId')
     items = data.get('items', [])
-    justificativa = data.get('justificativa', 'Reagendamento em lote via Copiloto Hermes.')
+    justificativa = data.get('justificativa', 'Reagendamento em lote via Copiloto Gaspar.')
 
     if not items:
         raise https_fn.HttpsError(
@@ -12396,7 +12396,7 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
         now_iso = _dt.now(_tz.utc).isoformat()
         diary_entry = {
             'data': now_iso,
-            'nota': f"[Copiloto Hermes] {justificativa}"
+            'nota': f"[Copiloto Gaspar] {justificativa}"
         }
 
         count = 0
@@ -12459,7 +12459,7 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
     session_id = data.get('sessionId')
     message_id = data.get('messageId')
     items = data.get('items', [])
-    justificativa = data.get('justificativa', 'Edição em lote via Copiloto Hermes.')
+    justificativa = data.get('justificativa', 'Edição em lote via Copiloto Gaspar.')
 
     if not items:
         raise https_fn.HttpsError(
@@ -12583,7 +12583,7 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
             campos_desc = ', '.join(k for k in updates if k not in ('data_atualizacao', 'data_conclusao'))
             diary_entry = {
                 'data': now_iso,
-                'nota': f"[Copiloto Hermes] Ação editada em lote ({justificativa}). Campos alterados: {campos_desc}."
+                'nota': f"[Copiloto Gaspar] Ação editada em lote ({justificativa}). Campos alterados: {campos_desc}."
             }
 
             batch.update(task_ref, {
@@ -12960,7 +12960,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         client = genai.Client(api_key=gemini_key)
 
         prompt = f"""
-        Você é o HERMES Master IA. Analise a sequência de tarefas abaixo da area_tematica '{area_tematica}'.
+        Você é o GASPAR Master IA. Analise a sequência de tarefas abaixo da area_tematica '{area_tematica}'.
         Sua missão é identificar um PADRÃO de trabalho ou um PROCEDIMENTO que o André segue.
         
         Com base nessas tarefas, crie um "Guia de Procedimento Operacional Padrão" para esta area_tematica.
@@ -13263,7 +13263,7 @@ def salvarRelatorioNoDrive(req: https_fn.CallableRequest):
             )
 
         rel = rel_doc.to_dict()
-        titulo = rel.get('titulo', 'Relatório Hermes')
+        titulo = rel.get('titulo', 'Relatório Gaspar')
         markdown_text = rel.get('markdown', '')
 
         # 2. Converte Markdown → HTML (conversor inline sem dependências externas)
@@ -13626,7 +13626,7 @@ Título: {titulo}
 Status: {status}
 Prazo Final: {prazo_final or 'Não definido'}
 Data de Execução: {data_limite or 'Não definida'}
-REVISÃO DE DATAS: O Hermes entende que 'Data de Execução' é apenas planejamento, não o prazo final. Ignore contradições de datas entre execução e diário.
+REVISÃO DE DATAS: O Gaspar entende que 'Data de Execução' é apenas planejamento, não o prazo final. Ignore contradições de datas entre execução e diário.
 
 PLANO DE AÇÃO:
 {plano_txt}
@@ -14956,7 +14956,7 @@ def generate_contact_summary(req: https_fn.CallableRequest):
         client = genai.Client(api_key=gemini_key)
         
         prompt = f"""
-        Você é o HERMES Master IA, assistente inteligente integrado ao sistema de produtividade pessoal do André.
+        Você é o GASPAR Master IA, assistente inteligente integrado ao sistema de produtividade pessoal do André.
         Abaixo estão os dados de um contato cadastrado e o histórico de suas interações registradas no sistema (mencionados em tarefas, diários de bordo ou reuniões).
         
         NOME DO CONTATO: {contact_data.get('nome')}

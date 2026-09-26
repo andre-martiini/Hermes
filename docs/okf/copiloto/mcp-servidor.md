@@ -1,15 +1,15 @@
 ---
 type: reference
-title: Servidor MCP do Hermes
-description: Como o catálogo de tools do Hermes é exposto por MCP, o que está disponível, o modelo de segurança e como conectar um cliente (Claude Code, cliente de voz).
+title: Servidor MCP do Gaspar
+description: Como o catálogo de tools do Gaspar é exposto por MCP, o que está disponível, o modelo de segurança e como conectar um cliente (Claude Code, cliente de voz).
 resource: functions/mcp_server.py
 tags: [hermes, okf, copiloto, mcp, tools, integracao]
 timestamp: 2026-08-25T00:00:00-03:00
 ---
 
-# Servidor MCP do Hermes
+# Servidor MCP do Gaspar
 
-O Hermes expõe seu catálogo de tools por [MCP](https://modelcontextprotocol.io),
+O Gaspar expõe seu catálogo de tools por [MCP](https://modelcontextprotocol.io),
 para que clientes externos — Claude Code, o cliente de voz local, futuras
 automações — operem o sistema com as **mesmas** ferramentas do copiloto web, em
 vez de cada canal reimplementar as suas.
@@ -146,7 +146,7 @@ a ser executável. Não há lógica nova, só exposição do que já existia.
 primeira mensagem. Cobre o que a lista de tools não diz — em especial **a captura
 de memória**: no copiloto web, salvar um fato durável era subproduto da conversa,
 porque o system prompt mandava. Num cliente MCP só acontece se algo disser para
-acontecer, e sem isso o Hermes para de aprender.
+acontecer, e sem isso o Gaspar para de aprender.
 
 Também carrega a regra contra **injeção de prompt**: tudo o que vem de terceiros
 (e-mail, WhatsApp — inclusive transcrição de áudio e descrição de imagem —, página
@@ -193,7 +193,7 @@ Decisão do dono do sistema em 2026-08-25: as demais tools que gravam rodam sem 
 dupla ida e volta, porque o cliente MCP já pede permissão por chamada — exigir
 `_confirmed` em tudo adicionaria atrito sem adicionar um humano ao circuito. O
 envio de WhatsApp ficou de fora por ser o único efeito que **manda mensagem em
-nome do usuário para terceiros** e não dá para desfazer de dentro do Hermes.
+nome do usuário para terceiros** e não dá para desfazer de dentro do Gaspar.
 
 O `_meta` de cada tool em `tools/list` distingue as duas coisas:
 
@@ -279,7 +279,7 @@ https://gestao-hermes.firebaseapp.com/mcp
 
 Não preencha Client ID nem Client Secret — o DCR registra o cliente sozinho. O
 Claude abre a página de consentimento, você entra com a mesma conta Google do
-Hermes, e pronto. Contas fora de `system/mcp_access.allowed_uids` são recusadas
+Gaspar, e pronto. Contas fora de `system/mcp_access.allowed_uids` são recusadas
 com `access_denied`.
 
 > A URL precisa bater **exatamente** com o campo `resource` do protected resource
@@ -295,7 +295,7 @@ O Claude Desktop **delega a autorização ao navegador padrão do sistema**. A j
 abre no Chrome, muitas vezes atrás do app ou numa janela já existente — o app
 continua mostrando o spinner e parece travado.
 
-Procure no navegador a aba **"Autorizar acesso ao Hermes"**. Use sempre a aba da
+Procure no navegador a aba **"Autorizar acesso ao Gaspar"**. Use sempre a aba da
 tentativa mais recente: abas antigas carregam `state` e `code_challenge` de
 autorizações já abandonadas, que o Claude não aceita mais.
 
@@ -303,7 +303,7 @@ autorizações já abandonadas, que o Claude não aceita mais.
 
 A causa que custou mais caro, e que não aparece em log nenhum.
 
-O PWA do Hermes registra um service worker em `gestao-hermes.web.app`, e o
+O PWA do Gaspar registra um service worker em `gestao-hermes.web.app`, e o
 `navigateFallbackDenylist` do `vite-plugin-pwa` só excluía `/^\/__/`. Toda
 navegação para qualquer outra rota da origem — `/mcp`, `/oauth/authorize`,
 `/.well-known/*` — recebia o `index.html` do app, **do cache, sem tocar na rede**.
@@ -314,7 +314,7 @@ no navegador do usuário. E o log do servidor ficava vazio justamente porque
 nenhuma requisição saía da máquina.
 
 O que separou o problema foi abrir a URL de autorização à mão: por `curl` vinha a
-página de consentimento, no navegador vinha a tela inicial do Hermes.
+página de consentimento, no navegador vinha a tela inicial do Gaspar.
 
 Duas barreiras, porque uma só não basta:
 

@@ -207,7 +207,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
             Gestor de POPs
           </h2>
         </div>
-        <p className={`mt-2 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Gerencie os Procedimentos Operacionais Padrão (POPs) que orientam o Hermes Copiloto.</p>
+        <p className={`mt-2 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Gerencie os Procedimentos Operacionais Padrão (POPs) que orientam o Gaspar Copiloto.</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">

@@ -9,13 +9,13 @@ timestamp: 2026-05-19T17:30:42-03:00
 
 # Deploy das Cloud Functions de sincronização
 
-O Hermes oferece duas rotas de deploy equivalentes para sincronização automática com o Google Tasks: a função genérica via `gcloud` (Python, gen2) e o fluxo Firebase CLI (Node.js), que adiciona também a sincronização agendada a cada 30 minutos. Ver pré-requisito de billing em [Habilitar billing no Firebase](/docs/okf/operacoes/habilitar-billing.md).
+O Gaspar oferece duas rotas de deploy equivalentes para sincronização automática com o Google Tasks: a função genérica via `gcloud` (Python, gen2) e o fluxo Firebase CLI (Node.js), que adiciona também a sincronização agendada a cada 30 minutos. Ver pré-requisito de billing em [Habilitar billing no Firebase](/docs/okf/operacoes/habilitar-billing.md).
 
 ## O que você vai ter (fluxo Firebase CLI)
 
 - Sincronização 100% na nuvem (não depende do computador local).
 - Sincronização manual (botão "Sync Google") e automática (a cada 30 minutos).
-- Bidirecional (Hermes ↔ Google Tasks).
+- Bidirecional (Gaspar ↔ Google Tasks).
 
 ## Pré-requisitos (fluxo gcloud)
 

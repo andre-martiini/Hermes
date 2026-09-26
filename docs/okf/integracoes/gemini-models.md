@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Modelos Gemini disponíveis e preferências
-description: Modelos Gemini 2.0/2.5 usados pelo Hermes, preferências de uso e tratamento de erros conhecidos.
+description: Modelos Gemini 2.0/2.5 usados pelo Gaspar, preferências de uso e tratamento de erros conhecidos.
 tags: [hermes, gemini, llm, configuracao]
 timestamp: 2026-05-19T17:30:42-03:00
 ---
@@ -10,11 +10,11 @@ timestamp: 2026-05-19T17:30:42-03:00
 
 ## Visão geral
 
-Desde o início/meados de 2025, o Google migrou para as séries Gemini 2.0 e 2.5. A série 1.5 é legada e não deve ser usada no Hermes.
+Desde o início/meados de 2025, o Google migrou para as séries Gemini 2.0 e 2.5. A série 1.5 é legada e não deve ser usada no Gaspar.
 
 ## Modelos disponíveis (verificado fev–ago 2025)
 
-- `gemini-2.5-flash-lite`: otimizado para velocidade e custo. Modelo priorizado por André Martini para o bot Hermes.
+- `gemini-2.5-flash-lite`: otimizado para velocidade e custo. Modelo priorizado por André Martini para o bot Gaspar.
 - `gemini-2.5-pro`: alta inteligência, janela de contexto ampla, thinking.
 - `gemini-2.5-flash`: balanceado para uso geral.
 - `gemini-2.0-flash`: versão estável padrão da série 2.0.
@@ -71,12 +71,12 @@ feature real de alto volume e baixo risco: o roteador de intenção de
   os números do A/B.
 - **Comparação:** os custos de cada provider ficam em coleções paralelas
   (`system_usage/gemini` e `system_usage/openai`), agregáveis por dia/feature
-  para decidir se vale expandir o Luna para mais chamadas do Hermes.
+  para decidir se vale expandir o Luna para mais chamadas do Gaspar.
 
 
 ## Agentes com tool-calling (2026-09-19)
 
-- Os agentes do Hermes que chamam ferramentas (planejador diário, elevações semanais e o secretário do WhatsApp) usam `llm_providers/gemini_provider.py`. Modelo padrão `GEMINI_AGENT_MODEL` = `gemini-3.8-flash`, reserva `GEMINI_AGENT_FALLBACK_MODEL` = `gemini-3.5-flash-lite` (troca automática em 404/429/5xx).
+- Os agentes do Gaspar que chamam ferramentas (planejador diário, elevações semanais e o secretário do WhatsApp) usam `llm_providers/gemini_provider.py`. Modelo padrão `GEMINI_AGENT_MODEL` = `gemini-3.8-flash`, reserva `GEMINI_AGENT_FALLBACK_MODEL` = `gemini-3.5-flash-lite` (troca automática em 404/429/5xx).
 - **O raciocínio do 3.8 Flash não desliga**: `thinking_level=minimal` e `thinking_budget=0` não são aceitos; `low` é o mais rápido que funciona (~2,2 s por chamada trivial, contra ~3,2 s no padrão e ~0,8 s do Flash-Lite, que não raciocina).
 - **`max_output_tokens` inclui o raciocínio** (~300–600 tokens mesmo em pergunta trivial): sem folga a resposta visível sai cortada. O provider soma `THINKING_HEADROOM_TOKENS` (2048) ao orçamento pedido.
 - Preço (telemetria em `gemini_cost_controls._MODEL_PRICE_USD_PER_MTOK`): US$0,75 entrada / US$3,75 saída por Mtok até 31/12/2026; **a partir de 01/01/2027 a tarifa padrão é US$1,50 / US$7,50** (tratada em `_PRICE_FROM_DATE`). O pensamento é cobrado como saída.

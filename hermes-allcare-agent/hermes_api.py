@@ -30,7 +30,7 @@ def call(function_name: str, data: dict, *, timeout: int = 150) -> dict:
     try:
         payload = response.json()
     except ValueError as error:
-        raise HermesApiError(f"Resposta inválida do Hermes ({response.status_code}).") from error
+        raise HermesApiError(f"Resposta inválida do Gaspar ({response.status_code}).") from error
     if response.status_code != 200 or payload.get("error"):
         detail = (payload.get("error") or {}).get("message") or f"HTTP {response.status_code}"
         raise HermesApiError(str(detail))

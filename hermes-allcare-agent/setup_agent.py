@@ -19,7 +19,7 @@ PLAN_USER = "plan-match"
 
 def main() -> int:
     if not firebase_auth.has_session():
-        print("Sessão local do Hermes não encontrada; iniciando login único.")
+        print("Sessão local do Gaspar não encontrada; iniciando login único.")
         from login_hermes import main as login_main
         if login_main() != 0:
             return 1

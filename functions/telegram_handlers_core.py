@@ -445,7 +445,7 @@ def _process_telegram_message(db, data: dict):
                 db,
                 token,
                 chat_id,
-                "⏳ <i>Estou processando pelo Copiloto Hermes...</i>",
+                "⏳ <i>Estou processando pelo Copiloto Gaspar...</i>",
                 session=session,
             )
             _persist_copilot_message(db, copilot_session_id, "user", user_content_for_copilot, source="telegram")

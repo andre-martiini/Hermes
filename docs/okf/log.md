@@ -1,12 +1,14 @@
 ---
 type: log
 title: Histórico do bundle OKF
-description: Registro cronológico de mudanças na documentação operacional do Hermes.
+description: Registro cronológico de mudanças na documentação operacional do Gaspar.
 tags: [hermes, okf, changelog]
 timestamp: 2026-08-01T00:00:00Z
 ---
 
 # Log
+
+- **2026-09-26** — Renomeação de marca: Hermes → Gaspar, só em texto lido por pessoas (título do PWA e manifest, telas, mensagens do Telegram, persona nos prompts, descrições das tools MCP e da ponte de voz, docs de referência). Nenhum identificador mudou: projeto `gestao-hermes`, Cloud Functions, coleções, nomes/parâmetros de tools, servidor MCP, chaves de armazenamento, scripts `.bat`/`.vbs`, pasta "Hermes Vídeo" no Drive e o store "Hermes Acervo Global". O modo secretário passa a assinar `**Gaspar Bot:** `; `_RE_ASSINATURA_BOT` reconhece também a assinatura antiga (`**Hermes Bot:**`) que segue no histórico, e "Gaspar" sem "Bot" só conta com os dois-pontos. `_AUTO_LINK_NOTE_RE` (inbox_pendentes) aceita `[ícone Hermes]` e `[ícone Gaspar]`. "gaspar" entrou nas stopwords da busca de ações ao lado de "hermes". Docs históricos (autonomia/, handoffs, planos datados, este log) ficam como estão.
 
 - **2026-09-25** — Ação em stand-by fica fora do dia mesmo quando tem data. A web apaga a data ao pausar (`applyStandbyDateRules`), mas MCP, Telegram e copiloto gravam o status e deixam a data, e a ação aparecia no "hoje" do resumo e do `obter_estado_atual` com etapa do dia, no briefing das 5h e era arrastada para hoje toda noite. Agora: `morning_summary._coletar_acoes` pula stand-by antes do bloco de hoje/atrasadas (o prazo final continua em `prazos_duros`), `daily_morning_briefing` só lista `em andamento` e `daily_reset_job` só consulta `em andamento`. Testes novos em `test_daily_reset_job.py` e `test_daily_morning_briefing.py`. Medido antes: raro (1 dos 30 resumos gravados teve stand-by no dia, mais o caso de 25/09 no resumo ao vivo; 0 de 16 ações em stand-by com data no momento). Fica de fora, para depois se incomodar: limpar as datas ao entrar em stand-by no backend, o que também tiraria a ação do Google Tasks (`sync_google_tasks_push` envia toda ação não excluída com data).
 

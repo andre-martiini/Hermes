@@ -110,7 +110,7 @@ def _exigir_monitorado(db, chat_id: str) -> None:
         return
     if chat_id not in _allowlist(db):
         raise WhatsAppNaoMonitorado(
-            f"A conversa '{chat_id}' nao esta monitorada. O Hermes so le conteudo "
+            f"A conversa '{chat_id}' nao esta monitorada. O Gaspar so le conteudo "
             "de conversas na allowlist — habilite na Caixa de Entrada do WhatsApp "
             "se quiser que ela seja acompanhada. Use listar_conversas_whatsapp "
             "para ver quais estao monitoradas."
@@ -175,7 +175,7 @@ def listar_conversas(ctx, args: dict) -> dict:
             "critério: há terceiros nessas conversas que não sabem que um agente lê."
             if leitura_total else
             ("Só conversas monitoradas permitem ler mensagens ou consolidar."
-             + (" O Hermes está capturando todas as conversas, mas capturada≠legível: "
+             + (" O Gaspar está capturando todas as conversas, mas capturada≠legível: "
                 "peça ao dono para habilitar a leitura na Caixa de Entrada."
                 if captura_total else "")
              if apenas_monitoradas else
@@ -505,7 +505,7 @@ def consultar_envio(ctx, args: dict) -> dict:
             if atraso is not None and atraso > ATRASO_SUSPEITO_SEG:
                 saida["status_efetivo"] = "aguardando_confirmacao_manual"
                 saida["message"] = (
-                    f"NOTIFICADO HA {atraso // 60} MIN, SEM CONFIRMACAO: o Hermes mandou um "
+                    f"NOTIFICADO HA {atraso // 60} MIN, SEM CONFIRMACAO: o Gaspar mandou um "
                     "link de WhatsApp pelo Telegram para o dono enviar manualmente, mas "
                     "ninguem confirmou o envio ainda (botao 'Ja enviei' no Telegram). Pode "
                     "ja ter sido entregue de fato -- pergunte ao usuario antes de afirmar "

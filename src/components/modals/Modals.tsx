@@ -294,7 +294,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         Automações
       </h4>
       <p className={`text-[10px] leading-relaxed ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>
-        O Hermes pode investigar sinais de vários canais e propor, via Telegram, vincular a uma ação e registrar no diário de bordo — e gerar um diário pessoal a partir das suas interações. Tudo abaixo é opcional, desligado por padrão, e cada mudança é salva na hora.
+        O Gaspar pode investigar sinais de vários canais e propor, via Telegram, vincular a uma ação e registrar no diário de bordo — e gerar um diário pessoal a partir das suas interações. Tudo abaixo é opcional, desligado por padrão, e cada mudança é salva na hora.
       </p>
 
       {error && (
@@ -394,7 +394,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         <div className={`pt-3 border-t border-dashed space-y-3 ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
           <ToggleRow
             label="Triagem automática do WhatsApp"
-            desc="Análise automática de conversas com proposta de vínculo a ações, avisando no Telegram e no Hermes. Desligar não afeta captura, leitura nem envio — só para de gerar as sugestões."
+            desc="Análise automática de conversas com proposta de vínculo a ações, avisando no Telegram e no Gaspar. Desligar não afeta captura, leitura nem envio — só para de gerar as sugestões."
             enabled={data.whatsapp_ingest.enabled}
             onToggle={() => toggle('whatsapp_ingest')}
           />
@@ -456,7 +456,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         <div className="space-y-3">
           <ToggleRow
             label="Modo Secretário no WhatsApp"
-            desc="O Hermes atende quem escreve no WhatsApp quando você estiver indisponível — anota recados e consulta a agenda sem nunca confirmar compromissos sozinho. Toda resposta é assinada com '**Hermes Bot:**' e enviada via outbox com janela de cancelamento."
+            desc="O Gaspar atende quem escreve no WhatsApp quando você estiver indisponível — anota recados e consulta a agenda sem nunca confirmar compromissos sozinho. Toda resposta é assinada com '**Gaspar Bot:**' e enviada via outbox com janela de cancelamento."
             enabled={Boolean(data.whatsapp_secretario?.enabled)}
             onToggle={toggleSecretario}
           />
@@ -1122,7 +1122,7 @@ export const SettingsModal = ({
                   <div>
                     <p className={`text-xs font-bold uppercase tracking-wider mb-1 ${isDarkTheme ? 'text-amber-300' : 'text-amber-800'}`}>Nota sobre Permissões</p>
                     <p className={`text-[10px] leading-relaxed ${isDarkTheme ? 'text-amber-400' : 'text-amber-700'}`}>
-                      Ao adicionar novos escopos (como Google Drive), pode ser necessário re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Hermes tenha permissão de escrita.
+                      Ao adicionar novos escopos (como Google Drive), pode ser necessário re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Gaspar tenha permissão de escrita.
                     </p>
                   </div>
                 </div>

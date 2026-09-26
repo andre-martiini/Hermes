@@ -862,7 +862,7 @@ const EmailLinkSuggestionsPanel: React.FC<{
                                                             onClick={() => handleCustomAction(suggestion)}
                                                             className="mt-1.5 rounded-lg border border-[#9333ea] px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9333ea] transition hover:bg-[#9333ea]/10 disabled:cursor-not-allowed disabled:opacity-40"
                                                         >
-                                                            Pedir ao Hermes
+                                                            Pedir ao Gaspar
                                                         </button>
                                                     </div>
                                                 )}

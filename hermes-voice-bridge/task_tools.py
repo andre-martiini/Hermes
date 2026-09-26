@@ -84,7 +84,7 @@ TASK_TOOL_DECLARATIONS = [
     {
         "name": "consultar_acao_atual",
         "description": (
-            "Retorna o detalhe completo de uma acao/tarefa do Hermes: titulo, status, "
+            "Retorna o detalhe completo de uma acao/tarefa do Gaspar: titulo, status, "
             "datas, descricao, notas, plano de acao com passos concluidos/pendentes e "
             "ultimas entradas do diario de bordo. Se a sessao estiver dentro de uma "
             "acao, pode ser chamada sem task_id."
@@ -102,7 +102,7 @@ TASK_TOOL_DECLARATIONS = [
     {
         "name": "registrar_no_diario",
         "description": (
-            "Registra uma entrada no diario de bordo de uma acao/tarefa do Hermes. "
+            "Registra uma entrada no diario de bordo de uma acao/tarefa do Gaspar. "
             "Use sempre que o usuario pedir para anotar, registrar ou logar algo no diario."
         ),
         "parameters": {
@@ -284,7 +284,7 @@ TASK_TOOL_DECLARATIONS = [
     {
         "name": "criar_nova_acao",
         "description": (
-            "Cria uma NOVA acao/tarefa no sistema Hermes no Firestore. "
+            "Cria uma NOVA acao/tarefa no sistema Gaspar no Firestore. "
             "Use SEMPRE que o usuario pedir para criar, adicionar ou registrar uma nova acao, tarefa ou item de trabalho. "
             "NUNCA diga que uma acao foi criada sem chamar esta ferramenta e receber status 'ok' de volta."
         ),
@@ -797,7 +797,7 @@ def _criar_nova_acao(
 
     diary_entry = {
         "data": now_iso,
-        "nota": "Ação criada via Copiloto de Voz Hermes.",
+        "nota": "Ação criada via Copiloto de Voz Gaspar.",
         "autor": "Copiloto de Voz",
     }
 
@@ -833,7 +833,7 @@ def _criar_nova_acao(
         db.collection("tarefas").document(task_id).set(doc_payload)
         return {
             "status": "ok",
-            "mensagem": f"Ação '{titulo.strip()}' criada com sucesso no Hermes!",
+            "mensagem": f"Ação '{titulo.strip()}' criada com sucesso no Gaspar!",
             "task_id": task_id,
             "titulo": titulo.strip(),
             "data_limite": doc_payload.get("data_limite"),

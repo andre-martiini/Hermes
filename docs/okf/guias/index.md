@@ -1,7 +1,7 @@
 ---
 type: index
 title: Guias
-description: Guias de primeiros passos para rodar o Hermes localmente.
+description: Guias de primeiros passos para rodar o Gaspar localmente.
 tags: [hermes, okf, guias]
 timestamp: 2026-06-17T00:00:00Z
 ---

@@ -1436,7 +1436,7 @@ const HealthView: React.FC<HealthViewProps> = ({
         onSaveTelegramReminder({
             id: `custom_${Date.now()}`,
             title,
-            message: newReminderMessage.trim() || 'André, lembrete de saúde configurado no Hermes.',
+            message: newReminderMessage.trim() || 'André, lembrete de saúde configurado no Gaspar.',
             time: newReminderTime,
             enabled: true,
             daysOfWeek: newReminderDays.length ? newReminderDays : [0, 1, 2, 3, 4, 5, 6],
@@ -3376,7 +3376,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                         type="text"
                                                         value={newReminderMessage}
                                                         onChange={e => setNewReminderMessage(e.target.value)}
-                                                        placeholder="André, lembrete de saúde configurado no Hermes."
+                                                        placeholder="André, lembrete de saúde configurado no Gaspar."
                                                         className={inputClasses}
                                                     />
                                                 </label>
@@ -3484,7 +3484,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             </div>
                                             {!isAlert && (
                                                 <p className="mt-3 text-[10px] font-semibold uppercase text-on-surface-variant">
-                                                    {latest.prompt_version ? 'Redigido pelo Hermes a partir da placa abaixo' : 'Texto seco, sem modelo (Gemini indisponível no momento)'}
+                                                    {latest.prompt_version ? 'Redigido pelo Gaspar a partir da placa abaixo' : 'Texto seco, sem modelo (Gemini indisponível no momento)'}
                                                 </p>
                                             )}
                                         </div>

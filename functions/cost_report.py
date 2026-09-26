@@ -315,7 +315,7 @@ def build_message(
             alerts.append(f"⚠️ Projeção do mês ({brl(gcp_summary['projection'])}) acima do orçamento ({brl(gcp_summary['monthly_budget'])})")
         if gcp_summary["spike"]:
             alerts.append(f"⚠️ Dia {SPIKE_FACTOR:.1f}× acima da média de 7 dias")
-    header = f"💰 <b>Custos do Hermes — {day.strftime('%d/%m/%Y')}</b>"
+    header = f"💰 <b>Custos do Gaspar — {day.strftime('%d/%m/%Y')}</b>"
     lines.append(header)
     lines.extend(alerts)
     if gcp_summary:

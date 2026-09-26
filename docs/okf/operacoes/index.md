@@ -1,7 +1,7 @@
 ---
 type: index
 title: Operações
-description: Runbooks de deploy, billing e sincronização do Hermes.
+description: Runbooks de deploy, billing e sincronização do Gaspar.
 tags: [hermes, okf, operacoes]
 timestamp: 2026-06-17T00:00:00Z
 ---

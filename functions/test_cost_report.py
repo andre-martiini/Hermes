@@ -170,7 +170,7 @@ class FormatTest(unittest.TestCase):
             ["Firestore medido (backend): 120.000 leituras | 3.000 escritas | 900 consultas"], usd_brl=5.0,
             today=today,
         )
-        self.assertIn("Custos do Hermes — 08/09/2026", msg)
+        self.assertIn("Custos do Gaspar — 08/09/2026", msg)
         self.assertIn("⚠️ Projeção do mês (R$ 297,40) acima do orçamento (R$ 200,00)", msg)
         self.assertIn("GCP 08/09</b>: R$ 9,30 | média 7d: R$ 10,00", msg)
         self.assertIn("Mês: R$ 79,30 de R$ 200,00 | projeção: R$ 297,40", msg)
@@ -178,7 +178,7 @@ class FormatTest(unittest.TestCase):
         self.assertIn("Serviços: Firestore R$ 3,00 · Gemini R$ 3,20", msg)
         self.assertIn("scheduled-sync: R$ 1,10", msg)
         # Cabeçalho geral e bloco GCP usam a data de ontem (day)...
-        self.assertIn("Custos do Hermes — 08/09/2026", msg)
+        self.assertIn("Custos do Gaspar — 08/09/2026", msg)
         # ...enquanto IA e Firestore, dados parciais do dia corrente, usam
         # explicitamente a data de hoje (today) — não a mesma do cabeçalho.
         self.assertIn("IA — 09/09 (parcial, até agora)", msg)
@@ -270,7 +270,7 @@ class GerarRelatorioTest(unittest.TestCase):
             else:
                 sys.modules.pop("main", None)
         # Cabeçalho e bloco GCP: dia anterior (08/09, o que o export do Billing tem).
-        self.assertIn("Custos do Hermes — 08/09/2026", msg)
+        self.assertIn("Custos do Gaspar — 08/09/2026", msg)
         self.assertIn("GCP 08/09</b>: R$ 4,00", msg)
         self.assertIn("de R$ 150,00", msg)
         self.assertIn("Gemini R$ 4,00", msg)

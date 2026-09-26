@@ -45,7 +45,7 @@ def verify_browser_id_token(id_token: str) -> str:
         raise BrowserAuthError("Token sem uid.")
 
     if not _is_uid_allowed(uid):
-        raise BrowserAuthError("UID nao autorizado a usar o copiloto de voz do Hermes.")
+        raise BrowserAuthError("UID nao autorizado a usar o copiloto de voz do Gaspar.")
 
     return uid
 

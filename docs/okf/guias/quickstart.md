@@ -1,12 +1,12 @@
 ---
 type: guide
 title: Guia rápido (Quickstart)
-description: Como iniciar o Hermes localmente, manual ou automaticamente, e estrutura básica do projeto.
+description: Como iniciar o Gaspar localmente, manual ou automaticamente, e estrutura básica do projeto.
 tags: [hermes, quickstart, setup]
 timestamp: 2026-05-19T17:30:42-03:00
 ---
 
-# Guia rápido — Hermes
+# Guia rápido — Gaspar
 
 ## Iniciar o sistema (mais fácil)
 

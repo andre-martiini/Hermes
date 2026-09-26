@@ -1,6 +1,6 @@
 {
   "name": "criar_acao_no_sistema",
-  "description": "Cria uma nova ação ou tarefa no Hermes",
+  "description": "Cria uma nova ação ou tarefa no Gaspar",
   "parameters": {
     "type": "object",
     "properties": {

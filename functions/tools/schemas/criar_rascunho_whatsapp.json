@@ -18,7 +18,7 @@
       },
       "acao_id": {
         "type": "string",
-        "description": "ID opcional da ação no Hermes vinculada a esta mensagem (ao aprovar, registra nota no diário da ação)."
+        "description": "ID opcional da ação no Gaspar vinculada a esta mensagem (ao aprovar, registra nota no diário da ação)."
       },
       "item_atencao_id": {
         "type": "string",

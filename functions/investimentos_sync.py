@@ -92,7 +92,7 @@ def sincronizar_decisao_investimentos(db) -> dict:
             {
                 "id": "etapa_3",
                 "texto": (
-                    f"Confirmar no Hermes via tool "
+                    f"Confirmar no Gaspar via tool "
                     f"registrar_execucao_investimento(ativo='{nova_posicao}')"
                 ),
                 "estado": "pendente",

@@ -799,7 +799,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
               <div className="bg-emerald-50/60 dark:bg-emerald-950/25 rounded-2xl border border-emerald-100/60 dark:border-emerald-900/50 px-5 py-4 flex gap-3">
                 <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-300 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-100 leading-relaxed">
-                  O Hermes vai buscar os itens no seu catálogo usando IA. "Ricota" pode corresponder a "Queijo Ricota", "Bombril" a "Palha de Aço", etc.
+                  O Gaspar vai buscar os itens no seu catálogo usando IA. "Ricota" pode corresponder a "Queijo Ricota", "Bombril" a "Palha de Aço", etc.
                 </p>
               </div>
               <button
@@ -838,7 +838,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                 </div>
               </div>
               <div>
-                <p className="font-black text-slate-800 text-lg">Hermes está pensando...</p>
+                <p className="font-black text-slate-800 text-lg">Gaspar está pensando...</p>
                 <p className="text-slate-400 text-sm font-medium mt-1">Buscando correspondências no catálogo</p>
               </div>
             </div>
@@ -2177,7 +2177,7 @@ const App: React.FC = () => {
           const lastReminded = localStorage.getItem(`lastStartRemind_${t.id}`);
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" inicia em 15 minutos!`;
-            emitNotification("Hermes: Próxima Tarefa", msg, 'info', '', `task_start_${t.id}_${todayStr}`);
+            emitNotification("Gaspar: Próxima Tarefa", msg, 'info', '', `task_start_${t.id}_${todayStr}`);
             localStorage.setItem(`lastStartRemind_${t.id}`, todayStr);
           }
         }
@@ -2188,7 +2188,7 @@ const App: React.FC = () => {
           const lastReminded = localStorage.getItem(`lastEndRemind_${t.id}`);
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" encerra em 15 minutos!`;
-            emitNotification("Hermes: Encerramento de Tarefa", msg, 'info', '', `task_end_${t.id}_${todayStr}`);
+            emitNotification("Gaspar: Encerramento de Tarefa", msg, 'info', '', `task_end_${t.id}_${todayStr}`);
             localStorage.setItem(`lastEndRemind_${t.id}`, todayStr);
           }
         }
@@ -2281,7 +2281,7 @@ const App: React.FC = () => {
     const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
     if (!hasSeenWelcome && notifications.length === 0) {
       emitNotification(
-        'Bem-vindo ao Hermes',
+        'Bem-vindo ao Gaspar',
         'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
         'info',
         undefined,
@@ -4346,7 +4346,7 @@ const App: React.FC = () => {
       <div className={`min-h-screen flex items-center justify-center ${appBgClass}`}>
         <div className="flex flex-col items-center gap-4">
           <div className={`h-12 w-12 animate-spin rounded-none border-4 ${loadingSpinnerClass}`}></div>
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Hermes está carregando...</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Gaspar está carregando...</p>
         </div>
       </div>
     );
@@ -4356,9 +4356,9 @@ const App: React.FC = () => {
       <div className={`min-h-screen flex flex-col items-center justify-center p-6 transition-colors ${appBgClass}`}>
         <div className={`w-full max-w-md animate-in zoom-in-95 border p-8 text-center md:p-10 rounded-none ${loginPanelClass}`}>
           <div className={`mx-auto mb-8 flex h-20 w-20 items-center justify-center border p-3 rounded-none ${loginLogoTileClass}`}>
-            <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+            <img src="/logo.png" alt="Gaspar" className="h-full w-full object-contain" />
           </div>
-          <h1 className={`mb-2 font-mono text-3xl font-black uppercase tracking-tight ${loginTitleClass}`}>Hermes</h1>
+          <h1 className={`mb-2 font-mono text-3xl font-black uppercase tracking-tight ${loginTitleClass}`}>Gaspar</h1>
           <p className={`mb-10 text-sm font-medium leading-relaxed ${loginMutedClass}`}>
             Bem-vindo ao seu ecossistema de produtividade e gestão à vista.
           </p>
@@ -4683,10 +4683,10 @@ const App: React.FC = () => {
               className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
               onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
             >
-              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
+              <img src="/logo.png" alt="Gaspar" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
               {!isSidebarRetracted && (
                 <div>
-                  <h1 className="text-xl font-black tracking-tight font-mono uppercase">Hermes</h1>
+                  <h1 className="text-xl font-black tracking-tight font-mono uppercase">Gaspar</h1>
                 </div>
               )}
             </div>
@@ -4809,7 +4809,7 @@ const App: React.FC = () => {
                       onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <img src="/logo.png" alt="Hermes" className={`w-9 h-9 object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
+                      <img src="/logo.png" alt="Gaspar" className={`w-9 h-9 object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -5000,7 +5000,7 @@ const App: React.FC = () => {
                                       activeModule === 'acoes' ? 'Ações' :
                                         activeModule === 'financeiro' ? 'Financeiro' :
                                         activeModule === 'saude' ? 'Saúde' :
-                                          activeModule === 'estrategia' ? 'Estratégia' : 'Hermes'}
+                                          activeModule === 'estrategia' ? 'Estratégia' : 'Gaspar'}
                         </h1>
                       </div>
                     </div>
@@ -6716,7 +6716,7 @@ const App: React.FC = () => {
                           <div className="flex items-center justify-between mb-8 pb-4 border-b-2 border-border-grid">
                             <div>
                               <h3 className="text-xl font-black text-slate-900 tracking-tight font-mono uppercase">Módulos de Automação</h3>
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1 font-mono">Hermes R.P.A. Core Engine</p>
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1 font-mono">Gaspar R.P.A. Core Engine</p>
                             </div>
                             <div className="bg-slate-900 text-primary-tactile p-3 rounded-none border border-border-grid">
                               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
@@ -6919,7 +6919,7 @@ const App: React.FC = () => {
                                         ))
                                       )}
                                       <div className="mt-1 text-emerald-400 animate-pulse flex items-center gap-1">
-                                        <span className="text-[9px] opacity-50">STITCH@HERMES:~$</span>
+                                        <span className="text-[9px] opacity-50">STITCH@GASPAR:~$</span>
                                         <span className="w-2 h-4 bg-emerald-500"></span>
                                       </div>
                                     </div>
@@ -7375,7 +7375,7 @@ const App: React.FC = () => {
             )}
             <button
               type="button"
-              aria-label="Copiloto Hermes"
+              aria-label="Copiloto Gaspar"
               aria-expanded={isCopilotoLauncherOpen}
               onClick={() => setIsCopilotoLauncherOpen(v => !v)}
               className={`fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${

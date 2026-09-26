@@ -773,7 +773,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                 <h3 className="text-sm font-bold uppercase tracking-wider">Entrada orgânica</h3>
                 <textarea className={`${inputClass} mt-3 min-h-[140px] resize-y`} value={intention} onChange={e => setIntention(e.target.value)} placeholder="Descreva uma intenção estratégica em texto livre." />
                 <button disabled={isRefining || !intention.trim()} onClick={refineIntention} className="mt-3 w-full rounded-lg bg-[#7800ce] px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-white transition-all hover:bg-[#9333ea] disabled:opacity-50">
-                  {isRefining ? 'Refinando...' : 'Refinar com Hermes'}
+                  {isRefining ? 'Refinando...' : 'Refinar com Gaspar'}
                 </button>
 
 
@@ -1159,7 +1159,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           <h3 className="text-sm font-bold uppercase tracking-wider">Entrada orgânica</h3>
           <textarea className={`${inputClass} mt-3 min-h-[140px] resize-y`} value={intention} onChange={e => setIntention(e.target.value)} placeholder="Descreva uma intenção estratégica em texto livre." />
           <button disabled={isRefining || !intention.trim()} onClick={refineIntention} className="mt-3 w-full rounded-lg bg-[#7800ce] px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-white transition-all hover:bg-[#9333ea] disabled:opacity-50">
-            {isRefining ? 'Refinando...' : 'Refinar com Hermes'}
+            {isRefining ? 'Refinando...' : 'Refinar com Gaspar'}
           </button>
 
 

@@ -10,7 +10,7 @@ timestamp: 2026-05-19T17:30:42-03:00
 
 > **Alternativa exclusiva:** não execute `hermes_cli.py watch` junto com a Cloud
 > Function. Os dois observam `system/sync`; em produção, use somente a Cloud
-> Function. Os inicializadores do Hermes não sobem mais este watcher local.
+> Function. Os inicializadores do Gaspar não sobem mais este watcher local.
 
 ## Por quê
 

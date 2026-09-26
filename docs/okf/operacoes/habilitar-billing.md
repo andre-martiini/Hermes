@@ -22,7 +22,7 @@ O plano Blaze é pay-as-you-go, mas tem um free tier muito generoso:
 - 200.000 CPU-segundos/mês: grátis
 - 5 GB de tráfego de rede/mês: grátis
 
-Uso estimado do Hermes: sincronização manual (~600x/mês) + automática a cada 30 min (~1.440x/mês) = ~2.000 invocações/mês, 100% dentro do free tier.
+Uso estimado do Gaspar: sincronização manual (~600x/mês) + automática a cada 30 min (~1.440x/mês) = ~2.000 invocações/mês, 100% dentro do free tier.
 
 ## Como habilitar
 

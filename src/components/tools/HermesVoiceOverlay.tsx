@@ -282,7 +282,7 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                     <div className="rounded-3xl border-2 border-dashed border-violet-400/70 bg-violet-900/40 px-10 py-8 text-center backdrop-blur-md">
                         <div className="mb-2 text-4xl">📄</div>
-                        <p className="text-base font-semibold text-violet-200">Solte para enviar ao Hermes</p>
+                        <p className="text-base font-semibold text-violet-200">Solte para enviar ao Gaspar</p>
                         <p className="mt-1 text-xs text-violet-300/70">Até {MAX_FILES} arquivos · máx. {MAX_FILE_SIZE_MB} MB cada</p>
                     </div>
                 </div>
@@ -350,8 +350,8 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                     {/* 📎 Attach documents button */}
                     <button
                         type="button"
-                        aria-label="Enviar documento para o Hermes"
-                        title={isProcessingDocs ? docProgress : 'Enviar documento para o Hermes (PDF, DOCX, TXT…)'}
+                        aria-label="Enviar documento para o Gaspar"
+                        title={isProcessingDocs ? docProgress : 'Enviar documento para o Gaspar (PDF, DOCX, TXT…)'}
                         disabled={isProcessingDocs}
                         onClick={() => fileInputRef.current?.click()}
                         className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 disabled:cursor-wait disabled:opacity-60 ${
