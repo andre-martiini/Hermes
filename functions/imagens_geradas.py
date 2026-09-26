@@ -201,9 +201,15 @@ def registrar_uso(db, *, dia: str, provedor: str, modelo: str, feature: str, n: 
 _ORIGENS = ("drive_file_id", "upload_token", "url", "gmail_message_id")
 
 
+def _tem_alfa(img) -> bool:
+    return "A" in img.mode or (img.mode == "P" and "transparency" in img.info)
+
+
 def _como_imagem_de_entrada(dados: bytes, nome: str, *, exigir_alfa: bool = False) -> tuple[str, bytes, str]:
-    """Aceita o que o Pillow abrir; PNG/JPEG/WebP seguem como vieram, o resto vira PNG."""
-    from PIL import Image
+    """Aceita o que o Pillow abrir. PNG/JPEG/WebP sem rotação EXIF e em RGB(A)
+    seguem como vieram; o resto (foto de celular girada, MPO, CMYK, HEIC...) é
+    reescrito já na orientação certa — JPEG sem transparência, PNG com."""
+    from PIL import Image, ImageOps
 
     try:
         img = Image.open(io.BytesIO(dados))
@@ -212,29 +218,39 @@ def _como_imagem_de_entrada(dados: bytes, nome: str, *, exigir_alfa: bool = Fals
         raise Recusa(f"'{nome}' não é uma imagem legível ({exc}).")
     fmt = (img.format or "").lower()
     if exigir_alfa:
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
+        # A área transparente da máscara é a que muda. Máscara preto-e-branco
+        # viraria RGBA toda opaca e a edição não mudaria nada, sem erro.
+        if not _tem_alfa(img):
+            raise Recusa("A máscara precisa ser um PNG com transparência na área a mudar (canal alfa); "
+                         "máscara preto-e-branco não serve.")
         saida = io.BytesIO()
-        img.save(saida, "PNG")
+        img.convert("RGBA").save(saida, "PNG")
         return (_trocar_ext(nome, "png"), saida.getvalue(), "image/png")
-    if fmt in ("png", "jpeg", "webp"):
+    orientacao = img.getexif().get(0x0112, 1)
+    if fmt in ("png", "jpeg", "webp") and orientacao == 1 and img.mode in ("RGB", "RGBA", "L", "LA"):
         return (nome, dados, _MIME[fmt])
+    img = ImageOps.exif_transpose(img)
     saida = io.BytesIO()
-    img.convert("RGBA" if "A" in img.mode else "RGB").save(saida, "PNG")
-    return (_trocar_ext(nome, "png"), saida.getvalue(), "image/png")
+    if _tem_alfa(img):
+        img.convert("RGBA").save(saida, "PNG")
+        return (_trocar_ext(nome, "png"), saida.getvalue(), "image/png")
+    img.convert("RGB").save(saida, "JPEG", quality=92)
+    return (_trocar_ext(nome, "jpg"), saida.getvalue(), "image/jpeg")
 
 
 def _trocar_ext(nome: str, ext: str) -> str:
     return re.sub(r"\.[A-Za-z0-9]+$", "", nome or "imagem") + f".{ext}"
 
 
-def resolver_referencias(ctx, origens, mascara) -> tuple[list[tuple[str, bytes, str]], tuple | None]:
+def resolver_referencias(ctx, origens, mascara) -> tuple[list[tuple[str, bytes, str]], tuple | None, list[str]]:
     from tools.anexar_arquivo import _resolver_conteudo
 
     if not isinstance(origens, list) or not origens:
         raise Recusa("`imagens` precisa ser uma lista com ao menos uma origem (drive_file_id, upload_token, url ou gmail_message_id).")
     if len(origens) > MAX_REFERENCIAS:
         raise Recusa(f"No máximo {MAX_REFERENCIAS} imagens de referência por pedido.")
+
+    tokens_usados: list[str] = []
 
     def _uma(origem) -> tuple[bytes, str]:
         if isinstance(origem, str):
@@ -244,23 +260,26 @@ def resolver_referencias(ctx, origens, mascara) -> tuple[list[tuple[str, bytes, 
         if origem.get("conteudo_base64"):
             raise Recusa("conteudo_base64 não é aceito aqui; use drive_file_id, url ou preparar_upload.")
         try:
-            return _resolver_conteudo(ctx, origem)
+            dados_nome = _resolver_conteudo(ctx, origem)
         except ValueError as exc:
             raise Recusa(str(exc))
+        if origem.get("upload_token"):
+            tokens_usados.append(str(origem["upload_token"]))
+        return dados_nome
 
     referencias = [_como_imagem_de_entrada(*_uma(o)) for o in origens]
     masc = None
     if mascara:
         dados, nome = _uma(mascara)
         masc = _como_imagem_de_entrada(dados, nome, exigir_alfa=True)
-    return referencias, masc
+    return referencias, masc, tokens_usados
 
 
 # --------------------------------------------------------------------------
 # Provedores
 # --------------------------------------------------------------------------
 
-def _gerar_google(ctx, p: dict, referencias=None) -> oi.Resultado:
+def _gerar_google(ctx, p: dict, referencias, avisos: list[str]) -> oi.Resultado:
     from google.genai import types
 
     config = types.GenerateContentConfig(
@@ -281,6 +300,8 @@ def _gerar_google(ctx, p: dict, referencias=None) -> oi.Resultado:
             break
     if not imagens:
         raise oi.ErroImagem("resposta", "Gemini não devolveu imagem")
+    if len(imagens) < p["quantidade"]:
+        avisos.append(f"O Gemini devolveu {len(imagens)} de {p['quantidade']} imagens pedidas.")
     return oi.Resultado(modelo=MODELO_GOOGLE, imagens=imagens, prompts_revisados=[None] * len(imagens),
                         tokens={}, custo_usd=round(USD_POR_IMAGEM_GOOGLE * len(imagens), 6))
 
@@ -290,22 +311,27 @@ def _chamar(ctx, p: dict, referencias, mascara) -> tuple[oi.Resultado, list[str]
     if p["provedor"] == "google":
         if mascara is not None:
             avisos.append("O provedor Google não usa máscara; a instrução vale para a imagem toda.")
-        return _gerar_google(ctx, p, referencias), avisos
+        return _gerar_google(ctx, p, referencias, avisos), avisos
     try:
-        client = oi.cliente(ctx.db)
+        # Fora do MCP a chamada é síncrona e o copiloto desiste em ~150 s: esperar
+        # mais só pagaria uma imagem que ninguém recebe.
+        client = oi.cliente(ctx.db, timeout=300.0 if getattr(ctx, "canal", "") == "mcp" else 120.0)
         comuns = dict(modelo=p["modelo"], prompt=p["prompt"], tamanho=p["tamanho"], qualidade=p["qualidade"],
                       fundo=p["fundo"], formato=p["formato"], n=p["quantidade"])
         if p["modo"] == "editar":
             return oi.editar(client, imagens=referencias, mascara=mascara, **comuns), avisos
         return oi.gerar(client, **comuns), avisos
     except oi.ErroImagem as erro:
-        # Plano B só quando a OpenAI está fora; recusa, crédito e verificação vão ao usuário.
-        if erro.tipo not in ("indisponivel", "timeout"):
+        # Plano B só quando a OpenAI está fora. Timeout não: o pedido pode ainda
+        # sair (e ser cobrado) lá. Recusa, crédito e verificação vão ao usuário.
+        if erro.tipo != "indisponivel":
             raise
         print(f"[imagens] OpenAI indisponível ({erro.detalhe}); caindo para o Google.")
         avisos.append(f"{erro} Gerada pelo plano B (Google Gemini), em 1K e sem as opções da OpenAI.")
+        if mascara is not None:
+            avisos.append("O plano B não usa máscara; a instrução valeu para a imagem toda.")
         p["provedor"] = "google"
-        return _gerar_google(ctx, p, referencias), avisos
+        return _gerar_google(ctx, p, referencias, avisos), avisos
 
 
 # --------------------------------------------------------------------------
@@ -408,9 +434,9 @@ def executar(ctx, args: dict, *, modo: str) -> str | dict:
         p = normalizar(args or {}, modo=modo)
         if p["task_id"] and not ctx.db.collection("tarefas").document(p["task_id"]).get().exists:
             raise Recusa(f"Ação '{p['task_id']}' não encontrada; nada foi gerado.")
-        referencias, mascara = ([], None)
+        referencias, mascara, tokens_upload = ([], None, [])
         if modo == "editar":
-            referencias, mascara = resolver_referencias(ctx, args.get("imagens"), args.get("mascara"))
+            referencias, mascara, tokens_upload = resolver_referencias(ctx, args.get("imagens"), args.get("mascara"))
         if p["provedor"] == "openai":
             estimativa = oi.estimar_usd(modelo=p["modelo"], tamanho=p["tamanho"], qualidade=p["qualidade"],
                                         n=p["quantidade"], referencias=len(referencias))
@@ -433,6 +459,12 @@ def executar(ctx, args: dict, *, modo: str) -> str | dict:
     registrar_uso(ctx.db, dia=dia, provedor=p["provedor"], modelo=resultado.modelo, feature=feature,
                   n=len(resultado.imagens), tokens=resultado.tokens, custo=resultado.custo_usd)
     entregues = _entregar(ctx, p, resultado, agora, avisos)
+    if tokens_upload:
+        # Mesmo contrato do anexar_arquivo: o staging só some depois do sucesso.
+        from tools.anexar_arquivo import consumir_upload_token
+
+        for token in tokens_upload:
+            consumir_upload_token(ctx, token)
     return _resposta(ctx, p, resultado, entregues, avisos)
 
 
@@ -471,8 +503,12 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
         link_download = _url_publica(blob)
 
         caminho_previa = f"{PREFIXO_STORAGE}{mes}/{img_id}_previa.jpg"
+        link_previa = None
         try:
-            bucket.blob(caminho_previa).upload_from_string(_previa(dados), content_type="image/jpeg")
+            blob_previa = bucket.blob(caminho_previa)
+            blob_previa.upload_from_string(_previa(dados), content_type="image/jpeg")
+            if getattr(ctx, "canal", "") != "mcp":
+                link_previa = _url_publica(blob_previa)
         except Exception as exc:  # noqa: BLE001
             print(f"[imagens] Falha na prévia de {img_id}: {exc}")
             caminho_previa = None
@@ -514,6 +550,7 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
             "nome": nome,
             "storage_path": caminho,
             "previa_path": caminho_previa,
+            "link_previa": link_previa,
             "link_download": link_download,
             "drive_file_id": drive_id,
             "link_visualizacao": link_drive,
@@ -548,13 +585,17 @@ def _anexar_na_acao(db, task_id: str, *, nome: str, link: str, drive_id: str | N
 
 
 def _resposta(ctx, p: dict, resultado: oi.Resultado, entregues: list[dict], avisos: list[str]) -> str:
-    markdown = "\n\n".join(f"![{_alt(p['prompt'])}]({e['link_download']})" for e in entregues)
     if getattr(ctx, "canal", "") != "mcp":
         # Web e Telegram: o Markdown de sempre (o Telegram vira foto a partir dele).
+        # A foto aponta para a prévia JPEG: o PNG original pode passar dos 5 MB
+        # do sendPhoto por URL. O original vai no link logo abaixo.
+        markdown = "\n\n".join(f"![{_alt(p['prompt'])}]({e.get('link_previa') or e['link_download']})"
+                                 for e in entregues)
+        originais = " · ".join(
+            f"[original {i}]({e['link_download']})" if len(entregues) > 1 else f"[original]({e['link_download']})"
+            for i, e in enumerate(entregues, 1))
         extra = "".join(f"\n\n⚠️ {a}" for a in avisos)
-        drive = [e["link_visualizacao"] for e in entregues if e.get("link_visualizacao")]
-        rodape = f"\n\n*(Gerada via {resultado.modelo}." + (f" Drive: {drive[0]}" if len(drive) == 1 else "") + ")*"
-        return markdown + rodape + extra
+        return f"{markdown}\n\n*(Gerada via {resultado.modelo}. Resolução cheia: {originais})*{extra}"
 
     campos = ("id", "nome", "drive_file_id", "link_visualizacao", "link_download", "tamanho", "formato",
               "prompt_revisado", "custo_estimado_usd", "task_id", "pool_item_id", "previa_path")

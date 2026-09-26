@@ -225,7 +225,9 @@ class TestGerarImagem(_Base):
     def test_chamada_antiga_so_com_prompt_no_copiloto_devolve_markdown(self):
         self.client.images.generate.return_value = _resp([_png()])
         texto = ig.executar(self.ctx(canal="web"), {"prompt": "um gato"}, modo="gerar")
-        self.assertRegex(texto, r"^!\[um gato\]\(https://storage\.test/imagens_geradas/.+\.png\)")
+        # A foto é a prévia JPEG (cabe no sendPhoto do Telegram); o original vai no link.
+        self.assertRegex(texto, r"^!\[um gato\]\(https://storage\.test/imagens_geradas/.+_previa\.jpg\)")
+        self.assertRegex(texto, r"\[original\]\(https://storage\.test/imagens_geradas/[^)]+\.png\)")
         kwargs = self.client.images.generate.call_args.kwargs
         self.assertEqual((kwargs["size"], kwargs["quality"]), ("1024x1024", "medium"))
 
@@ -302,6 +304,16 @@ class TestGerarImagem(_Base):
         self.assertTrue(any("plano B" in a for a in r["avisos"]))
         self.assertEqual(self.uso()["provedores"]["google"]["imagens"], 1)
 
+    def test_timeout_nao_cai_para_o_google(self):
+        # O pedido pode ainda sair (e ser cobrado) na OpenAI: pagar o Gemini por
+        # cima seria cobrança dupla.
+        self.client.images.generate.side_effect = _ErroApi("timed out", nome="APITimeoutError")
+        genai = MagicMock()
+        ctx = ToolContext(user_uid="dono", canal="mcp", _db=self.db, _genai_client=genai)
+        r = ig.executar(ctx, {"prompt": "x"}, modo="gerar")
+        self.assertEqual(r["erro"], str(oi.ErroImagem("timeout")))
+        genai.models.generate_content.assert_not_called()
+
     def test_drive_fora_ainda_entrega_pelo_storage(self):
         self.drive.falhar = True
         self.client.images.generate.return_value = _resp([_png()])
@@ -315,7 +327,7 @@ class TestGerarImagem(_Base):
 class TestEditarImagem(_Base):
     def test_referencias_e_mascara_vao_para_images_edit_no_sunburst(self):
         fontes = {"ref1": (_png(80, 80), "pessoas.png"), "ref2": (_png(), "logo.png"),
-                  "masc": (_png(80, 80, "RGB"), "mascara.png")}
+                  "masc": (_png(80, 80, "RGBA"), "mascara.png")}
         self.client.images.edit.return_value = _resp([_png()], img_in=1500)
 
         with patch("tools.anexar_arquivo._resolver_conteudo", lambda ctx, o: fontes[o["drive_file_id"]]):
@@ -333,6 +345,32 @@ class TestEditarImagem(_Base):
         self.assertEqual(Image.open(io.BytesIO(dados_m)).mode, "RGBA", "máscara precisa de canal alfa")
         self.assertEqual(r["tokens"]["imagem_entrada"], 1500)
         self.assertEqual(self.uso()["features"]["editar_imagem"]["calls"], 1)
+
+    def test_mascara_sem_transparencia_e_recusada(self):
+        fontes = {"ref": (_png(), "a.png"), "masc": (_png(64, 64, "L"), "mascara.png")}
+        with patch("tools.anexar_arquivo._resolver_conteudo", lambda ctx, o: fontes[o["drive_file_id"]]):
+            r = ig.executar(self.ctx(), {"prompt": "x", "imagens": [{"drive_file_id": "ref"}],
+                                         "mascara": {"drive_file_id": "masc"}}, modo="editar")
+        self.assertIn("transparência", r["erro"])
+        self.client.images.edit.assert_not_called()
+
+    def test_foto_girada_pelo_exif_segue_na_orientacao_certa(self):
+        img = Image.new("RGB", (40, 20), (0, 0, 255))
+        exif = img.getexif()
+        exif[0x0112] = 6  # girar 90° na exibição
+        saida = io.BytesIO()
+        img.save(saida, "JPEG", exif=exif)
+        nome, dados, mime = ig._como_imagem_de_entrada(saida.getvalue(), "foto.jpeg")
+        self.assertEqual((nome, mime), ("foto.jpg", "image/jpeg"))
+        self.assertEqual(Image.open(io.BytesIO(dados)).size, (20, 40))
+
+    def test_upload_token_e_consumido_so_depois_do_sucesso(self):
+        self.client.images.edit.return_value = _resp([_png()])
+        with patch("tools.anexar_arquivo._resolver_conteudo", lambda ctx, o: (_png(), "a.png")), \
+                patch("tools.anexar_arquivo.consumir_upload_token") as consumir:
+            ig.executar(self.ctx(), {"prompt": "x", "imagens": [{"upload_token": "tok1"}]}, modo="editar")
+        consumir.assert_called_once()
+        self.assertEqual(consumir.call_args.args[1], "tok1")
 
     def test_sem_referencia_recusa(self):
         r = ig.executar(self.ctx(), {"prompt": "x", "imagens": []}, modo="editar")
