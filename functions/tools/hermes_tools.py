@@ -1918,6 +1918,62 @@ def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
     return projetar_parcelas(ctx.db, meses=int(args.get("meses") or 12))
 
 
+# `perfil_pessoal` de `obter_estado_atual`: listas curtas e texto aparado --
+# entra no início de TODA conversa do Claude, então cada item custa contexto.
+_PERFIL_PESSOAL_MAX_ITENS = 4
+_PERFIL_PESSOAL_MAX_CHARS_ITEM = 120
+_PERFIL_PESSOAL_MAX_CHARS_TEXTO = 500
+_PERFIL_PESSOAL_NATUREZA = (
+    "impressões semanais destiladas do diário pessoal, não fatos -- use para "
+    "calibrar tom e planejamento, sem repetir ao usuário como diagnóstico"
+)
+
+
+def _perfil_pessoal_compacto(perfil: dict | None) -> dict | None:
+    """Versão compacta de `ai_profile.personalidade` para abrir conversas.
+
+    Parte do `perfil` que `build_morning_summary` já leu (mesma leitura de
+    `usuarios/{uid}`, nenhuma a mais). Devolve None quando não há perfil ou
+    quando ele veio sem nenhum campo útil.
+    """
+    if not isinstance(perfil, dict):
+        return None
+
+    def _texto(valor) -> str:
+        texto = str(valor or "").strip()
+        if len(texto) > _PERFIL_PESSOAL_MAX_CHARS_TEXTO:
+            texto = texto[:_PERFIL_PESSOAL_MAX_CHARS_TEXTO].rstrip() + "…"
+        return texto
+
+    def _lista(valor) -> list:
+        if not isinstance(valor, list):
+            return []
+        itens = []
+        for item in valor:
+            texto = str(item or "").strip()
+            if not texto:
+                continue
+            if len(texto) > _PERFIL_PESSOAL_MAX_CHARS_ITEM:
+                texto = texto[:_PERFIL_PESSOAL_MAX_CHARS_ITEM].rstrip() + "…"
+            itens.append(texto)
+            if len(itens) >= _PERFIL_PESSOAL_MAX_ITENS:
+                break
+        return itens
+
+    compacto = {
+        "resumo_narrativo": _texto(perfil.get("resumo")),
+        "estilo_comunicacao": _texto(perfil.get("estilo_comunicacao")),
+        "gatilhos_de_estresse": _lista(perfil.get("gatilhos")),
+        "fontes_de_energia": _lista(perfil.get("energia")),
+        "rotinas": _lista(perfil.get("rotinas")),
+    }
+    if not any(compacto.values()):
+        return None
+    compacto["atualizado_em"] = perfil.get("atualizado_em")
+    compacto["natureza"] = _PERFIL_PESSOAL_NATUREZA
+    return compacto
+
+
 def obter_estado_atual(ctx: ToolContext, args: dict):
     """Panorama do dia numa chamada: acoes, agenda, pendencias, heranca.
 
@@ -1986,6 +2042,12 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             estado["outbox_pendentes"] = contar_outbox_pendentes(ctx.db)
         except Exception:
             estado["outbox_pendentes"] = 0
+        # Perfil pessoal (ai_profile.personalidade, consolidado todo domingo):
+        # substitui o `perfil` cru do resumo matinal pela versão compacta e
+        # rotulada. Só aparece quando o perfil existe.
+        perfil_pessoal = _perfil_pessoal_compacto(estado.pop("perfil", None))
+        if perfil_pessoal:
+            estado["perfil_pessoal"] = perfil_pessoal
         return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}

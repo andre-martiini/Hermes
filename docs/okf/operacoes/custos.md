@@ -116,12 +116,14 @@ Decisão do André (26/09/2026). Estimativas, a conferir no relatório das 19h d
 | `consolidar_memorias_copiloto` | diário 4h | varria `knowledge_nodes` e fundia memórias quase duplicadas (embeddings + Gemini) |
 | `ai_notification_planner_daily` | diário 6h30 | agente Gemini propunha até 3 notificações/dia |
 | `detectar_subproduto_semanal` | domingo 18h | detector de subprodutos (elevações) |
-| `gerar_diario_pessoal` | diário 21h30 | diário pessoal (feature desligada em `system/settings.personal_diary`) |
-| `consolidar_personalidade` | domingo 22h | perfil de personalidade a partir dos diários (idem) |
+| `gerar_diario_pessoal` | diário 21h30 | diário pessoal (feature desligada em `system/settings.personal_diary`) — **restaurada no mesmo dia**, ver abaixo |
+| `consolidar_personalidade` | domingo 22h | perfil de personalidade a partir dos diários (idem) — **restaurada no mesmo dia**, ver abaixo |
 
 O código de apoio que ainda tem uso fica: `ajustarDiarioPessoal` (ajuste de diários antigos), `_reserve_and_create_notification` e o despacho de `scheduled_notifications` (usados pela fila `atencao` e por `check_and_send_reminders`), `deteccao_subproduto` (tools de elevação) e `executar_atualizacao_modelos_pessoas` (sob demanda/testes). **`retro_semanal_agente` (domingo 20h) continua agendado**: é o único chamador de `promocao_autonomia.tipos_elegiveis_para_promocao`/`registrar_sugestao_promocao`, que alimentam o fluxo de promoção de autonomia (P04).
 
-O que congela com as remoções (decisão do André): `perfil_pessoas.modelo_interacao` deixa de ser atualizado (`atualizar_modelos_pessoas`); `usuarios/{uid}.ai_profile.personalidade` fica no último perfil gravado (`consolidar_personalidade`); param as novas sugestões de elevação/subproduto (`detectar_subproduto_semanal` → `deteccao_subproduto.rodar_deteccao`) — as pendentes seguem consultáveis; `knowledge_nodes` deixa de ter memórias quase duplicadas fundidas; `diario_pessoal` não ganha dias novos. Saíram só os pontos de entrada e o que ficou morto com eles (coletor e prompt do diário, ferramentas e persona do planejador).
+O que congela com as remoções (decisão do André): `perfil_pessoas.modelo_interacao` deixa de ser atualizado (`atualizar_modelos_pessoas`); param as novas sugestões de elevação/subproduto (`detectar_subproduto_semanal` → `deteccao_subproduto.rodar_deteccao`) — as pendentes seguem consultáveis; `knowledge_nodes` deixa de ter memórias quase duplicadas fundidas. Saíram só os pontos de entrada e o que ficou morto com eles (ferramentas e persona do planejador).
+
+**Diário e personalidade de volta (26/09/2026, mesmo dia):** a pedido do André, `gerar_diario_pessoal` (21h30) e `consolidar_personalidade` (domingo 22h) voltaram, com coletor e prompt, idênticos ao que eram antes da PR #356, e continuam atrás de `system/settings.personal_diary.enabled` (padrão **desligado** — é preciso ligar em Configurações → Automações → "Diário pessoal"). Evoluções: o perfil entra compacto em `obter_estado_atual` (`perfil_pessoal`, sem leitura extra) e a consolidação de domingo manda o espelho semanal no Telegram com "✏️ Corrigir"/"👍 Está certo"; a correção vai para `ai_profile.personalidade_ajustes` e pesa mais que os diários na leitura seguinte. Custo estimado com o toggle ligado: ~R$ 5–10/mês (30 chamadas Gemini de diário + 4 de consolidação por mês, em modelo frontier, mais duas execuções agendadas de 512 MB). Com o toggle desligado, os dois jobs só leem `system/settings` e saem.
 
 **Outros ajustes:**
 

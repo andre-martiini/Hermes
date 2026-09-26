@@ -1039,6 +1039,20 @@ def _get_session(db, chat_id: str) -> dict:
     doc = db.collection("telegram_sessions").document(chat_id).get()
     return doc.to_dict() or {"chat_id": chat_id, "contexto_ativo": "geral", "history": []}
 
+# Marcadores de "a próxima mensagem livre vira X" armados por botões do
+# Telegram ("✍️ Ajustar" do diário, "✏️ Editar" de rascunho do outbox,
+# "✏️ Corrigir" do espelho do perfil). Só o mais recente vale: armar um limpa
+# os outros, senão o texto iria para o botão tocado antes.
+FREE_TEXT_CAPTURE_KEYS = ("pending_diary_edit", "pending_outbox_edit", "pending_perfil_ajuste")
+
+
+def _arm_free_text_capture(session: dict, key: str, value) -> None:
+    """Arma `key` como a única captura de texto livre ativa na sessão."""
+    for other in FREE_TEXT_CAPTURE_KEYS:
+        session.pop(other, None)
+    session[key] = value
+
+
 def _save_session(db, chat_id: str, session: dict):
     session["updated_at"] = firestore.SERVER_TIMESTAMP
     db.collection("telegram_sessions").document(chat_id).set(session)
