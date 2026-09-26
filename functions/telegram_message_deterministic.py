@@ -42,7 +42,21 @@ from telegram_utils import (
     _try_register_walk_block,
 )
 
-PERFIL_AJUSTE_VALIDADE_HORAS = 24
+PERFIL_AJUSTE_VALIDADE_HORAS = 12
+
+# Capturas que só aceitam mensagem de texto digitada: áudio, foto, documento,
+# figurinha, legenda de mídia ou mensagem editada limpam o marcador e seguem o
+# fluxo normal (o outbox fica de fora: tem tratamento próprio de marcador obsoleto).
+_CAPTURAS_SO_TEXTO = ("pending_diary_edit", "pending_perfil_ajuste")
+
+
+def limpar_capturas_so_texto(session: dict) -> bool:
+    """Remove os marcadores de `_CAPTURAS_SO_TEXTO`. True se algum existia."""
+    limpou = False
+    for chave in _CAPTURAS_SO_TEXTO:
+        if session.pop(chave, None) is not None:
+            limpou = True
+    return limpou
 
 
 def _perfil_ajuste_ainda_valido(marcador, agora=None) -> bool:
@@ -58,11 +72,18 @@ def _perfil_ajuste_ainda_valido(marcador, agora=None) -> bool:
     return agora - desde <= timedelta(hours=PERFIL_AJUSTE_VALIDADE_HORAS)
 
 
-def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, response_mode, voice_profile, perf_state, _persist_turn_to_copilot) -> bool:
+def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, response_mode, voice_profile, perf_state, _persist_turn_to_copilot, texto_livre: bool = True) -> bool:
     """Tenta responder sem LLM (caminhada, edicao de diario/outbox pendente, /entrar,
     busca+trava de contexto, listagem/busca deterministica de acoes, comandos, pedido
     de reset). Retorna True se tratou (a chamada ja enviou a resposta e persistiu o
-    turno); False se nenhum ramo bateu e o fluxo deve seguir para o Gemini."""
+    turno); False se nenhum ramo bateu e o fluxo deve seguir para o Gemini.
+
+    `texto_livre=False` (mídia, legenda ou mensagem editada) nunca é consumido
+    como ajuste de diário nem como correção de perfil: os dois marcadores saem
+    e a mensagem segue o fluxo normal."""
+    if not texto_livre and limpar_capturas_so_texto(session):
+        _save_session(db, chat_id, session)
+
     # --- Registro rápido de caminhada na esteira (determinístico, sem LLM) ---
     walk_reply = _try_register_walk_block(db, text)
     if walk_reply:

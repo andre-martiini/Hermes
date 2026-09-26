@@ -186,7 +186,7 @@ class AjusteTest(unittest.TestCase):
         correcoes = pd._format_ajustes_personalidade([
             {"texto": "Retrabalho me cansa, reunião não.", "em": "2026-09-21T10:00:00+00:00"},
             "lixo", {"texto": ""},
-        ])
+        ], agora=datetime(2026, 9, 26, tzinfo=timezone.utc))
         self.assertEqual(correcoes, "- [2026-09-21] Retrabalho me cansa, reunião não.")
         prompt = pd._build_personality_prompt(PERFIL_ANTIGO, "- pedido do diário", "[2026-09-20]\ntexto", correcoes)
         self.assertIn("CORREÇÕES DIRETAS DO USUÁRIO", prompt)
@@ -201,10 +201,28 @@ class AjusteTest(unittest.TestCase):
         self.assertIn("(nenhum perfil anterior)", prompt)
 
     def test_formato_limita_quantidade(self):
-        ajustes = [{"texto": f"c{i}"} for i in range(15)]
-        linhas = pd._format_ajustes_personalidade(ajustes).split("\n")
+        agora = datetime(2026, 9, 26, tzinfo=timezone.utc)
+        ajustes = [{"texto": f"c{i}", "em": (agora - timedelta(days=15 - i)).isoformat()} for i in range(15)]
+        linhas = pd._format_ajustes_personalidade(ajustes, agora=agora).split("\n")
         self.assertEqual(len(linhas), pd.MAX_AJUSTES_NO_PROMPT)
-        self.assertEqual(linhas[-1], "- c14")
+        self.assertTrue(linhas[-1].endswith(" c14"))
+        self.assertTrue(linhas[0].endswith(" c5"))
+
+    def test_so_entram_correcoes_das_ultimas_8_semanas(self):
+        agora = datetime(2026, 9, 26, 12, tzinfo=timezone.utc)
+        ajustes = [
+            {"texto": "velha", "em": (agora - timedelta(weeks=8, days=1)).isoformat()},
+            {"texto": "no limite", "em": (agora - timedelta(weeks=8) + timedelta(hours=1)).isoformat()},
+            {"texto": "sem data"},
+            {"texto": "recente", "em": (agora - timedelta(days=2)).isoformat()},
+        ]
+        texto = pd._format_ajustes_personalidade(ajustes, agora=agora)
+        self.assertNotIn("velha", texto)
+        self.assertNotIn("sem data", texto)
+        self.assertIn("no limite", texto)
+        self.assertIn("recente", texto)
+        # Armazenamento continua com teto de 20, independente da idade.
+        self.assertEqual(pd.MAX_AJUSTES_PERSONALIDADE, 20)
 
 
 # --------------------------------------------------------------------------- #
@@ -246,11 +264,15 @@ class ConsolidarTest(unittest.TestCase):
 
     def test_grava_perfil_envia_espelho_e_usa_correcoes(self):
         import json
-        db, enabled = self._db(ajustes=[{"texto": "Retrabalho me cansa.", "em": "2026-09-21T10:00:00+00:00"}])
+        db, enabled = self._db(ajustes=[
+            {"texto": "Retrabalho me cansa.", "em": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()},
+            {"texto": "Correção antiga.", "em": (datetime.now(timezone.utc) - timedelta(weeks=10)).isoformat()},
+        ])
         gerar, enviar = self._run(db, enabled, json.dumps(PERFIL_NOVO))
 
         prompt = gerar.call_args.kwargs["contents"]
         self.assertIn("Retrabalho me cansa.", prompt)
+        self.assertNotIn("Correção antiga.", prompt)
         self.assertIn("ajuste ", prompt)  # ajustes dos diários continuam indo
 
         ai = db.store["usuarios/u1"]["ai_profile"]
@@ -397,11 +419,69 @@ class CapturaCorrecaoTest(unittest.TestCase):
         self.addCleanup(mock.patch.stopall)
         self.persist = mock.Mock()
 
-    def _responder(self, texto, session):
+    def _responder(self, texto, session, texto_livre=True):
         return tmd.try_deterministic_reply(
             mock.Mock(), "tok", "123", texto, session, "gk", "texto",
-            "masculina", {}, self.persist,
+            "masculina", {}, self.persist, texto_livre=texto_livre,
         )
+
+    def test_midia_legenda_ou_edicao_nao_vira_correcao(self):
+        for pendente in ("pending_perfil_ajuste", "pending_diary_edit"):
+            with self.subTest(marcador=pendente):
+                session = {pendente: datetime.now(timezone.utc).isoformat()}
+                with mock.patch("personal_diary.registrar_ajuste_personalidade") as registrar, \
+                        mock.patch("personal_diary.apply_diary_feedback") as diario:
+                    # Legenda de foto chega como `text`, mas texto_livre=False.
+                    tratada = self._responder("legenda da foto", session, texto_livre=False)
+                self.assertFalse(tratada)
+                registrar.assert_not_called()
+                diario.assert_not_called()
+                self.assertNotIn(pendente, session)
+                self.save.assert_called()
+
+    def test_audio_sem_texto_limpa_o_marcador(self):
+        session = {"pending_perfil_ajuste": datetime.now(timezone.utc).isoformat()}
+        self.assertFalse(self._responder("", session, texto_livre=False))
+        self.assertNotIn("pending_perfil_ajuste", session)
+
+    def test_corrigir_depois_editar_rascunho_texto_vai_para_o_rascunho(self):
+        import telegram_callbacks_sessao as tcs
+        session = {}
+        with patch("telegram_callbacks_perfil._send_telegram_message"), \
+                patch("telegram_callbacks_perfil._save_session"), \
+                patch("telegram_callbacks_perfil._answer_callback_query"):
+            tcp.handle(MagicMock(), "tok", "q1", "123", "perfil:fix", {}, session, "s", MagicMock(), None, None)
+        self.assertIn("pending_perfil_ajuste", session)
+        with patch.object(tcs, "_send_telegram_message"), \
+                patch.object(tcs, "_save_session"), \
+                patch.object(tcs, "_answer_callback_query"):
+            tcs.handle(MagicMock(), "tok", "q2", "123", "outbox:rasc-1:edit", {}, session, "s",
+                       MagicMock(), MagicMock(), MagicMock())
+        self.assertEqual(session.get("pending_outbox_edit"), "rasc-1")
+        self.assertNotIn("pending_perfil_ajuste", session)
+
+        with mock.patch("personal_diary.registrar_ajuste_personalidade") as registrar, \
+                mock.patch("outbox_aprovacao.aplicar_edicao_rascunho", return_value={"status": "ok"}) as editar:
+            self.assertTrue(self._responder("Texto novo do rascunho", session))
+        registrar.assert_not_called()
+        self.assertEqual(editar.call_args.args[1:3], ("rasc-1", "Texto novo do rascunho"))
+
+    def test_editar_rascunho_depois_corrigir_texto_vai_para_o_perfil(self):
+        import telegram_callbacks_sessao as tcs
+        session = {}
+        with patch.object(tcs, "_send_telegram_message"), \
+                patch.object(tcs, "_save_session"), \
+                patch.object(tcs, "_answer_callback_query"):
+            tcs.handle(MagicMock(), "tok", "q2", "123", "diary_edit:2026-09-25", {}, session, "s",
+                       MagicMock(), MagicMock(), MagicMock())
+            tcs.handle(MagicMock(), "tok", "q2", "123", "outbox:rasc-1:edit", {}, session, "s",
+                       MagicMock(), MagicMock(), MagicMock())
+        self.assertEqual(set(k for k in session if k.startswith("pending_")), {"pending_outbox_edit"})
+        with patch("telegram_callbacks_perfil._send_telegram_message"), \
+                patch("telegram_callbacks_perfil._save_session"), \
+                patch("telegram_callbacks_perfil._answer_callback_query"):
+            tcp.handle(MagicMock(), "tok", "q1", "123", "perfil:fix", {}, session, "s", MagicMock(), None, None)
+        self.assertEqual(set(k for k in session if k.startswith("pending_")), {"pending_perfil_ajuste"})
 
     def test_texto_vira_correcao_e_confirma(self):
         session = {"pending_perfil_ajuste": datetime.now(timezone.utc).isoformat()}
@@ -441,8 +521,9 @@ class CapturaCorrecaoTest(unittest.TestCase):
 
     def test_validade_do_marcador(self):
         agora = datetime(2026, 9, 27, 12, tzinfo=timezone.utc)
+        self.assertEqual(tmd.PERFIL_AJUSTE_VALIDADE_HORAS, 12)
         self.assertTrue(tmd._perfil_ajuste_ainda_valido("2026-09-27T01:00:00+00:00", agora))
-        self.assertFalse(tmd._perfil_ajuste_ainda_valido("2026-09-25T01:00:00+00:00", agora))
+        self.assertFalse(tmd._perfil_ajuste_ainda_valido("2026-09-26T23:00:00+00:00", agora))
         self.assertTrue(tmd._perfil_ajuste_ainda_valido(True, agora))
 
 
@@ -507,3 +588,41 @@ class PerfilPessoalEstadoAtualTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebhookTextoLivreTest(unittest.TestCase):
+    """telegramWebhook marca `texto_livre` só para texto digitado em mensagem nova."""
+
+    def _run(self, update, session=None):
+        import telegram_handlers_core as thc
+        db = MagicMock()
+        req = MagicMock()
+        req.method = "POST"
+        req.get_json.return_value = update
+        session = session if session is not None else {}
+        with patch.object(thc, "_get_allowed_chat_id", return_value=None), \
+                patch.object(thc, "_get_session", return_value=session), \
+                patch.object(thc, "_save_session") as salvar, \
+                patch.object(thc, "_get_db", return_value=db), \
+                patch.object(thc, "_get_telegram_token", return_value="tok"):
+            fn = getattr(thc.telegramWebhook, "__wrapped__", thc.telegramWebhook)
+            fn(req)
+        payloads = [c.args[0] for c in db.collection.return_value.document.return_value.set.call_args_list]
+        return payloads, session, salvar
+
+    def test_mensagem_de_texto_nova_e_texto_livre(self):
+        payloads, _, _ = self._run({"message": {"chat": {"id": 1}, "message_id": 5, "text": "oi"}})
+        self.assertTrue(payloads and payloads[-1]["texto_livre"])
+
+    def test_mensagem_editada_nao_e_texto_livre(self):
+        payloads, _, _ = self._run({"edited_message": {"chat": {"id": 1}, "message_id": 5, "text": "oi"}})
+        self.assertFalse(payloads[-1]["texto_livre"])
+
+    def test_figurinha_limpa_captura_pendente(self):
+        session = {"pending_perfil_ajuste": "2026-09-26T10:00:00+00:00", "pending_outbox_edit": "x"}
+        payloads, session, salvar = self._run(
+            {"message": {"chat": {"id": 1}, "message_id": 6, "sticker": {"file_id": "s"}}}, session)
+        self.assertEqual(payloads, [])
+        self.assertNotIn("pending_perfil_ajuste", session)
+        self.assertEqual(session.get("pending_outbox_edit"), "x")
+        salvar.assert_called_once()

@@ -44,6 +44,7 @@ PERFIL_CALLBACK_CORRIGIR = "perfil:fix"
 PERFIL_CALLBACK_OK = "perfil:ok"
 MAX_AJUSTES_PERSONALIDADE = 20       # guardados em ai_profile.personalidade_ajustes
 MAX_AJUSTES_NO_PROMPT = 10           # os mais recentes vão para a consolidação
+IDADE_MAX_AJUSTE_NO_PROMPT = timedelta(weeks=8)  # correção mais velha deixa de pesar
 MAX_CHARS_AJUSTE = 1000
 MAX_ITENS_POR_LINHA_ESPELHO = 3
 AJUSTE_CONFIRMACAO = "Anotado — entra na próxima leitura de domingo."
@@ -526,21 +527,32 @@ def ajustarDiarioPessoal(req: https_fn.CallableRequest):
     return {"texto": novo_texto}
 
 
-def _format_ajustes_personalidade(ajustes) -> str:
+def _format_ajustes_personalidade(ajustes, agora: datetime | None = None) -> str:
     """Correções diretas do perfil (botão "✏️ Corrigir" do espelho semanal),
-    mais recentes por último, no formato que vai para o prompt."""
+    mais recentes por último, no formato que vai para o prompt. Só entram as
+    das últimas IDADE_MAX_AJUSTE_NO_PROMPT (sem data legível, não entra), no
+    máximo MAX_AJUSTES_NO_PROMPT."""
     if not isinstance(ajustes, list):
         return ""
-    linhas = []
-    for ajuste in ajustes[-MAX_AJUSTES_NO_PROMPT:]:
+    agora = agora or datetime.now(timezone.utc)
+    limite = agora - IDADE_MAX_AJUSTE_NO_PROMPT
+    recentes = []
+    for ajuste in ajustes:
         if not isinstance(ajuste, dict):
             continue
         texto = str(ajuste.get("texto") or "").strip()
         if not texto:
             continue
-        em = str(ajuste.get("em") or "")[:10]
-        linhas.append(f"- [{em}] {texto}" if em else f"- {texto}")
-    return "\n".join(linhas)
+        try:
+            em = datetime.fromisoformat(str(ajuste.get("em") or ""))
+        except ValueError:
+            continue
+        if em.tzinfo is None:
+            em = em.replace(tzinfo=timezone.utc)
+        if em < limite:
+            continue
+        recentes.append(f"- [{em.date().isoformat()}] {texto}")
+    return "\n".join(recentes[-MAX_AJUSTES_NO_PROMPT:])
 
 
 def _build_personality_prompt(perfil_atual, ajustes_text: str, diaries_text: str, correcoes_text: str = "") -> str:

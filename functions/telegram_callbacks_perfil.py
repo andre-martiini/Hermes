@@ -5,7 +5,8 @@ Depois de gravar um perfil novo, `consolidar_personalidade`
 botões:
 
 - "✏️ Corrigir" (`perfil:fix`): marca a sessão com `pending_perfil_ajuste`
-  (mesmo padrão de `pending_diary_edit` do "✍️ Ajustar" do diário); a próxima
+  (mesmo padrão de `pending_diary_edit` do "✍️ Ajustar" do diário, e armar
+  um limpa os outros — `_arm_free_text_capture`); a próxima
   mensagem livre vira a correção, gravada por
   `personal_diary.registrar_ajuste_personalidade` em
   telegram_message_deterministic.py.
@@ -22,7 +23,12 @@ módulo.
 from datetime import datetime, timezone
 
 from personal_diary import PERFIL_CALLBACK_CORRIGIR, PERFIL_CALLBACK_OK
-from telegram_utils import _answer_callback_query, _save_session, _send_telegram_message
+from telegram_utils import (
+    _answer_callback_query,
+    _arm_free_text_capture,
+    _save_session,
+    _send_telegram_message,
+)
 
 PENDING_KEY = "pending_perfil_ajuste"
 PEDIDO_CORRECAO = (
@@ -34,7 +40,7 @@ PEDIDO_CORRECAO = (
 def handle(db, token, query_id, chat_id, data, message, session, copilot_session_id, _persist_callback_turn, _pending_web_card, _clear_pending_web_card) -> bool:
     """Trata perfil:fix / perfil:ok. Retorna True se tratou."""
     if data == PERFIL_CALLBACK_CORRIGIR:
-        session[PENDING_KEY] = datetime.now(timezone.utc).isoformat()
+        _arm_free_text_capture(session, PENDING_KEY, datetime.now(timezone.utc).isoformat())
         _save_session(db, chat_id, session)
         _answer_callback_query(token, query_id, "Me conta o que corrigir.")
         _persist_callback_turn("Botão: corrigir perfil pessoal", PEDIDO_CORRECAO)

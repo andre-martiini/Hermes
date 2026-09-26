@@ -242,9 +242,15 @@ def _process_telegram_message(db, data: dict):
     print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
     _perf_mark(perf_state, "telegram.session_load")
 
+    # Só texto digitado numa mensagem nova arma as capturas de diário/perfil.
+    # Itens antigos da fila (sem o campo) caem na regra equivalente.
+    texto_livre = data.get("texto_livre")
+    if texto_livre is None:
+        texto_livre = bool(text) and not audio_info and not file_info
     if try_deterministic_reply(
         db, token, chat_id, text, session, gemini_key, response_mode,
         voice_profile, perf_state, _persist_turn_to_copilot,
+        texto_livre=bool(texto_livre),
     ):
         return
 
@@ -854,13 +860,22 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
                 print(f"[Webhook] File download error: {e}")
 
     if not text and not audio_info and not file_info:
+        # Figurinha, localização, contato etc.: não entra na fila, mas também
+        # não pode deixar a captura de diário/perfil esperando a próxima
+        # mensagem de texto como se nada tivesse chegado.
+        _limpar_capturas_so_texto_da_sessao(db, chat_id)
         return https_fn.Response("OK", status=200)
+
+    # Texto digitado numa mensagem nova (não legenda de mídia, não edição):
+    # só ele pode virar ajuste de diário ou correção de perfil.
+    texto_livre = bool(message.get("text")) and "message" in update and not audio_info and not file_info
 
     # --- Enfileira no Firestore ---
     payload = {
         "chat_id": chat_id,
         "message_id": message_id,
         "text": text,
+        "texto_livre": texto_livre,
         "from_user": from_user,
         "audio_info": audio_info,
         "file_info": file_info,
@@ -872,6 +887,16 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     db.collection("telegram_inbound").document(f"{chat_id}_{message_id}").set(payload)
 
     return https_fn.Response("OK", status=200)
+
+def _limpar_capturas_so_texto_da_sessao(db, chat_id: str) -> None:
+    try:
+        from telegram_message_deterministic import limpar_capturas_so_texto
+        session = _get_session(db, chat_id)
+        if limpar_capturas_so_texto(session):
+            _save_session(db, chat_id, session)
+    except Exception as exc:
+        print(f"[Webhook] Falha ao limpar captura de texto pendente: {exc}")
+
 
 @firestore_fn.on_document_written(document="health_exercise_logs/{date}")
 def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:

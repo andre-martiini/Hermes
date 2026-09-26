@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from telegram_utils import (
     _EXIT_KEYBOARD,
     _answer_callback_query,
+    _arm_free_text_capture,
     _cached_acao_snapshot,
     _call_web_callable,
     _find_latest_copilot_card_message_id,
@@ -312,7 +313,7 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
 
     elif data.startswith("diary_edit:"):
         diary_date = data.split("diary_edit:")[1].strip()
-        session["pending_diary_edit"] = diary_date
+        _arm_free_text_capture(session, "pending_diary_edit", diary_date)
         _save_session(db, chat_id, session)
         _answer_callback_query(token, query_id, "Me conta o que ajustar.")
         msg = f"✍️ Pode me contar o que você quer mudar no diário de {diary_date}. Sua próxima mensagem vira o ajuste."
@@ -362,7 +363,7 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
             else:
                 _answer_callback_query(token, query_id, f"Erro: {res.get('erro', 'falha ao descartar')}")
         elif action == "edit":
-            session["pending_outbox_edit"] = outbox_id
+            _arm_free_text_capture(session, "pending_outbox_edit", outbox_id)
             _save_session(db, chat_id, session)
             _answer_callback_query(token, query_id, "Me manda o texto novo.")
             msg = "✍️ Me manda o texto novo em resposta a esta mensagem."
