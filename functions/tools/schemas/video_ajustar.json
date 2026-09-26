@@ -1,0 +1,40 @@
+{
+  "name": "video_ajustar",
+  "description": "Aplica os ajustes que o usuário pediu no storyboard de um projeto do Hermes Vídeo (estado aguardando_storyboard) e gera a prévia de novo refazendo SÓ o que mudou: narração nova refaz o áudio daquela cena; descrição visual nova da cena i refaz o quadro final dela (Ki, e o K0 se for a cena 1); instrução para um quadro refaz só aquele quadro. Repetir o mesmo ajuste não muda nada. Roda como job: devolve status 'processing' + job_id; busque com consultar_job.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "projeto_id": {
+        "type": "string",
+        "description": "ID do projeto."
+      },
+      "cenas": {
+        "type": "array",
+        "description": "Mudanças por cena. Informe só os campos que mudam.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "ordem": {"type": "integer", "description": "Número da cena (1 = primeira)."},
+            "narracao": {"type": "string", "description": "Novo texto falado (até ~15 palavras para caber em 8 s)."},
+            "descricao_visual": {"type": "string", "description": "Nova descrição do que aparece na tela."},
+            "prompt_video": {"type": "string", "description": "Novo prompt de movimento para o Veo."}
+          },
+          "required": ["ordem"]
+        }
+      },
+      "quadros": {
+        "type": "array",
+        "description": "Instruções para refazer quadros específicos da folha de contato.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "indice": {"type": "integer", "description": "Número do quadro (0 para K0, 4 para K4...)."},
+            "instrucao": {"type": "string", "description": "O que mudar no quadro (ex.: 'câmera mais aberta', 'personagem sorrindo')."}
+          },
+          "required": ["indice", "instrucao"]
+        }
+      }
+    },
+    "required": ["projeto_id"]
+  }
+}

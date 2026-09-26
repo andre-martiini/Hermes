@@ -164,6 +164,9 @@ _CATALOG: dict[str, str] = {
     # Hermes Vídeo (functions/video/) — Fase 1: criar e consultar, sem custo.
     "video_criar_projeto": "Cria um projeto de vídeo a partir do roteiro aprovado (cenas, narração, bíblia visual) e devolve a estimativa de custo; não gera nada pago",
     "video_status": "Estado de um projeto de vídeo: etapa atual, cenas, progresso dos clipes, custo estimado e real, link do vídeo",
+    # Fase 2: prévia do storyboard (centavos por chamada, teto por prévia; roda como job).
+    "video_gerar_previa": "Gera a prévia do storyboard de um projeto de vídeo: narração por cena, quadros-chave, folha de contato e MP3 no Drive (custo de centavos, com teto)",
+    "video_ajustar": "Ajusta o storyboard de um projeto de vídeo (narração ou descrição de cena, instrução para um quadro) e refaz só o que mudou",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -236,6 +239,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     "consumir_autorizacao_argos",
     # Grava o projeto de vídeo (custo zero; as tools pagas chegam na Fase 4).
     "video_criar_projeto",
+    # Prévia e ajustes: gravam cenas/quadros e publicam arquivos no Drive.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -244,6 +250,9 @@ _ASYNC_TOOLS: set[str] = {
     "gerar_relatorio",
     "pesquisar_internet",
     "ler_pagina_web",
+    # Hermes Vídeo: narração + quadros-chave + folha de contato levam minutos.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -286,6 +295,9 @@ _VOICE_EXCLUDED: set[str] = {
     # Roteiro de vídeo é uma estrutura de cenas com narração e bíblia visual —
     # escrito e aprovado na conversa com o Claude, não ditado. Status continua falado.
     "video_criar_projeto",
+    # A prévia se avalia olhando a folha de contato; o ajuste é por cena/quadro.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 _schema_cache: dict[str, dict] = {}
@@ -1908,9 +1920,13 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # HOJE, mas e um contrato de SNAPSHOT, nao uma garantia estrutural como
     # o enum de `listar_rascunhos_pendentes` -- registrado explicitamente
     # para nao repetir o erro de redacao corrigido na sub-entrega 24/N.
-    # `_TOOLS_LONGAS` (`mcp_server.py`) tem hoje EXATAMENTE 3 tools:
-    # `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_analisar_
-    # email` -- as 3 unicas que podem produzir um job com `status == "done"`.
+    # `_TOOLS_LONGAS` (`mcp_server.py`) tinha EXATAMENTE 3 tools quando isto
+    # foi escrito: `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_
+    # analisar_email`. Revisado ao entrar o Hermes Vídeo (Fase 2, 26/09/2026):
+    # `video_gerar_previa` e `video_ajustar` devolvem, no sucesso, TEXTO JSON
+    # (`video/previa.py::resposta_tool`) justamente para manter `resultado`
+    # como string; na falha devolvem dict com `erro`, que vira job em erro e
+    # nunca chega a este ramo. Teste: test_video_previa.TestToolsPeloMcp.
     # Lidos os 3 handlers por completo (`tools/telegram_extended.py`, ramos
     # `gerar_relatorio`/`ler_documento_na_integra`; `tools/buscar_e_
     # analisar_email.py`): TODO `return` das 3 e uma `string` (Markdown/

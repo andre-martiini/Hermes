@@ -165,6 +165,10 @@ _TOOLS_LONGAS: set[str] = {
     "gerar_relatorio",
     "ler_documento_na_integra",
     "buscar_e_analisar_email",
+    # Hermes Vídeo: narração por cena + quadros-chave encadeados + folha de contato.
+    # Devolvem texto JSON no sucesso (o `resultado` de `consultar_job` é string).
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60

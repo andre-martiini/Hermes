@@ -2380,6 +2380,23 @@ def _video_status(ctx: ToolContext, args: dict):
     return projeto.obter_status(ctx.db, str(args.get("projeto_id") or ""), ctx.user_uid)
 
 
+# Fase 2 — tools longas (mcp_server._TOOLS_LONGAS): rodam como job em mcp_jobs.
+def _video_gerar_previa(ctx: ToolContext, args: dict):
+    from video import midia, previa
+
+    resultado = previa.gerar_previa(ctx.db, str(args.get("projeto_id") or ""), ctx.user_uid,
+                                    midia.ServicosVertex(ctx.db))
+    return previa.resposta_tool(resultado)
+
+
+def _video_ajustar(ctx: ToolContext, args: dict):
+    from video import midia, previa
+
+    resultado = previa.ajustar(ctx.db, str(args.get("projeto_id") or ""), ctx.user_uid,
+                               midia.ServicosVertex(ctx.db), cenas=args.get("cenas"), quadros=args.get("quadros"))
+    return previa.resposta_tool(resultado)
+
+
 # ---------------------------------------------------------------------------
 # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — thin
 # wrappers em torno das funções PURAS já existentes e testadas em
@@ -2680,6 +2697,8 @@ _HANDLERS: dict = {
     # Hermes Vídeo — Fase 1
     "video_criar_projeto": _video_criar_projeto,
     "video_status": _video_status,
+    "video_gerar_previa": _video_gerar_previa,
+    "video_ajustar": _video_ajustar,
 }
 
 

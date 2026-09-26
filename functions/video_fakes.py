@@ -40,7 +40,13 @@ class DocRef:
     def update(self, data):
         if self.path not in self._db.docs:
             raise KeyError(f"{self.path} não existe")
-        self._db.docs[self.path].update(copy.deepcopy(data))
+        atual = self._db.docs[self.path]
+        for chave, valor in data.items():
+            incremento = getattr(valor, "value", None) if type(valor).__name__ == "Increment" else None
+            if incremento is not None:
+                atual[chave] = (atual.get(chave) or 0) + incremento
+            else:
+                atual[chave] = copy.deepcopy(valor)
         self._db.escritas += 1
 
     def collection(self, nome):
@@ -72,13 +78,16 @@ class Batch:
         self._ops = []
 
     def set(self, ref, data, merge=False):
-        self._ops.append((ref, data, merge))
+        self._ops.append(("set", ref, data, merge))
+
+    def update(self, ref, data):
+        self._ops.append(("update", ref, data, False))
 
     def commit(self):
         if self._db.falhar_commit:
             raise RuntimeError("commit falhou")
-        for ref, data, merge in self._ops:
-            ref.set(data, merge=merge)
+        for op, ref, data, merge in self._ops:
+            ref.update(data) if op == "update" else ref.set(data, merge=merge)
 
 
 class Transacao:
