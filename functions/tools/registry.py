@@ -164,6 +164,9 @@ _CATALOG: dict[str, str] = {
     # Hermes Vídeo (functions/video/) — Fase 1: criar e consultar, sem custo.
     "video_criar_projeto": "Cria um projeto de vídeo a partir do roteiro aprovado (cenas, narração, bíblia visual) e devolve a estimativa de custo; não gera nada pago",
     "video_status": "Estado de um projeto de vídeo: etapa atual, cenas, progresso dos clipes, custo estimado e real, link do vídeo",
+    # Fase 2: prévia do storyboard (centavos por chamada, teto por prévia; roda como job).
+    "video_gerar_previa": "Gera a prévia do storyboard de um projeto de vídeo: narração por cena, quadros-chave, folha de contato e MP3 no Drive (custo de centavos, com teto)",
+    "video_ajustar": "Ajusta o storyboard de um projeto de vídeo (narração ou descrição de cena, instrução para um quadro) e refaz só o que mudou",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -236,6 +239,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     "consumir_autorizacao_argos",
     # Grava o projeto de vídeo (custo zero; as tools pagas chegam na Fase 4).
     "video_criar_projeto",
+    # Prévia e ajustes: gravam cenas/quadros e publicam arquivos no Drive.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -244,6 +250,9 @@ _ASYNC_TOOLS: set[str] = {
     "gerar_relatorio",
     "pesquisar_internet",
     "ler_pagina_web",
+    # Hermes Vídeo: narração + quadros-chave + folha de contato levam minutos.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -286,6 +295,9 @@ _VOICE_EXCLUDED: set[str] = {
     # Roteiro de vídeo é uma estrutura de cenas com narração e bíblia visual —
     # escrito e aprovado na conversa com o Claude, não ditado. Status continua falado.
     "video_criar_projeto",
+    # A prévia se avalia olhando a folha de contato; o ajuste é por cena/quadro.
+    "video_gerar_previa",
+    "video_ajustar",
 }
 
 _schema_cache: dict[str, dict] = {}

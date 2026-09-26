@@ -1255,6 +1255,28 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "video", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — só lê video_projetos/{id} e as subcoleções cenas/clipes",
     ),
+    # Fase 2: gastam centavos (TTS + imagem na Vertex), com teto por prévia checado antes.
+    "video_gerar_previa": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria resposta traz os links da folha de contato e do MP3; video_status relê o estado",
+        rede_servico="Vertex AI (Gemini TTS e imagem), Cloud Storage (gestao-hermes-video), Google Drive",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente no que custa: video/previa.py só gera narração de cena sem áudio da versão "
+        "atual e quadro sem imagem ou marcado pendente, gravando cada resultado como checkpoint; repetir "
+        "a chamada não paga de novo. Cada chamada publica uma nova folha de contato e um novo MP3 no Drive "
+        "(previa_versao + 1) — arquivos novos, não efeito pago. Recusa antes de gastar se o custo previsto "
+        "passar de teto_previa_usd.",
+    ),
+    "video_ajustar": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria resposta traz a prévia refeita e a lista de ajustes aplicados",
+        rede_servico="Vertex AI (Gemini TTS e imagem), Cloud Storage (gestao-hermes-video), Google Drive",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente: video/previa.py::ajustar só grava campo cujo texto mudou (texto igual não gera "
+        "versão nova nem marca quadro pendente) e, sem mudança, responde 'Nada mudou' sem chamar a prévia.",
+    ),
 }
 
 del _L, _R, _C
