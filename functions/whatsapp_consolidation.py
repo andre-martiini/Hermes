@@ -138,7 +138,7 @@ def _build_transcript(messages: list[dict]) -> str:
 
 def _build_synthesis_prompt(chat_name: str, transcript: str) -> str:
     hoje = datetime.now(TZ_SP).strftime("%Y-%m-%d")
-    return f"""Você é o Hermes, assistente pessoal. Abaixo está o transcript LITERAL de mensagens
+    return f"""Você é o Gaspar, assistente pessoal. Abaixo está o transcript LITERAL de mensagens
 selecionadas da conversa de WhatsApp "{chat_name}" (montado automaticamente, sem interpretação).
 Hoje é {hoje}.
 

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Mapa de Cloud Functions
-description: Cloud Functions exportadas pelo backend Python do Hermes, agrupadas por arquivo e tipo de trigger.
+description: Cloud Functions exportadas pelo backend Python do Gaspar, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
 timestamp: 2026-08-22T00:00:00-03:00

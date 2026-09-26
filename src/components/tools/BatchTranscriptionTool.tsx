@@ -284,7 +284,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
   const sendDocumentToCopiloto = () => {
     if (finalDocument && onSendToCopiloto) {
       onSendToCopiloto(finalDocument);
-      showToast('Documento enviado ao Copiloto Hermes!', 'success');
+      showToast('Documento enviado ao Copiloto Gaspar!', 'success');
     }
   };
 
@@ -454,7 +454,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
         {items.length === 0 ? (
           <div className={`border rounded-none-none p-10 text-center mb-6 ${cardBg}`}>
             <p className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Nenhum item na fila</p>
-            <p className={`text-[11px] font-mono mt-2 ${textMuted}`}>Adicione arquivos/textos acima, ou compartilhe mensagens do WhatsApp direto para o Hermes pelo celular.</p>
+            <p className={`text-[11px] font-mono mt-2 ${textMuted}`}>Adicione arquivos/textos acima, ou compartilhe mensagens do WhatsApp direto para o Gaspar pelo celular.</p>
           </div>
         ) : (
           <div className="space-y-2 mb-6">

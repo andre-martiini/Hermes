@@ -81,7 +81,7 @@ const FALLBACK_ANALYSIS: FinancialHealthAnalysis = {
     title: 'Diagnóstico financeiro em preparação',
     summary: 'Ainda não há uma análise consolidada para este recorte financeiro.',
     mainRisk: 'Dados insuficientes para apontar o risco principal com segurança.',
-    positivePoint: 'Assim que houver dados suficientes, o Hermes destacará o ponto mais saudável do mês.',
+    positivePoint: 'Assim que houver dados suficientes, o Gaspar destacará o ponto mais saudável do mês.',
     actionProposal: 'Revise as entradas, contas e gastos do mês para permitir uma proposta mais precisa.',
 };
 

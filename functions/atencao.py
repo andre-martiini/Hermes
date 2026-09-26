@@ -557,7 +557,7 @@ def avaliar_rotinas_saude(
                 "dias_sem_pesagem": dias_sem_pesagem,
                 "ultimo_peso": peso_val,
             },
-            "sugestao": "Registrar pesagem matinal no módulo Saúde do Hermes",
+            "sugestao": "Registrar pesagem matinal no módulo Saúde do Gaspar",
             "estado": ESTADO_ABERTO,
             "chave_dedupe": f"saude_pesagem_ausente:{data_str}",
         })

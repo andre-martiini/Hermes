@@ -1,7 +1,7 @@
 ---
 type: proposta
 title: Interface Vocal Híbrida + Servidor MCP — Proposta Consolidada
-description: Avaliação da proposta de interface vocal (STT/TTS local + Gemini + MCP) confrontada com o estado atual do Hermes, e proposta final revisada.
+description: Avaliação da proposta de interface vocal (STT/TTS local + Gemini + MCP) confrontada com o estado atual do Gaspar, e proposta final revisada.
 tags: [hermes, okf, copiloto, voz, mcp, arquitetura]
 timestamp: 2026-07-21T00:00:00-03:00
 ---
@@ -13,7 +13,7 @@ Este documento avalia a proposta original de "Interface Vocal Híbrida e Servido
 real do repositório, registra os problemas encontrados na verificação ponta a ponta e
 apresenta a **proposta final revisada**.
 
-## 1. Confronto com o estado atual do Hermes
+## 1. Confronto com o estado atual do Gaspar
 
 A proposta original assume um cenário quase greenfield. O repositório mostra outra
 realidade:
@@ -25,11 +25,11 @@ realidade:
 | Tool discovery dinâmica necessária | Existe um registry central rico: `functions/tools/registry.py` com ~42 tools, schemas JSON por tool (`functions/tools/schemas/*.json`), gating de confirmação (`_NEEDS_CONFIRMATION`), tools assíncronas via Pub/Sub (`_ASYNC_TOOLS`) |
 | Copiloto acessível por rota HTTP REST | O copiloto principal é o callable Firebase `askCopilotoHermes` (`functions/main.py:7029`), com RAG híbrido, memória de sessão em Firestore (`sessoes_copiloto`), persona (`system/copilot_soul`), perfil do usuário e protocolos de gating |
 | Autenticação a definir (Firebase ID Token) | Web usa Firebase Auth via callables; o voice-bridge atual usa **senha falada** validada contra a transcrição (frágil); Telegram usa whitelist de chat_id |
-| Memória = FIFO de 4–6 turnos no cliente | O Hermes já tem memória de sessão server-side (`sessoes_copiloto`), memória global (`knowledge_nodes`), POPs e perfil deduzido do usuário |
+| Memória = FIFO de 4–6 turnos no cliente | O Gaspar já tem memória de sessão server-side (`sessoes_copiloto`), memória global (`knowledge_nodes`), POPs e perfil deduzido do usuário |
 | Gemini 3.5 Flash-Lite | Coerente: o copiloto já usa `gemini-3.5-flash-lite` (chat) com escalada para `gemini-3.6-flash` em prompts complexos (`gemini_cost_controls.py`) — modelos atualizados em 2026-07-21 (ver changelog no fim deste documento) |
 | STT/TTS inexistentes | Backend já transcreve com **Groq Whisper-Large-V3-Turbo** (fallback Gemini) e sintetiza TTS com `gemini-2.5-flash-preview-tts` (canal Telegram); frontend tem Web Speech API e MediaRecorder |
 
-**Diagnóstico central:** o problema real do Hermes hoje não é ausência de voz — é
+**Diagnóstico central:** o problema real do Gaspar hoje não é ausência de voz — é
 **fragmentação de cérebros**. Existem quatro orquestradores paralelos (copiloto web
 Gemini, Godmode Claude, router Telegram, voice-bridge Live), e o voice-bridge duplica à
 mão 7 tools somente-leitura que já derivaram do catálogo oficial de 42. A proposta
@@ -126,7 +126,7 @@ registry existente, não de um catálogo novo.
         internet via tool pesquisar_internet)  Token + whitelist de UID   │
                                                │ reusa registry + schemas │
                                                ▼                          │
-                                    Firestore / Cloud Functions (Hermes)──┘
+                                    Firestore / Cloud Functions (Gaspar)──┘
 ```
 
 ### Módulo C — Servidor MCP (construir primeiro)
@@ -173,8 +173,8 @@ por texto, como um chatbot comum — não um script headless.
   Auth REST.
 
 **Caminho de evolução para online**: como a UI já é web e o servidor MCP já é cloud,
-migrar para o formato online (dentro do web app do Hermes) significa apenas portar o
-componente de UI para o React do Hermes e trocar o processamento local de áudio por um
+migrar para o formato online (dentro do web app do Gaspar) significa apenas portar o
+componente de UI para o React do Gaspar e trocar o processamento local de áudio por um
 serviço na nuvem (Gemini Live ou STT/TTS gerenciado) — o cérebro, o catálogo e a
 interface permanecem os mesmos.
 
@@ -191,7 +191,7 @@ interface permanecem os mesmos.
 - **Confirmação falada obrigatória** antes de qualquer tool `needs_confirmation`:
   o orquestrador intercepta a function call, verbaliza a proposta ("Vou criar a ação X
   com prazo Y — confirma?") e só chama `tools/call` após "sim" explícito.
-- Feedback auditivo imediato ("Verificando no Hermes…") disparado localmente ao
+- Feedback auditivo imediato ("Verificando no Gaspar…") disparado localmente ao
   detectar a function call — mantido da proposta original.
 
 ### Fases de implementação
@@ -308,7 +308,7 @@ real contra Firestore de produção, nem deploy real no Cloud Functions (exige
 > as **53** do catálogo, com o executor unificado em `functions/tools/hermes_tools.py`
 > (`tools/mcp_dispatch.py` foi removido). O estado atual, o modelo de segurança, o
 > passo a passo de conexão de um cliente e o débito de duplicação com `main.py` estão
-> em **[Servidor MCP do Hermes](./mcp-servidor.md)** — esta seção fica como registro
+> em **[Servidor MCP do Gaspar](./mcp-servidor.md)** — esta seção fica como registro
 > histórico da fase 1.
 
 ### Próximos passos (fase 3 e além)
@@ -363,7 +363,7 @@ máquina do usuário via `uvicorn main:app`.
 
 - **Push-to-talk, não VAD contínuo** — segurar o botão para falar. VAD/barge-in fica
   para a fase 3 (como já estava planejado no Módulo A).
-- **GEMINI_API_KEY própria e local** — não passa pelo backend do Hermes
+- **GEMINI_API_KEY própria e local** — não passa pelo backend do Gaspar
   (`system/api_keys` no Firestore), para não exigir mais uma chamada autenticada só
   para buscar a chave. É a chave pessoal do usuário, fica só no `.env` local.
 - **Cancelamento de eco pelo navegador** (`getUserMedia({echoCancellation:true})`) em

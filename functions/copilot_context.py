@@ -22,7 +22,7 @@ def _format_core_context(db) -> str:
     core = _get_doc_dict(db, "system", "copilot_core")
     soul = _get_doc_dict(db, "system", "copilot_soul")
 
-    lines = ["## CONTEXTO CENTRAL DO HERMES"]
+    lines = ["## CONTEXTO CENTRAL DO GASPAR"]
     if core.get("content"):
         lines.append(f"- nucleo: {_clean(core.get('content'), 900)}")
 
@@ -104,7 +104,7 @@ def _format_recent_memories(db, limit: int = 8) -> str:
 
     if not memories:
         return ""
-    return "## MEMORIAS RECENTES DO HERMES\n" + "\n".join(memories)
+    return "## MEMORIAS RECENTES DO GASPAR\n" + "\n".join(memories)
 
 
 def _get_doc_dict(db, collection: str, document: str) -> dict:

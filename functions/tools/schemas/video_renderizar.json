@@ -1,6 +1,6 @@
 {
   "name": "video_renderizar",
-  "description": "Renderiza um projeto do Hermes Vídeo depois da aprovação 2 (storyboard): gera os clipes no Veo em sequência, monta com a narração e entrega o MP4 no Drive, no diário da ação e com aviso no Telegram. É o passo CARO e faz parte do piso de confirmação obrigatória: a primeira chamada devolve uma prévia com o custo máximo, o gasto do mês e o teto mensal, e um confirmation_id — mostre isso ao usuário e só chame confirmar_acao(confirmation_id) depois do 'sim' dele. Também retoma uma renderização que parou em erro (clipes prontos não são pagos de novo). Recusa, sem gastar, se a prévia não estiver pronta ou se passar do orçamento do projeto ou do teto mensal. Leva alguns minutos: acompanhe com video_status.",
+  "description": "Renderiza um projeto do Gaspar Vídeo depois da aprovação 2 (storyboard): gera os clipes no Veo em sequência, monta com a narração e entrega o MP4 no Drive, no diário da ação e com aviso no Telegram. É o passo CARO e faz parte do piso de confirmação obrigatória: a primeira chamada devolve uma prévia com o custo máximo, o gasto do mês e o teto mensal, e um confirmation_id — mostre isso ao usuário e só chame confirmar_acao(confirmation_id) depois do 'sim' dele. Também retoma uma renderização que parou em erro (clipes prontos não são pagos de novo). Recusa, sem gastar, se a prévia não estiver pronta ou se passar do orçamento do projeto ou do teto mensal. Leva alguns minutos: acompanhe com video_status.",
   "parameters": {
     "type": "object",
     "properties": {

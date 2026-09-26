@@ -2260,7 +2260,7 @@ export const TaskExecutionView = ({
         const proximos = [...atuais, texto].slice(-30);
         onSave(task.id, { insights_ignorados: proximos });
       }
-      showToast('Opinião ignorada. O Hermes não vai mais sugerir isto.', 'success');
+      showToast('Opinião ignorada. O Gaspar não vai mais sugerir isto.', 'success');
     }
     handleInsightDiscard();
   };
@@ -3097,7 +3097,7 @@ export const TaskExecutionView = ({
                             <span className="text-[10px] font-black uppercase tracking-wider opacity-70">Silenciar vínculo de e-mail</span>
                           </label>
                           <p className={`text-[10px] pl-6 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
-                            Por padrão, o Hermes verifica se e-mails recebidos têm relação com esta ação e sugere
+                            Por padrão, o Gaspar verifica se e-mails recebidos têm relação com esta ação e sugere
                             registrar no diário via Telegram. Marque para não receber essas sugestões nesta ação.
                           </p>
                         </div>
@@ -3467,9 +3467,9 @@ export const TaskExecutionView = ({
                     <button
                       onClick={() => insightState && setShowInsightModal(true)}
                       title={
-                        isAnalyzingInsight ? 'O Hermes está analisando seu progresso...' :
+                        isAnalyzingInsight ? 'O Gaspar está analisando seu progresso...' :
                           insightState ? (insightState.nivel === 1 ? 'Insight Crítico detectado!' : insightState.nivel === 3 ? 'Ideia Criativa disponível!' : 'Sugestão de Otimização personalizada.') :
-                            'O Hermes está observando em busca de insights...'
+                            'O Gaspar está observando em busca de insights...'
                       }
                       className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all relative ${isAnalyzingInsight
                         ? `animate-pulse ${isDark ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-500'}`
@@ -3536,7 +3536,7 @@ export const TaskExecutionView = ({
             {!isCopilotPanelCollapsed && renderResizeHandle('copilot')}
 
             {isCopilotPanelCollapsed ? (
-              renderCollapsedPanelRail('copilot', 'Copiloto', 'Hermes', () => setIsCopilotCollapsed(false))
+              renderCollapsedPanelRail('copilot', 'Copiloto', 'Gaspar', () => setIsCopilotCollapsed(false))
             ) : (
               <div
                 onScrollCapture={(event) => {
@@ -3821,7 +3821,7 @@ export const TaskExecutionView = ({
             <div className="mt-3 text-center">
               <button
                 onClick={handleInsightIgnore}
-                title="O Hermes não voltará a sugerir esta opinião específica nesta ação"
+                title="O Gaspar não voltará a sugerir esta opinião específica nesta ação"
                 className={`text-[10px] font-medium transition-all inline-flex items-center gap-1 ${isDark ? 'text-white/30 hover:text-white/60' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>

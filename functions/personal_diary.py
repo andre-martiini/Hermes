@@ -249,7 +249,7 @@ def _build_diary_prompt(date_str: str, material: dict, persona_text: str, profil
     material_json = json.dumps(material, ensure_ascii=False, indent=2)
     return f"""Você vai escrever, em primeira pessoa, o diário pessoal do usuário do dia {date_str}.
 
-PERSONA DO HERMES (contexto de quem observa, não é quem escreve o diário):
+PERSONA DO GASPAR (contexto de quem observa, não é quem escreve o diário):
 {persona_text or "(sem persona configurada)"}
 
 PERFIL CONHECIDO DO USUÁRIO:
@@ -427,7 +427,7 @@ def _rewrite_diary_with_feedback(db, date_str: str, feedback_text: str) -> tuple
 
     genai = get_genai_module()
     client = genai.Client(api_key=api_key)
-    prompt = f"""Você é o Hermes reescrevendo, a pedido do próprio usuário, o diário pessoal dele do dia {date_str}.
+    prompt = f"""Você é o Gaspar reescrevendo, a pedido do próprio usuário, o diário pessoal dele do dia {date_str}.
 
 TEXTO ATUAL DO DIÁRIO:
 {texto_atual}
@@ -576,7 +576,7 @@ diagnóstico nem uma avaliação, são impressões úteis para personalizar a in
 PERFIL DE PERSONALIDADE ATUAL (evolua-o, não o substitua do zero — mantenha o que ainda é válido):
 {json.dumps(perfil_atual, ensure_ascii=False) if perfil_atual else "(nenhum perfil anterior)"}
 
-AJUSTES QUE O PRÓPRIO USUÁRIO PEDIU NOS DIÁRIOS DA SEMANA (sinal forte de calibração — o que ele corrigiu sobre como o Hermes o descreveu):
+AJUSTES QUE O PRÓPRIO USUÁRIO PEDIU NOS DIÁRIOS DA SEMANA (sinal forte de calibração — o que ele corrigiu sobre como o Gaspar o descreveu):
 {ajustes_text or "(nenhum ajuste pedido)"}
 
 DIÁRIOS DA SEMANA:

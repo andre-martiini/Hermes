@@ -242,7 +242,7 @@ class ServicosVertex(Servicos):
     def _caminho(self, uri: str) -> str:
         bucket, _, caminho = uri.removeprefix("gs://").partition("/")
         if bucket != BUCKET:
-            raise ValueError(f"URI fora do bucket do Hermes Vídeo: {uri}")
+            raise ValueError(f"URI fora do bucket do Gaspar Vídeo: {uri}")
         return caminho
 
     def ler(self, uri: str) -> bytes:

@@ -1040,17 +1040,17 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         className={`fixed bottom-5 right-5 z-[700] flex max-w-[280px] items-center gap-3 border px-4 py-3 text-left shadow-2xl transition-all hover:-translate-y-0.5 rounded-full ${
           isDark ? 'border-white/10 bg-[#191c1c] text-slate-100' : 'border-[#e5e7eb] bg-white text-slate-900'
         }`}
-        aria-label="Reabrir conversa com o Hermes"
+        aria-label="Reabrir conversa com o Gaspar"
         title="Reabrir conversa"
       >
         <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center border p-1.5 rounded-full ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-white'}`}>
-          <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+          <img src="/logo.png" alt="Gaspar" className="h-full w-full object-contain" />
           {isVoiceLive && (
             <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2 border-white bg-emerald-500" />
           )}
         </span>
         <span className="min-w-0">
-          <span className="block truncate font-sans text-[10px] font-bold uppercase tracking-wider">Hermes</span>
+          <span className="block truncate font-sans text-[10px] font-bold uppercase tracking-wider">Gaspar</span>
           <span className={`block truncate font-sans text-[10px] font-medium ${mutedClass}`}>{subtitle}</span>
         </span>
       </button>
@@ -1097,10 +1097,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
             <div className={`flex h-9 w-9 items-center justify-center border p-1.5 rounded-lg ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-surface'}`}>
-              <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+              <img src="/logo.png" alt="Gaspar" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <p className={`truncate font-sans text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Hermes</p>
+              <p className={`truncate font-sans text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Gaspar</p>
               <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>Histórico global</p>
             </div>
           </div>
@@ -1217,10 +1217,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             </button>
             )}
             <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex rounded-lg ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-white'}`}>
-              <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+              <img src="/logo.png" alt="Gaspar" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <h2 className={`truncate font-sans text-sm font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{headerTitle ?? 'Copiloto Hermes'}</h2>
+              <h2 className={`truncate font-sans text-sm font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{headerTitle ?? 'Copiloto Gaspar'}</h2>
               <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>{headerSubtitle ?? `Chat ${modeLabel} · ${currentSessionId ? 'conversa ativa' : 'nova conversa'}`}</p>
             </div>
           </div>
@@ -1267,7 +1267,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               <div className="flex flex-1 flex-col justify-center py-10">
                 <div className="mb-8 flex items-center gap-4">
                   <div className={`flex h-14 w-14 items-center justify-center border p-2.5 rounded-xl ${isDark ? 'bg-white border-white/10' : 'bg-white border-[#e5e7eb] shadow-sm'}`}>
-                    <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+                    <img src="/logo.png" alt="Gaspar" className="h-full w-full object-contain" />
                   </div>
                   <div>
                     <p className={`font-sans text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>{copilotMode === 'estrategia' ? 'Copiloto de estratégia' : 'Copiloto global'}</p>
@@ -1300,7 +1300,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                           : ''
                       }`}>
                         <div className={`mb-2 flex items-center gap-2 font-sans text-[8px] font-bold uppercase tracking-wider ${isUser ? 'text-current opacity-60' : mutedClass}`}>
-                          <span>{isUser ? 'Você' : 'Hermes'}</span>
+                          <span>{isUser ? 'Você' : 'Gaspar'}</span>
                           <span>{formatMessageTime(msg.timestamp)}</span>
                           <button
                             type="button"
@@ -1613,7 +1613,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   }
                 }}
                 disabled={isBlocked}
-                placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : (composerPlaceholder ?? 'Mensagem para o Hermes')}
+                placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : (composerPlaceholder ?? 'Mensagem para o Gaspar')}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
               <button

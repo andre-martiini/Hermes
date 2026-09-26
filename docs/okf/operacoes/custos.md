@@ -1,13 +1,13 @@
 ---
 type: runbook
-title: Custos do Hermes — diagnóstico e atribuição
+title: Custos do Gaspar — diagnóstico e atribuição
 description: Composição real da fatura do projeto gestao-hermes, como atribuir leituras de Firestore e CPU por function, e as consultas BigQuery usadas pelo relatório diário de custos.
 resource: https://console.cloud.google.com/billing
 tags: [hermes, okf, custos, billing, firestore, bigquery, cloud-functions]
 timestamp: 2026-09-08T21:00:00-03:00
 ---
 
-# Custos do Hermes — diagnóstico e atribuição
+# Custos do Gaspar — diagnóstico e atribuição
 
 Demanda: DEV-2026-0003 · [Issue #203](https://github.com/andre-martiini/Hermes/issues/203).
 
@@ -29,7 +29,7 @@ Total: **R$ 307,57** em 30 dias (orçamento do projeto: R$ 200/mês).
 
 Leitura: infraestrutura de leitura + CPU = 62%; IA = 26%. **Deploy (Cloud Build + Artifact Registry) não é o problema** (R$ 6,43).
 
-Custos **fora do GCP** gerados pelo Hermes, sem alerta e (até o PR 2) sem telemetria: Anthropic (**nenhum processo do Hermes usa mais** desde 2026-09-19: o Godmode foi extinto e o planejador de notificações, as elevações e o secretário WhatsApp migraram para Gemini; o código, a telemetria `system_usage/claude` e a dependência `anthropic` foram removidos — o histórico antigo segue no Firestore), OpenAI (`gpt-5.6-luna`), Groq (Whisper), Tavily, Twilio.
+Custos **fora do GCP** gerados pelo Gaspar, sem alerta e (até o PR 2) sem telemetria: Anthropic (**nenhum processo do Gaspar usa mais** desde 2026-09-19: o Godmode foi extinto e o planejador de notificações, as elevações e o secretário WhatsApp migraram para Gemini; o código, a telemetria `system_usage/claude` e a dependência `anthropic` foram removidos — o histórico antigo segue no Firestore), OpenAI (`gpt-5.6-luna`), Groq (Whisper), Tavily, Twilio.
 
 ## 2. Por que a fatura não diz "quem"
 
@@ -102,4 +102,4 @@ Permissão necessária para a function do relatório: `roles/bigquery.jobUser` n
 | 2 | Telemetria Claude/OpenAI/Groq/Tavily + rotear ~50 chamadas Gemini diretas por `generate_content_logged` | — |
 | 3 | Cortes guiados pelos dados (sync só grava diff; reminders 256 MB; listeners por view; cadências; Secret Manager 1 região; limpeza do Artifact Registry) | após 3–5 dias de medição |
 
-Meta: fatura GCP do Hermes ≤ R$ 150/mês sem remover funcionalidade.
+Meta: fatura GCP do Gaspar ≤ R$ 150/mês sem remover funcionalidade.

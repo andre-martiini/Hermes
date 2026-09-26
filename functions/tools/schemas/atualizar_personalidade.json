@@ -1,6 +1,6 @@
 {
   "name": "atualizar_personalidade",
-  "description": "Atualiza a personalidade dinâmica do copiloto Hermes",
+  "description": "Atualiza a personalidade dinâmica do copiloto Gaspar",
   "parameters": {
     "type": "object",
     "properties": {

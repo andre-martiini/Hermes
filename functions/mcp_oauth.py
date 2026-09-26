@@ -336,7 +336,7 @@ def _handle_register(req: https_fn.Request) -> https_fn.Response:
 _PAGINA_CONSENTIMENTO = """<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Autorizar acesso ao Hermes</title>
+<title>Autorizar acesso ao Gaspar</title>
 <style>
   :root { color-scheme: light dark; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;
@@ -356,8 +356,8 @@ _PAGINA_CONSENTIMENTO = """<!doctype html>
   .erro { margin-top:14px; color:#ff8080; font-size:14px; }
 </style></head><body>
 <div class="card">
-  <h1>Autorizar acesso ao Hermes</h1>
-  <p>Um cliente esta pedindo permissao para operar o Hermes em seu nome.</p>
+  <h1>Autorizar acesso ao Gaspar</h1>
+  <p>Um cliente esta pedindo permissao para operar o Gaspar em seu nome.</p>
   <div class="app">Cliente: <b>__CLIENT_NAME__</b><br>Retorno: __REDIRECT__</div>
   <ul>
     <li>Ler e criar acoes, agenda, financas, saude e contatos</li>
@@ -507,7 +507,7 @@ def _handle_authorize_post(req: https_fn.Request) -> https_fn.Response:
     if not uid or not _uid_autorizado(uid):
         return _erro_oauth(
             "access_denied",
-            "Esta conta nao esta autorizada a usar o servidor MCP do Hermes.",
+            "Esta conta nao esta autorizada a usar o servidor MCP do Gaspar.",
             status=403,
         )
 

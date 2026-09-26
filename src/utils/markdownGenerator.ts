@@ -88,7 +88,7 @@ export const generateActionsMarkdown = (tasks: Tarefa[]): string => {
   let md = '# Exportacao do Modulo: Acoes\n';
   md += `**Data da Exportacao:** ${timestamp}\n\n`;
   md += '## 1. Visao Geral\n';
-  md += 'Exportacao detalhada das acoes cadastradas no Hermes, incluindo metadados, diario de bordo e anexos vinculados.\n\n';
+  md += 'Exportacao detalhada das acoes cadastradas no Gaspar, incluindo metadados, diario de bordo e anexos vinculados.\n\n';
   md += '## 2. Resumo\n';
   md += `- Total de acoes: ${tasks.length}\n`;
   md += `- Em andamento: ${tasks.filter(task => normalizeStatus(task.status) === 'em andamento').length}\n`;

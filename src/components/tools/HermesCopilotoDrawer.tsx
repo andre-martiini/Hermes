@@ -348,7 +348,7 @@ const buildDiagnosisMarkdown = (diagnosis: DiagnosisRecord) => {
     if (diagnosis.markdownContent?.trim()) return diagnosis.markdownContent;
 
     const lines = [
-        '# Hermes - Diagnostico de Codigo',
+        '# Gaspar - Diagnostico de Codigo',
         diagnosis.nomeRepositorio ? `**Repositorio:** \`${diagnosis.nomeRepositorio}\`  ` : '',
         diagnosis.sistemaId ? `**Sistema:** \`${diagnosis.sistemaId}\`  ` : '',
         `**Problema:** ${diagnosis.descricaoProblema}`,
@@ -581,7 +581,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     `;
                 }
 
-                const prompt = `Você é o Copiloto Hermes (uma IA assistente). Analise o progresso desta tarefa.
+                const prompt = `Você é o Copiloto Gaspar (uma IA assistente). Analise o progresso desta tarefa.
                 
                 DADOS DA OPERAÇÃO:
                 ${contextText}
@@ -1967,7 +1967,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </svg>
                         </div>
                         <p className="text-lg font-bold uppercase tracking-wider">Solte para anexar</p>
-                        <p className="text-xs mt-2 opacity-80 max-w-[240px]">O Hermes usará este contexto para analisar documentos ou salvar no acervo.</p>
+                        <p className="text-xs mt-2 opacity-80 max-w-[240px]">O Gaspar usará este contexto para analisar documentos ou salvar no acervo.</p>
                     </div>
                 </div>
             )}
@@ -2001,7 +2001,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     )}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
                         <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
-                            {isHealthCopilot ? 'Copiloto de Saude' : isFinancialCopilot ? 'Copiloto Financeiro' : 'Copiloto Hermes'}
+                            {isHealthCopilot ? 'Copiloto de Saude' : isFinancialCopilot ? 'Copiloto Financeiro' : 'Copiloto Gaspar'}
                         </span>
                         {taskId && (
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -2148,7 +2148,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         {isProactiveInsight && (
                                             <div className={`mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
                                                 <span aria-hidden="true">{"\uD83E\uDD16"}</span>
-                                                <span>Hermes</span>
+                                                <span>Gaspar</span>
                                             </div>
                                         )}
                                         <div className={`absolute right-2 top-2 flex gap-1 opacity-0 transition-all group-hover:opacity-100`}>
@@ -2718,7 +2718,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         Conflito de Memória
                                                     </p>
                                                     <p className="text-[10px] text-slate-600 mb-3">
-                                                        O Hermes encontrou duas versões muito parecidas e precisa de uma decisão explícita.
+                                                        O Gaspar encontrou duas versões muito parecidas e precisa de uma decisão explícita.
                                                     </p>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                                                         <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-3">

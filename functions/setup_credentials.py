@@ -76,7 +76,7 @@ def _authenticate(credentials_path, token_path, force):
     if force or not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
         print("")
-        print("Abrindo login Google. Autorize a conta que o Hermes deve usar.")
+        print("Abrindo login Google. Autorize a conta que o Gaspar deve usar.")
         print("Se o navegador nao abrir, copie a URL exibida no terminal.")
         print("Aguarde esta janela mostrar a mensagem de sucesso antes de fechar.")
         print("")

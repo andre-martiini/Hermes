@@ -1192,7 +1192,7 @@ def criar_acao_no_sistema(
                     "titulo": f"Contexto de E-mail: {titulo}",
                     "tipo": "paragrafo",
                     "conteudo_regra": source_knowledge_text,
-                    "justificativa_da_regra": "Contexto extraido via integracao Gmail-Hermes",
+                    "justificativa_da_regra": "Contexto extraido via integracao Gmail-Gaspar",
                     "tags": tags,
                     "area_tematica": area_tematica,
                     "status": "ativo",
@@ -1395,7 +1395,7 @@ def preparar_edicao_em_lote(ctx: ToolContext, args: dict):
         return json.dumps({
             "tipo": "edicao_em_lote",
             "items": prepared_items,
-            "justificativa": args.get("justificativa") or "Edicao de multiplas acoes via Copiloto Hermes.",
+            "justificativa": args.get("justificativa") or "Edicao de multiplas acoes via Copiloto Gaspar.",
             "status": "pending",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }, ensure_ascii=False)
@@ -1520,7 +1520,7 @@ def preparar_remocao_horarios_em_lote(ctx: ToolContext, args: dict):
 
         return json.dumps({
             "items": items,
-            "justificativa": args.get("justificativa") or "Remocao de horarios em lote via Copiloto Hermes.",
+            "justificativa": args.get("justificativa") or "Remocao de horarios em lote via Copiloto Gaspar.",
             "status": "pending",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }, ensure_ascii=False)
@@ -1795,7 +1795,7 @@ def editar_acao(ctx: ToolContext, args: dict):
             ctx.db.collection("tarefas").document(str(args.get("task_id"))).update({
                 "acompanhamento": gcf.ArrayUnion([{
                     "data": datetime.now(timezone.utc).isoformat(),
-                    "nota": f"[Copiloto Hermes] Motivo do ajuste: {motivo}",
+                    "nota": f"[Copiloto Gaspar] Motivo do ajuste: {motivo}",
                 }])
             })
             resultado["motivo_registrado"] = True

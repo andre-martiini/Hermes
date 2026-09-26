@@ -1,6 +1,6 @@
 {
   "name": "buscar_arquivos_acervo",
-  "description": "Busca documentos, manuais e arquivos no Acervo Global do Hermes",
+  "description": "Busca documentos, manuais e arquivos no Acervo Global do Gaspar",
   "parameters": {
     "type": "object",
     "properties": {

@@ -12,15 +12,15 @@ from tools.inventory import (
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 
 _CATALOG: dict[str, str] = {
-    "consultar_historico_acoes": "Busca acoes, tarefas e projetos no Hermes por frase natural, texto aproximado, status, area ou prazo",
-    "buscar_arquivos_acervo": "Busca documentos, manuais e arquivos no Acervo Global do Hermes",
+    "consultar_historico_acoes": "Busca acoes, tarefas e projetos no Gaspar por frase natural, texto aproximado, status, area ou prazo",
+    "buscar_arquivos_acervo": "Busca documentos, manuais e arquivos no Acervo Global do Gaspar",
     "buscar_conversas_whatsapp": "Busca conversas de WhatsApp indexadas (digests) por similaridade semantica",
     "pesquisar_internet": "Busca informacoes recentes e atuais na internet",
     "ler_pagina_web": "Le e extrai o conteudo completo de uma URL",
     "consultar_agenda": "Consulta eventos e compromissos na agenda do Google Calendar",
     "encontrar_slot_livre": "Encontra o proximo horario livre disponivel na agenda",
-    "criar_acao_no_sistema": "Cria uma nova acao ou tarefa no Hermes com titulo, area, data de execucao, prazo final opcional e plano",
-    "agendar_lembrete_acao": "Agenda um lembrete para uma acao do Hermes com data, horario e texto opcional",
+    "criar_acao_no_sistema": "Cria uma nova acao ou tarefa no Gaspar com titulo, area, data de execucao, prazo final opcional e plano",
+    "agendar_lembrete_acao": "Agenda um lembrete para uma acao do Gaspar com data, horario e texto opcional",
     "salvar_memoria_global": "Salva um fato duravel ou preferencia permanente na memoria global",
     "registrar_correcao_procedimento": "Registra uma correcao ou melhoria em um procedimento existente",
     "buscar_e_analisar_email": "Busca e analisa e-mails no Gmail usando query padrao",
@@ -28,7 +28,7 @@ _CATALOG: dict[str, str] = {
     "ler_documento_na_integra": "Le um documento do Drive e responde uma pergunta exata com base no conteudo",
     "salvar_pop_global": "Cria ou atualiza um POP operacional reutilizavel",
     "resolver_conflito_memoria": "Resolve conflitos entre memorias globais previamente detectados",
-    "atualizar_personalidade": "Atualiza a personalidade dinamica do copiloto Hermes",
+    "atualizar_personalidade": "Atualiza a personalidade dinamica do copiloto Gaspar",
     "resolver_conflito_procedimento": "Valida ou resolve um procedimento marcado para revisao",
     "editar_plano_acao": "Atualiza o plano de acao de uma tarefa existente preservando passos concluidos",
     "preparar_edicao_acao": "Prepara uma proposta de edicao de campos de uma tarefa sem gravar no banco",

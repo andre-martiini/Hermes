@@ -209,13 +209,13 @@ _CATALOG_TTL_MS = 300_000
 # Hermes antes da primeira chamada real. Extrair para uma constante evita as
 # duas respostas divergirem sem que ninguem decida isso de proposito.
 _INSTRUCTIONS = (
-    "Hermes e o sistema de gestao pessoal e profissional do usuario: "
+    "Gaspar e o sistema de gestao pessoal e profissional do usuario: "
     "acoes, agenda, financas, saude, contatos, acervo e memoria.\n\n"
     "- Comece uma conversa nova com `obter_estado_atual` para se situar "
     "no dia, em vez de perguntar ao usuario o que esta acontecendo.\n"
     "- Quando o usuario afirmar um fato duravel sobre si, sobre pessoas "
     "ou sobre como as coisas funcionam, grave com `salvar_memoria_global`. "
-    "O Hermes so aprende o que for gravado explicitamente.\n"
+    "O Gaspar so aprende o que for gravado explicitamente.\n"
     "- O trabalho e organizado como macroacao dividida em subtarefas "
     "(`plano_acao`). O controle fino vive na subtarefa: `editar_plano_acao` "
     "marca cada etapa como `em_andamento`, `aguardando_terceiro` (com "
@@ -478,7 +478,7 @@ def _authenticate(req: https_fn.Request) -> str:
         raise McpError(-32001, "Token nao identifica um usuario")
 
     if not _is_uid_allowed(uid):
-        raise McpError(-32002, "UID nao autorizado a usar o servidor MCP do Hermes")
+        raise McpError(-32002, "UID nao autorizado a usar o servidor MCP do Gaspar")
 
     return uid
 
@@ -1209,7 +1209,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             "confirmation_id": confirmation_id,
             "expira_em": getattr(ctx, "mcp_confirmation_expires_at", datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
             "message": (
-                "Esta acao grava no Hermes e exige confirmacao explicita do usuario. "
+                "Esta acao grava no Gaspar e exige confirmacao explicita do usuario. "
                 "Mostre a ele exatamente o que sera feito e, apos o 'sim', chame "
                 "confirmar_acao(confirmation_id) para executar."
             ),
@@ -1546,7 +1546,7 @@ def _handle_prompts_list() -> dict:
             "title": titulo,
             "description": (
                 ("[SEMPRE ATIVO] " if dados.get("sempre_ativo") is True else "")
-                + f"POP do Hermes: {titulo}."
+                + f"POP do Gaspar: {titulo}."
                 + (f" Aciona em: {', '.join(gatilhos[:6])}." if gatilhos else "")
             ),
         })
@@ -1569,15 +1569,15 @@ def _handle_prompts_get(params: dict) -> dict:
         raise McpError(-32602, f"POP '{titulo}' nao tem instrucao_sistema definida.")
 
     return {
-        "description": f"POP do Hermes: {titulo}",
+        "description": f"POP do Gaspar: {titulo}",
         "messages": [{
             "role": "user",
             "content": {
                 "type": "text",
                 "text": (
-                    f"Siga este procedimento operacional do Hermes.\n\n"
+                    f"Siga este procedimento operacional do Gaspar.\n\n"
                     f"## {titulo}\n\n{instrucao}\n\n"
-                    "Use as tools do Hermes para executar o que o procedimento pedir. "
+                    "Use as tools do Gaspar para executar o que o procedimento pedir. "
                     "Se faltar algum dado para seguir um passo, pergunte antes de "
                     "prosseguir em vez de supor."
                 ),

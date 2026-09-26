@@ -539,7 +539,7 @@ def _anexar_na_acao(db, task_id: str, *, nome: str, link: str, drive_id: str | N
     if drive_id:
         item["drive_file_id"] = drive_id
     arquivo = "FILE::JSON::" + json.dumps({"n": nome, "v": link}, ensure_ascii=False)
-    nota = f"Imagem gerada pelo Hermes: {prompt[:300]}"
+    nota = f"Imagem gerada pelo Gaspar: {prompt[:300]}"
     db.collection("tarefas").document(task_id).update({
         "pool_dados": firestore.ArrayUnion([item]),
         "acompanhamento": firestore.ArrayUnion([{"data": agora, "nota": arquivo}, {"data": agora, "nota": nota}]),

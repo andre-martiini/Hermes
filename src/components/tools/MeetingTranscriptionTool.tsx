@@ -670,7 +670,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const userId = auth.currentUser?.uid || '';
 
   const copilotHeaderSubtitle = isRecording ? 'Acompanhando a reunião ao vivo' : 'Baseado na transcrição da reunião';
-  const copilotEmptyDescription = 'Respondo com base no que já foi transcrito. Também busco ações, conhecimento e histórico do Hermes quando for útil — e você pode colar prints para dar mais contexto.';
+  const copilotEmptyDescription = 'Respondo com base no que já foi transcrito. Também busco ações, conhecimento e histórico do Gaspar quando for útil — e você pode colar prints para dar mais contexto.';
 
   // ── Tokens de estilo ──
   const panelClass = isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200';
@@ -700,7 +700,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         </button>
         <div className="min-w-0 flex-1">
           <h2 className={`truncate text-2xl font-bold tracking-tight ${titleClass}`}>Reuniões em Tempo Real</h2>
-          <p className={`truncate text-sm font-medium ${mutedClass}`}>Transcrição ao vivo com o Copiloto Hermes ao lado.</p>
+          <p className={`truncate text-sm font-medium ${mutedClass}`}>Transcrição ao vivo com o Copiloto Gaspar ao lado.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -1128,9 +1128,9 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               <button
                 onClick={() => setIsCopilotCollapsed(false)}
                 className={`flex h-full w-12 flex-col items-center justify-center gap-3 rounded-2xl border transition-all ${ghostButtonClass} ${panelClass}`}
-                title="Abrir Copiloto Hermes"
+                title="Abrir Copiloto Gaspar"
               >
-                <img src="/logo.png" alt="Hermes" className="h-6 w-6 object-contain" />
+                <img src="/logo.png" alt="Gaspar" className="h-6 w-6 object-contain" />
                 <span className={`text-[9px] font-black uppercase tracking-widest ${mutedClass}`} style={{ writingMode: 'vertical-rl' }}>
                   Copiloto
                 </span>
@@ -1580,7 +1580,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 1. Participantes e Consentimento Ético
               </h4>
               <p className={`text-xs mb-3 leading-relaxed ${mutedClass}`}>
-                O Hermes transcreve as falas e extrai automaticamente compromissos e tarefas com o nome dos participantes.
+                O Gaspar transcreve as falas e extrai automaticamente compromissos e tarefas com o nome dos participantes.
               </p>
 
               <div className="flex flex-col gap-2">

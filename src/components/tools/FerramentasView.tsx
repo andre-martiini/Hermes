@@ -174,7 +174,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       if (data.refined) onAddTextIdea(data.refined);
     } catch (error: any) {
       console.error("Erro ao transcrever:", error);
-      showAlert("Erro", error?.message || "Erro ao processar áudio via Hermes AI.");
+      showAlert("Erro", error?.message || "Erro ao processar áudio via Gaspar AI.");
     } finally {
       setIsProcessing(false);
     }
@@ -231,7 +231,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         id: 'meeting_transcription',
         code: 'ID-006',
         title: 'Reuniões em Tempo Real',
-        desc: 'Transcrição ao vivo com o Copiloto Hermes integrado.',
+        desc: 'Transcrição ao vivo com o Copiloto Gaspar integrado.',
         dotColor: 'bg-indigo-500',
         iconClasses: isDark ? 'text-indigo-400 group-hover:bg-indigo-600' : 'text-indigo-600 group-hover:bg-indigo-600',
         lineColor: 'group-hover:bg-indigo-500',
@@ -241,7 +241,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         id: 'pop_manager',
         code: 'ID-007',
         title: 'Gestor de POPs',
-        desc: 'Procedimentos Operacionais Padrão do Hermes.',
+        desc: 'Procedimentos Operacionais Padrão do Gaspar.',
         dotColor: 'bg-blue-500',
         iconClasses: isDark ? 'text-blue-400 group-hover:bg-blue-600' : 'text-blue-600 group-hover:bg-blue-600',
         lineColor: 'group-hover:bg-blue-500',
@@ -376,7 +376,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
               <input
                 type="text"
                 disabled={isRecording || isProcessing}
-                placeholder={isRecording ? "Gravando... Fale agora." : isProcessing ? "Hermes AI está processando áudio..." : "Digite ou grave uma nova nota..."}
+                placeholder={isRecording ? "Gravando... Fale agora." : isProcessing ? "Gaspar AI está processando áudio..." : "Digite ou grave uma nova nota..."}
                 className={`flex-1 bg-transparent border-none outline-none px-2 py-3 text-[13px] font-sans font-semibold ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-800 placeholder:text-slate-300'} ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
                 value={textInput}
                 onChange={e => setTextInput(e.target.value)}

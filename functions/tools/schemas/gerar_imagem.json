@@ -46,7 +46,7 @@
       },
       "task_id": {
         "type": "string",
-        "description": "ID de uma ação do Hermes: a imagem fica anexada a ela e registrada no diário"
+        "description": "ID de uma ação do Gaspar: a imagem fica anexada a ela e registrada no diário"
       },
       "nome_arquivo": {
         "type": "string",

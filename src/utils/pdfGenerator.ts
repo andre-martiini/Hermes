@@ -172,7 +172,7 @@ export const generateScholarshipForm = (
   doc.setFontSize(8);
   doc.text(`Gerado em: ${dateStr}`, margin, pageWidth - 10); // Using pageWidth as height proxy if simple A4, actually pageHeight
   const pageHeight = doc.internal.pageSize.getHeight();
-  doc.text(`Gerado por Hermes System`, margin, pageHeight - 10);
+  doc.text(`Gerado por Gaspar System`, margin, pageHeight - 10);
 
   // Save
   doc.save(`Ficha_Cadastro_${person.nome.replace(/\s+/g, '_')}.pdf`);

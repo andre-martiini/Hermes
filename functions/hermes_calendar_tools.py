@@ -182,7 +182,7 @@ def formatar_eventos_para_llm(
     for ev in events:
         inicio = ev["inicio"] or "dia inteiro"
         fim_str = f"–{ev['fim']}" if ev["fim"] else ""
-        tag = " [HERMES]" if ev["hermes_id"] else ""
+        tag = " [GASPAR]" if ev["hermes_id"] else ""
         lines.append(f"• {ev['data']} {inicio}{fim_str} — {ev['titulo']}{tag}")
 
     rodape: list[str] = []

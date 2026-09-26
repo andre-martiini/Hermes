@@ -32,7 +32,7 @@ from orchestrator import VoiceSession
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="Hermes Voice Client")
+app = FastAPI(title="Gaspar Voice Client")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Audio minimo considerado valido (~0.15s a 16kHz/16bit mono) — evita mandar
@@ -107,7 +107,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=1011)
         return
 
-    await websocket.send_json({"type": "status", "message": "Conectado ao Hermes Voice."})
+    await websocket.send_json({"type": "status", "message": "Conectado ao Gaspar Voice."})
 
     loop = asyncio.get_event_loop()
 

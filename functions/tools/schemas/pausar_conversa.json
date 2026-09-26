@@ -6,7 +6,7 @@
     "properties": {
       "contato_ou_grupo": {"type": "string", "description": "Nome, telefone ou chat_id conhecido do contato/grupo."},
       "retomar_em": {"type": "string", "description": "ISO datetime com fuso, amanha_manha ou hoje_tarde."},
-      "mensagem": {"type": "string", "description": "Texto opcional; sem ele usa o modelo curto do Hermes."},
+      "mensagem": {"type": "string", "description": "Texto opcional; sem ele usa o modelo curto do Gaspar."},
       "acao_id": {"type": "string", "description": "Ação a atualizar; se omitida, usa vínculo WhatsApp↔ação ativo."},
       "_confirmed": {"type": "boolean", "description": "Repita com true somente depois da confirmação explícita do usuário."}
     },

@@ -1,6 +1,6 @@
 {
   "name": "video_criar_projeto",
-  "description": "Cria um projeto de vídeo do Hermes Vídeo a partir do roteiro JÁ APROVADO pelo usuário (aprovação 1) e devolve projeto_id, a duração provisória de cada clipe (4, 6 ou 8 s, pelo ritmo de ~2,0 palavras/s) e a estimativa de custo e de tempo. Custo zero: não gera narração, imagem nem vídeo. Uma cena cuja narração não cabe em 8 s é recusada com erro pedindo para dividi-la. Chamar de novo cria OUTRO projeto — use video_status para consultar um que já existe.",
+  "description": "Cria um projeto de vídeo do Gaspar Vídeo a partir do roteiro JÁ APROVADO pelo usuário (aprovação 1) e devolve projeto_id, a duração provisória de cada clipe (4, 6 ou 8 s, pelo ritmo de ~2,0 palavras/s) e a estimativa de custo e de tempo. Custo zero: não gera narração, imagem nem vídeo. Uma cena cuja narração não cabe em 8 s é recusada com erro pedindo para dividi-la. Chamar de novo cria OUTRO projeto — use video_status para consultar um que já existe.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -20,7 +20,7 @@
       },
       "acao_id": {
         "type": "string",
-        "description": "ID da ação do Hermes à qual o vídeo pertence (o link final vai para o diário dela)."
+        "description": "ID da ação do Gaspar à qual o vídeo pertence (o link final vai para o diário dela)."
       },
       "biblia": {
         "type": "object",

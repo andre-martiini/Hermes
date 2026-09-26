@@ -174,7 +174,7 @@ def renderizar(db, projeto_id: str, execucao_id: str, *, veo: VeoProvider, servi
     if int(projeto.get("worker_min_versao") or 0) > VERSAO_WORKER:
         motivo = (f"Worker desatualizado (versão {VERSAO_WORKER}; o projeto exige "
                   f"{projeto.get('worker_min_versao')}): rode deploy_video_worker.bat e dispare de novo.")
-        avisos.avisar(f"⚠️ Hermes Vídeo: {motivo}")
+        avisos.avisar(f"⚠️ Gaspar Vídeo: {motivo}")
         return {"status": "recusado", "erro": motivo}
     cenas = sorted((c.to_dict() or {} for c in ref.collection("cenas").stream()), key=lambda c: c["ordem"])
     quadros = {int(q.get("indice")): q for q in (s.to_dict() or {} for s in ref.collection("keyframes").stream())}
@@ -202,7 +202,7 @@ def renderizar(db, projeto_id: str, execucao_id: str, *, veo: VeoProvider, servi
                             campos={"erro": f"renderização: {exc}"[:500]})
         except vp.ErroVideo:
             pass
-        avisos.avisar(f"⚠️ Hermes Vídeo: a renderização de \"{projeto.get('titulo')}\" parou: {exc}"[:600])
+        avisos.avisar(f"⚠️ Gaspar Vídeo: a renderização de \"{projeto.get('titulo')}\" parou: {exc}"[:600])
         return {"status": "erro", "erro": f"A renderização falhou: {exc}"}
     finally:
         vp.liberar_execucao(db, projeto_id, execucao_id)
@@ -429,7 +429,7 @@ def _montar_e_entregar(ctx: _Contexto, projeto, cenas, avisos):
         pub = ctx.servicos.publicar(f"{titulo}.mp4", mp4, "video/mp4")
         ctx.ref.update({"video_drive_id": pub["id"], "video_link": pub["link"], "video_gcs": uri_final})
     custo = float(_estado(ctx.ref).get("custo_real_usd") or 0)
-    nota = (f"🎬 Hermes Vídeo: \"{titulo}\" pronto — {total:.0f} s, custo real US$ {custo:.2f}. "
+    nota = (f"🎬 Gaspar Vídeo: \"{titulo}\" pronto — {total:.0f} s, custo real US$ {custo:.2f}. "
             f"Link: {pub['link']}")
     if projeto.get("acao_id") and not projeto.get("video_anexado"):
         try:

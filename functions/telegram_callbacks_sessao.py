@@ -219,7 +219,7 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
             _clear_pending_web_card("edit")
             _save_session(db, chat_id, session)
             status = result.get("status") or "completed"
-            response_text = "Edição confirmada e aplicada no Hermes." if status == "completed" else (result.get("message") or f"Edição retornou status: {status}")
+            response_text = "Edição confirmada e aplicada no Gaspar." if status == "completed" else (result.get("message") or f"Edição retornou status: {status}")
             _persist_callback_turn("Botão: confirmar edição", response_text)
             _send_telegram_message(token, chat_id, response_text)
         except Exception as exc:

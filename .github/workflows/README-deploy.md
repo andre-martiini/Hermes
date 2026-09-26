@@ -1,6 +1,6 @@
 # Deploy automático no Firebase (CI/CD)
 
-Este repositório publica o sistema **Hermes** no Firebase (projeto
+Este repositório publica o sistema **Gaspar** no Firebase (projeto
 `gestao-hermes`) automaticamente sempre que algo entra na branch **`main`**
 — ou seja, **a cada merge**. A automação está em
 [`.github/workflows/deploy.yml`](./deploy.yml).

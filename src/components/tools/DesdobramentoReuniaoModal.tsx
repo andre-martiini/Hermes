@@ -275,7 +275,7 @@ export const DesdobramentoReuniaoModal: React.FC<Props> = ({
             disabled={criando || acoesAceitas.size === 0 || criadas !== null}
             className={`ml-auto rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-40 ${isDark ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
           >
-            {criando ? 'Criando…' : 'Criar no Hermes'}
+            {criando ? 'Criando…' : 'Criar no Gaspar'}
           </button>
         </footer>
       </div>

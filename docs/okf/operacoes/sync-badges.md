@@ -10,7 +10,7 @@ timestamp: 2026-05-19T17:30:42-03:00
 
 ## Visão geral
 
-O Hermes suporta badges visuais para indicar tarefas recém-sincronizadas do Google Tasks.
+O Gaspar suporta badges visuais para indicar tarefas recém-sincronizadas do Google Tasks.
 
 ## Campos na interface `Tarefa`
 

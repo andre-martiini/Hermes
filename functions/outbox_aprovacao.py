@@ -322,7 +322,7 @@ def criar_rascunho(
         motivo_falha = (
             "Destinatário ambíguo (múltiplas correspondências encontradas)."
             if ambiguo
-            else "Destinatário não encontrado na base de contatos/conversas do Hermes."
+            else "Destinatário não encontrado na base de contatos/conversas do Gaspar."
         )
         return {
             "erro": motivo_falha,

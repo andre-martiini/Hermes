@@ -1,7 +1,7 @@
 ---
 type: policy
 title: Como manter este bundle atualizado
-description: Regras de quando e como atualizar os documentos OKF do Hermes — especialmente os de arquitetura — para que não fiquem obsoletos.
+description: Regras de quando e como atualizar os documentos OKF do Gaspar — especialmente os de arquitetura — para que não fiquem obsoletos.
 tags: [hermes, okf, manutencao, governanca]
 timestamp: 2026-06-17T00:00:00Z
 ---

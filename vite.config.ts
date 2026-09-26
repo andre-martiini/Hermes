@@ -25,8 +25,8 @@ export default defineConfig(() => {
         injectRegister: false,
         includeAssets: ["icon.svg"],
         manifest: {
-          name: "Hermes - Gestão à Vista",
-          short_name: "Hermes",
+          name: "Gaspar - Gestão à Vista",
+          short_name: "Gaspar",
           description: "Gestão Inteligente de Tarefas e Metas",
           theme_color: "#0f172a",
           background_color: "#f8fafc",

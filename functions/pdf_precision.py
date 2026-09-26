@@ -11,7 +11,7 @@ from typing import Any
 
 
 DEFAULT_GEMINI_TEXT_PROMPT = (
-    "Extraia o texto legivel deste PDF para indexacao e consulta no Hermes. "
+    "Extraia o texto legivel deste PDF para indexacao e consulta no Gaspar. "
     "Preserve a estrutura em Markdown quando possivel, incluindo titulos, listas e tabelas. "
     "Se o documento precisar de OCR, execute OCR. "
     "Retorne apenas o texto extraido, sem comentarios."

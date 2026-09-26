@@ -1,4 +1,6 @@
-# Hermes - Sistema de Gestão de Tarefas
+# Gaspar - Sistema de Gestão de Tarefas
+
+> Gaspar (anteriormente Hermes). Os identificadores técnicos mantêm o nome `hermes`.
 
 Sistema integrado de gestão de tarefas com sincronização automática com Google Tasks.
 
@@ -53,7 +55,7 @@ com a Cloud Function.
 ### Iniciar tudo de uma vez (Windows)
 
 - `start.bat`: abre uma janela de terminal visível para cada serviço local (frontend, API de automações, monitor de páginas e voz). A sincronização principal permanece na Cloud Function.
-- `start_hidden.vbs`: inicia os mesmos serviços sem nenhuma janela de terminal, com a saída redirecionada para arquivos em `logs/`. Aponte um atalho na pasta Inicializar (`shell:startup`) ou uma tarefa do Agendador de Tarefas do Windows para `wscript.exe start_hidden.vbs` para que o Hermes suba silenciosamente junto com o Windows.
+- `start_hidden.vbs`: inicia os mesmos serviços sem nenhuma janela de terminal, com a saída redirecionada para arquivos em `logs/`. Aponte um atalho na pasta Inicializar (`shell:startup`) ou uma tarefa do Agendador de Tarefas do Windows para `wscript.exe start_hidden.vbs` para que o Gaspar suba silenciosamente junto com o Windows.
 
 ### Opção 2: Deploy da Cloud Function (recomendado)
 

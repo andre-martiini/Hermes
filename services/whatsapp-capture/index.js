@@ -404,7 +404,7 @@ client.on('ready', async () => {
 
 client.on('auth_failure', async (msg) => {
     console.error('Authentication failure:', msg);
-    await sendTelegramAlert(`🚨 Hermes WhatsApp: falha de autenticação (${msg}). É preciso reautenticar — rode o worker no terminal e escaneie o QR novamente.`);
+    await sendTelegramAlert(`🚨 Gaspar WhatsApp: falha de autenticação (${msg}). É preciso reautenticar — rode o worker no terminal e escaneie o QR novamente.`);
 });
 
 client.on('disconnected', async (reason) => {
@@ -421,7 +421,7 @@ client.on('disconnected', async (reason) => {
         }
     }
     await sendTelegramAlert(
-        `⚠️ Hermes WhatsApp: sessão desconectada (${reason}). ` +
+        `⚠️ Gaspar WhatsApp: sessão desconectada (${reason}). ` +
         (recoverable ? 'Tentando reconectar automaticamente em 15s...' : 'É preciso reautenticar — um novo QR será gerado e salvo em qr-code.png na pasta do worker.')
     );
     if (recoverable) {
@@ -689,7 +689,7 @@ async function repairMissingMedia() {
             if (alertable.length) {
                 const labels = alertable.map((item) => item.label);
                 await sendTelegramAlert(
-                    `⚠️ Hermes WhatsApp: não consegui recuperar a mídia de ${alertable.length} mensagem(ns) mesmo após ${MEDIA_REPAIR_MAX_ATTEMPTS} tentativas: ` +
+                    `⚠️ Gaspar WhatsApp: não consegui recuperar a mídia de ${alertable.length} mensagem(ns) mesmo após ${MEDIA_REPAIR_MAX_ATTEMPTS} tentativas: ` +
                     `${labels.slice(0, 5).join(', ')}${labels.length > 5 ? '…' : ''}. O conteúdo pode não estar mais disponível.`
                 );
             }
@@ -1187,7 +1187,7 @@ function reportFatal(kind, err) {
     if (now - lastFatalAlertMs < 10 * 60 * 1000) return; // no máximo 1 alerta a cada 10min
     lastFatalAlertMs = now;
     sendTelegramAlert(
-        `🚨 Hermes WhatsApp worker: erro não tratado (${kind}): ${err?.message || err}. ` +
+        `🚨 Gaspar WhatsApp worker: erro não tratado (${kind}): ${err?.message || err}. ` +
         'O worker continua rodando; se a captura parar, reinicie-o.'
     );
 }

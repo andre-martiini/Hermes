@@ -1,6 +1,6 @@
 {
   "name": "video_status",
-  "description": "Estado de um projeto do Hermes Vídeo: etapa (roteiro, previa_gerando, aguardando_storyboard, renderizando, montando, concluido, erro, cancelado), cenas com duração e narração, progresso dos clipes por status, custo estimado, custo real até agora, orçamento (teto) e o link do vídeo quando pronto. Só leitura.",
+  "description": "Estado de um projeto do Gaspar Vídeo: etapa (roteiro, previa_gerando, aguardando_storyboard, renderizando, montando, concluido, erro, cancelado), cenas com duração e narração, progresso dos clipes por status, custo estimado, custo real até agora, orçamento (teto) e o link do vídeo quando pronto. Só leitura.",
   "parameters": {
     "type": "object",
     "properties": {

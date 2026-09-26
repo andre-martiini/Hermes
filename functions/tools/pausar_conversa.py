@@ -77,7 +77,7 @@ def _find_chat(ctx, value: str) -> dict:
                             "to_number": chat_id, "tipo": "grupo"})
     unique = {m["chat_id"]: m for m in matches}
     if not unique:
-        raise ValueError("Contato ou grupo não resolvido na base do Hermes; nada foi enviado.")
+        raise ValueError("Contato ou grupo não resolvido na base do Gaspar; nada foi enviado.")
     if len(unique) > 1:
         raise ValueError("Contato ou grupo ambíguo; informe nome completo, número ou chat_id.")
     return next(iter(unique.values()))

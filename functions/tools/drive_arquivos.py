@@ -182,9 +182,9 @@ def _modificado_em_assentado(service, file_id: str, do_update):
 def _erro_do_drive(exc: Exception) -> str:
     status = getattr(getattr(exc, "resp", None), "status", None)
     if status == 404:
-        return "Arquivo nao encontrado no Drive (ou o Hermes nao tem acesso a ele)."
+        return "Arquivo nao encontrado no Drive (ou o Gaspar nao tem acesso a ele)."
     if status == 403:
-        return "O Hermes nao tem permissao para editar este arquivo."
+        return "O Gaspar nao tem permissao para editar este arquivo."
     return str(exc)
 
 
@@ -221,12 +221,12 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
     if meta.get("trashed"):
         return {"erro": "O arquivo esta na lixeira: restaure-o antes de atualizar. Nada foi alterado."}
     if not (meta.get("capabilities") or {}).get("canEdit"):
-        return {"erro": "O Hermes nao tem permissao para editar este arquivo. Nada foi alterado."}
+        return {"erro": "O Gaspar nao tem permissao para editar este arquivo. Nada foi alterado."}
 
     # `ownedByMe` NAO vem preenchido em item de Drive compartilhado: la o sinal e o `driveId`.
     if meta.get("ownedByMe") is False or meta.get("driveId"):
         return {"erro": "O arquivo pertence a outra pessoa (ou a um Drive compartilhado): por seguranca o "
-                        "Hermes so atualiza arquivos do proprio dono. Edite pela interface do Google. "
+                        "Gaspar so atualiza arquivos do proprio dono. Edite pela interface do Google. "
                         "Nada foi alterado."}
 
     mime = meta.get("mimeType") or ""

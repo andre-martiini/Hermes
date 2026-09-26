@@ -31,7 +31,7 @@ SESSION_LOCK = threading.Lock()
 PLAN_SESSIONS: dict[str, dict] = {}
 SESSION_TTL_SECONDS = 30 * 60
 
-app = FastAPI(title="Hermes Automations API")
+app = FastAPI(title="Gaspar Automations API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
