@@ -1,0 +1,72 @@
+{
+  "name": "video_criar_projeto",
+  "description": "Cria um projeto de vídeo do Hermes Vídeo a partir do roteiro JÁ APROVADO pelo usuário (aprovação 1) e devolve projeto_id, a duração provisória de cada clipe (4, 6 ou 8 s, pelo ritmo de ~2,0 palavras/s) e a estimativa de custo e de tempo. Custo zero: não gera narração, imagem nem vídeo. Uma cena cuja narração não cabe em 8 s é recusada com erro pedindo para dividi-la. Chamar de novo cria OUTRO projeto — use video_status para consultar um que já existe.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "Título do vídeo."
+      },
+      "formato": {
+        "type": "string",
+        "enum": ["16:9", "9:16"],
+        "description": "Proporção: 16:9 (horizontal, padrão) ou 9:16 (vertical, redes sociais)."
+      },
+      "modo": {
+        "type": "string",
+        "enum": ["padrao", "final"],
+        "description": "padrao = Veo 3.1 Lite (mais barato, padrão); final = Veo 3.1 Fast (melhor qualidade, ~3× o custo)."
+      },
+      "acao_id": {
+        "type": "string",
+        "description": "ID da ação do Hermes à qual o vídeo pertence (o link final vai para o diário dela)."
+      },
+      "biblia": {
+        "type": "object",
+        "description": "Bíblia visual: o que mantém todas as cenas com a mesma cara.",
+        "properties": {
+          "estilo": {"type": "string", "description": "Estilo visual (ex.: 'ilustração flat 2D, iluminação difusa'). Obrigatório."},
+          "paleta": {"type": "string", "description": "Paleta de cores."},
+          "personagens": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Descrição fixa de cada personagem (aparência, roupa), repetida em toda cena."
+          },
+          "evitar": {"type": "string", "description": "O que não pode aparecer (ex.: texto na imagem, logotipos, rostos de pessoas reais)."}
+        },
+        "required": ["estilo"]
+      },
+      "voz": {
+        "type": "object",
+        "description": "Voz da narração (padrão: Kore, neutro e claro).",
+        "properties": {
+          "nome": {"type": "string", "description": "Nome da voz do Gemini TTS."},
+          "estilo": {"type": "string", "description": "Instrução de estilo da fala (ex.: 'calmo e didático')."}
+        }
+      },
+      "musica": {
+        "type": "string",
+        "description": "Clima da música de fundo (calmo, animado, institucional) ou 'nenhuma' (padrão)."
+      },
+      "legenda": {
+        "type": "boolean",
+        "description": "Queimar legenda da narração no vídeo (padrão: false)."
+      },
+      "cenas": {
+        "type": "array",
+        "description": "Cenas na ordem. No máximo 30 e 120 s no total.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "narracao": {"type": "string", "description": "Texto falado na cena (até ~15 palavras para caber em 8 s). Pode ser vazio."},
+            "descricao_visual": {"type": "string", "description": "O que aparece na tela. Obrigatório."},
+            "prompt_video": {"type": "string", "description": "Opcional: prompt de movimento para o Veo (câmera, ação, luz)."}
+          },
+          "required": ["descricao_visual"]
+        }
+      }
+    },
+    "required": ["titulo", "biblia", "cenas"]
+  }
+}

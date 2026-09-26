@@ -2365,6 +2365,22 @@ def _consultar_status_modo_secretario(ctx: ToolContext, args: dict):
 
 
 # ---------------------------------------------------------------------------
+# Hermes Vídeo (functions/video/) — Fase 1: criar o projeto e consultar o estado.
+# Nenhuma das duas chama serviço pago; as tools pagas (renderizar, refazer cena)
+# chegam na Fase 4, com confirmation_id.
+def _video_criar_projeto(ctx: ToolContext, args: dict):
+    from video import projeto
+
+    return projeto.criar_projeto(ctx.db, ctx.user_uid, dict(args or {}))
+
+
+def _video_status(ctx: ToolContext, args: dict):
+    from video import projeto
+
+    return projeto.obter_status(ctx.db, str(args.get("projeto_id") or ""), ctx.user_uid)
+
+
+# ---------------------------------------------------------------------------
 # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — thin
 # wrappers em torno das funções PURAS já existentes e testadas em
 # autonomy/policy.py (test_policy.py). Nenhum dos três toca `ctx.db`: consultar
@@ -2660,6 +2676,10 @@ _HANDLERS: dict = {
     "consultar_politica": _consultar_politica,
     "simular_politica": _simular_politica,
     "preparar_politica": _preparar_politica,
+
+    # Hermes Vídeo — Fase 1
+    "video_criar_projeto": _video_criar_projeto,
+    "video_status": _video_status,
 }
 
 
