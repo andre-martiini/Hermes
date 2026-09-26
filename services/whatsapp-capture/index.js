@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { detectarMencao } from './mentions.js';
 import { criarExecutorCoalescido } from './coalescido.js';
 import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes.js';
+import { criarInicializador } from './inicializacao.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -426,7 +427,7 @@ client.on('disconnected', async (reason) => {
     if (recoverable) {
         setTimeout(() => {
             console.log('Tentando reconectar o cliente do WhatsApp...');
-            client.initialize().catch((e) => console.error('Falha ao reconectar:', e));
+            abrirWhatsApp('reconexao');
         }, 15000);
     }
 });
@@ -993,7 +994,15 @@ db.collection('whatsapp_chats_sync_requests')
         });
     }, (err) => console.error('[ChatsSync] Falha ao observar whatsapp_chats_sync_requests:', err));
 
-client.initialize();
+// Boot e reconexão passam pelo mesmo caminho: se abrir o WhatsApp Web falhar
+// (ex.: "Page.navigate timed out" com a rede ainda subindo), fecha o Chromium
+// que sobrou e tenta de novo sozinho — ver inicializacao.js.
+const abrirWhatsApp = criarInicializador({
+    inicializar: () => client.initialize(),
+    destruir: () => client.destroy(),
+    alertar: sendTelegramAlert,
+});
+abrirWhatsApp('boot');
 
 // Varredura horária de reparo de mídia (além da passada pós-ready) — recupera
 // mídias cujo download/upload falhou na captura ao vivo.
