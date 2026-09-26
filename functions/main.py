@@ -137,6 +137,24 @@ DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7e
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+# Achado de custo de 26/09/2026 (scheduled_sync ~100k leituras/~50k escritas por dia mesmo em
+# dia calmo; on_sync_request até 130k leituras/94k escritas):
+# - cada log_to_firestore(..., True) dentro do run_full_sync regravava system/sync, e cada
+#   gravação ali reinvocava on_sync_request (1 GB) só para sair na hora. Os logs agora são
+#   acumulados em memória e gravados no máximo a cada SYNC_LOG_FLUSH_INTERVAL_S (ou já, se a
+#   linha for de erro) -- ver _SyncRefComLogsEspacados.
+# - o sync de contatos do Google (varre perfil_pessoas inteira) roda no máximo a cada
+#   CONTACTS_SYNC_MIN_INTERVAL_S, salvo pedido manual pela interface.
+# - a alteração de horário/prazo de uma ação pede um sync só de agenda (SYNC_SCOPE_CALENDAR),
+#   sem contatos, Allcare nem triagem de WhatsApp.
+SYNC_LOG_FLUSH_INTERVAL_S = 15
+CONTACTS_SYNC_MIN_INTERVAL_S = 6 * 60 * 60
+CONTACTS_SYNC_STATE_DOC_ID = 'sync_contatos'
+SYNC_SCOPE_FULL = 'full'
+SYNC_SCOPE_CALENDAR = 'calendar'
+# Marca gravada na tarefa quando a sincronia inversa (agenda -> Hermes) altera o horário: o
+# on_tarefa_written reconhece a própria escrita do sync e não pede outro sync por causa dela.
+CAL_SYNC_MARKER_FIELD = 'agenda_sync_marcador'
 # Sincronização de Gmail (Pix, boletos, vínculo e-mail-ação) via webhook (Pub/Sub) em vez de
 # polling a cada 60min dentro de run_full_sync (achado de custo de 16/09/2026, ação
 # e7fe01f4-6b7b-4789-8: run_full_sync respondia por 65-82% de TODAS as escritas do sistema).
@@ -710,12 +728,44 @@ def build_task_calendar_event_id(task_id):
     return f"hermes{stable_uuid.hex}"
 
 
-def queue_sync_request(db, reason=None):
+_CAMPOS_AGENDA_TAREFA = ('data_limite', 'horario_inicio', 'horario_fim')
+
+
+def _marcador_sincronia_inversa(task_updates):
+    """Marca gravada junto com a escrita da sincronia inversa (agenda -> Hermes).
+    Guarda o horário gravado e um instante único, para que cada escrita tenha
+    uma marca diferente da anterior."""
+    marcador = {campo: task_updates.get(campo) for campo in _CAMPOS_AGENDA_TAREFA}
+    marcador['em'] = datetime.now(timezone.utc).isoformat()
+    return marcador
+
+
+def _escrita_da_sincronia_inversa(before, after):
+    """True quando esta escrita da tarefa foi feita pela sincronia inversa do próprio sync:
+    a marca mudou nesta escrita e o horário/prazo gravado é exatamente o que a marca
+    registra. Qualquer outra escrita (interface, MCP, bot) não mexe na marca, então
+    segue pedindo sync como antes."""
+    marcador = (after or {}).get(CAL_SYNC_MARKER_FIELD)
+    if not isinstance(marcador, dict):
+        return False
+    if marcador == (before or {}).get(CAL_SYNC_MARKER_FIELD):
+        return False
+    return all((after or {}).get(campo) == marcador.get(campo) for campo in _CAMPOS_AGENDA_TAREFA)
+
+
+def queue_sync_request(db, reason=None, scope=SYNC_SCOPE_FULL):
 
     payload = {
         'pending_request': True,
         'pending_request_at': datetime.now(timezone.utc).isoformat()
     }
+
+    # Só grava a marca de escopo completo (nunca a desliga): um pedido "só agenda" que chegue
+    # depois de um pedido completo não pode rebaixar o próximo passo. run_full_sync zera as
+    # duas marcas no início de cada passo.
+    if scope != SYNC_SCOPE_CALENDAR:
+
+        payload['pending_full_request'] = True
 
     if reason:
 
@@ -1568,6 +1618,19 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
 
         seen_ids = set()
 
+        # Leitura única dos eventos já gravados na janela sincronizada (achado de custo de
+        # 26/09/2026): antes cada ciclo regravava TODOS os eventos da janela com
+        # last_sync=agora (escrita mesmo sem mudança nenhuma) e depois relia a mesma janela
+        # para a limpeza. Agora só grava o que mudou, e a limpeza usa este mesmo dicionário.
+        existing_events = {
+            doc.id: doc
+            for doc in db.collection('google_calendar_events')
+                .where('data_inicio', '>=', time_min)
+                .where('data_inicio', '<=', time_max)
+                .stream()
+        }
+        written_count = 0
+
         # Reaproveita a leitura de 'tarefas' feita uma unica vez em run_full_sync
         # (evita 2 leituras completas redundantes da colecao por ciclo de sync).
         source_docs = tarefas_docs if tarefas_docs is not None else db.collection('tarefas').stream()
@@ -1630,7 +1693,7 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
                 # possam ignorá-los — sinalizar de volta um evento que o próprio Hermes criou é redundante.
                 hermes_task_id = ((event.get('extendedProperties') or {}).get('private') or {}).get('hermes_task_id')
 
-                db.collection('google_calendar_events').document(doc_id).set({
+                event_payload = {
 
                     'google_id': event_id,
 
@@ -1644,9 +1707,20 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
 
                     'criado_pelo_hermes': bool(hermes_task_id),
 
-                    'last_sync': datetime.now().isoformat()
+                }
 
-                }, merge=True)
+                # Evento fora do dicionário (novo, ou que começou antes da janela e por isso
+                # não voltou na consulta por data_inicio) é gravado como antes. last_sync
+                # passa a marcar a última gravação real, não mais cada ciclo.
+                existing_snap = existing_events.get(doc_id)
+                existing_data = (existing_snap.to_dict() or {}) if existing_snap is not None else None
+                if existing_data is None or any(existing_data.get(k) != v for k, v in event_payload.items()):
+
+                    event_payload['last_sync'] = datetime.now().isoformat()
+
+                    db.collection('google_calendar_events').document(doc_id).set(event_payload, merge=True)
+
+                    written_count += 1
 
                 count += 1
 
@@ -1689,28 +1763,29 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
                         # Usa "agora" para garantir que o push subsequente preserve esse ajuste no Tasks/Calendar
                         'data_atualizacao': datetime.now().isoformat()
                     }
+                    # Marca a escrita como do próprio sync: o push logo abaixo, neste mesmo
+                    # passo, já leva o ajuste ao Tasks/Calendar, então on_tarefa_written não
+                    # precisa pedir outro sync por causa dela (ver _escrita_da_sincronia_inversa).
+                    task_updates[CAL_SYNC_MARKER_FIELD] = _marcador_sincronia_inversa(task_updates)
                     task_ref.update(task_updates)
                     task_data.update(task_updates)
                     log_to_firestore(sync_ref, logs, f"[CAL->HERMES] Horário atualizado pela agenda: {task_data.get('titulo', '(Sem titulo)')}")
 
-        # Limpeza de eventos deletados no Google Calendar (somente janela sincronizada)
-
-        docs = db.collection('google_calendar_events')\
-            .where('data_inicio', '>=', time_min)\
-            .where('data_inicio', '<=', time_max)\
-            .stream()
+        # Limpeza de eventos deletados no Google Calendar (somente janela sincronizada),
+        # sobre a leitura única feita no início. Equivale à releitura de antes: todo evento
+        # gravado neste ciclo está em seen_ids e, portanto, nunca seria apagado.
 
         deleted_count = 0
 
-        for doc in docs:
+        for doc_id, doc in existing_events.items():
 
-            if doc.id not in seen_ids:
+            if doc_id not in seen_ids:
 
                 doc.reference.delete()
 
                 deleted_count += 1
 
-        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados em {len(calendar_ids)} agenda(s). {deleted_count} removidos.")
+        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados em {len(calendar_ids)} agenda(s) ({written_count} gravados). {deleted_count} removidos.")
 
         return tasks_by_id
 
@@ -3417,15 +3492,99 @@ def renovar_gmail_watch_diario(event: scheduler_fn.ScheduledEvent) -> None:
     renovar_gmail_watch(db, gs)
 
 
-def run_full_sync(trigger_reason='unspecified'):
-    """Executa o processo completo de sincronização"""
+class _SyncRefComLogsEspacados:
+    """Envolve a referência de system/sync durante o run_full_sync para espaçar a gravação
+    dos logs (achado de custo de 26/09/2026).
+
+    Cada log_to_firestore(..., True) fazia um update({'logs': ...}) em system/sync, e cada
+    gravação ali disparava on_sync_request (1 GB) só para ele sair em seguida (status !=
+    'requested') -- dezenas de invocações e escritas por ciclo. Aqui um update que só traz
+    'logs' é gravado no máximo a cada `intervalo_s` segundos; no meio disso a lista segue
+    acumulando em memória (é o mesmo objeto `logs`) e vai inteira na próxima gravação.
+    Linha com "ERRO" grava na hora, para o terminal da interface não esconder falhas.
+    Qualquer outra operação (set, get, update com outros campos) passa direto, e os set()
+    do próprio run_full_sync (troca de passo, conclusão, erro) já levam a lista completa.
+    """
+
+    def __init__(self, ref, intervalo_s=SYNC_LOG_FLUSH_INTERVAL_S, relogio=time.monotonic):
+        self._ref = ref
+        self._intervalo_s = intervalo_s
+        self._relogio = relogio
+        self._ultima_gravacao = None
+
+    def _marcar_gravacao(self, payload):
+        if isinstance(payload, dict) and 'logs' in payload:
+            self._ultima_gravacao = self._relogio()
+
+    def update(self, payload, *args, **kwargs):
+        so_logs = isinstance(payload, dict) and set(payload.keys()) == {'logs'} and not args and not kwargs
+        if so_logs:
+            logs = payload.get('logs') or []
+            ultima_linha = str(logs[-1]) if logs else ''
+            agora = self._relogio()
+            vencido = self._ultima_gravacao is None or (agora - self._ultima_gravacao) >= self._intervalo_s
+            if not vencido and 'ERRO' not in ultima_linha.upper():
+                return None
+        self._marcar_gravacao(payload)
+        return self._ref.update(payload, *args, **kwargs)
+
+    def set(self, payload, *args, **kwargs):
+        self._marcar_gravacao(payload)
+        return self._ref.set(payload, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._ref, name)
+
+
+def _contatos_devem_rodar(db, forcar=False, agora=None):
+    """Sync de contatos do Google no máximo a cada CONTACTS_SYNC_MIN_INTERVAL_S (ele varre a
+    coleção perfil_pessoas inteira). `forcar` (pedido manual pela interface) ignora o
+    intervalo. Na dúvida (sem registro ou registro ilegível), roda."""
+    if forcar:
+        return True
+    agora = agora or datetime.now(timezone.utc)
+    try:
+        snap = db.collection('system').document(CONTACTS_SYNC_STATE_DOC_ID).get()
+        dados = (snap.to_dict() or {}) if snap.exists else {}
+    except Exception as exc:
+        print(f"[SYNC] Falha ao ler o registro do sync de contatos ({exc}); rodando mesmo assim.")
+        return True
+    ultima = parse_iso_datetime(dados.get('ultima_execucao'))
+    if ultima is None:
+        return True
+    if ultima.tzinfo is None:
+        ultima = ultima.replace(tzinfo=timezone.utc)
+    return (agora - ultima).total_seconds() >= CONTACTS_SYNC_MIN_INTERVAL_S
+
+
+def _registrar_execucao_contatos(db, agora=None):
+    agora = agora or datetime.now(timezone.utc)
+    try:
+        db.collection('system').document(CONTACTS_SYNC_STATE_DOC_ID).set(
+            {'ultima_execucao': agora.isoformat()}, merge=True
+        )
+    except Exception as exc:
+        print(f"[SYNC] Falha ao registrar a execução do sync de contatos: {exc}")
+
+
+def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_contatos=False):
+    """Executa o processo completo de sincronização.
+
+    `scope`:
+      - SYNC_SCOPE_FULL (padrão; cron horário e pedido manual pela interface): tudo.
+      - SYNC_SCOPE_CALENDAR (pedido de on_tarefa_written, quando só mudou horário/prazo de uma
+        ação): Calendar, Tasks e os detectores que reaproveitam a leitura de 'tarefas'; pula
+        contatos do Google, Allcare e triagem de WhatsApp, que não têm nada a ver com a
+        mudança e rodam no próximo ciclo completo.
+    `forcar_contatos`: ignora o intervalo mínimo do sync de contatos (pedido manual).
+    """
     db = get_db()
-    sync_ref = db.collection('system').document('sync')
+    sync_ref = _SyncRefComLogsEspacados(db.collection('system').document('sync'))
     run_id = uuid.uuid4().hex
-    logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})... Trigger: {trigger_reason}"]
+    logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})... Trigger: {trigger_reason} (escopo: {scope})"]
 
     if not acquire_sync_lock(db, run_id):
-        queue_sync_request(db, f"sync-busy:{trigger_reason}")
+        queue_sync_request(db, f"sync-busy:{trigger_reason}", scope=scope)
         print(f"Sincronização já em andamento. Pedido enfileirado: {trigger_reason}")
         return False
 
@@ -3434,22 +3593,30 @@ def run_full_sync(trigger_reason='unspecified'):
             'status': 'processing',
             'active_run_id': run_id,
             'pending_request': False,
+            'pending_full_request': False,
+            'requested_scope': None,
             'last_trigger': trigger_reason,
             'started_at': datetime.now(timezone.utc).isoformat(),
             'logs': logs
         }, merge=True)
 
+        contatos_ja_avaliados = False
+        pass_scope = scope
+
         for current_pass in range(1, MAX_SYNC_PASSES + 1):
             if current_pass > 1:
-                log_to_firestore(sync_ref, logs, f"[SYNC] Reexecutando sincronização para consolidar alterações pendentes (passo {current_pass}/{MAX_SYNC_PASSES}).", True)
+                log_to_firestore(sync_ref, logs, f"[SYNC] Reexecutando sincronização para consolidar alterações pendentes (passo {current_pass}/{MAX_SYNC_PASSES}, escopo: {pass_scope}).")
                 sync_ref.set({
                     'status': 'processing',
                     'active_run_id': run_id,
                     'pending_request': False,
+                    'pending_full_request': False,
                     'logs': logs
                 }, merge=True)
 
-            ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
+            escopo_completo = pass_scope != SYNC_SCOPE_CALENDAR
+
+            ts, cs = get_tasks_service(), get_calendar_service()
             # Leitura unica de 'tarefas' para este ciclo: antes, sync_google_calendar
             # e sync_google_tasks_push liam a colecao inteira cada um por conta
             # propria (2 leituras completas redundantes por ciclo de sync, 48
@@ -3483,14 +3650,23 @@ def run_full_sync(trigger_reason='unspecified'):
             sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
             sync_google_tasks_pull(ts, sync_ref, logs)
 
-            # Sincronização de Contatos do Google People API
-            sync_google_contacts_internal(db, sync_ref, logs)
+            if escopo_completo:
+                # Sincronização de Contatos do Google People API: no máximo uma vez por
+                # run_full_sync e a cada CONTACTS_SYNC_MIN_INTERVAL_S (salvo pedido manual).
+                if not contatos_ja_avaliados:
+                    contatos_ja_avaliados = True
+                    if _contatos_devem_rodar(db, forcar=forcar_contatos):
+                        stats_contatos = sync_google_contacts_internal(db, sync_ref, logs)
+                        if stats_contatos is not None:
+                            _registrar_execucao_contatos(db)
+                    else:
+                        log_to_firestore(sync_ref, logs, f"[SYNC] Contatos do Google sincronizados há menos de {CONTACTS_SYNC_MIN_INTERVAL_S // 3600}h; etapa pulada neste ciclo.")
 
-            # Ingestão de Documentos (Acervo Global)
-            log_to_firestore(sync_ref, logs, "[SYNC] Verificando novos documentos na Pasta de Deságue (Acervo Global)...", True)
-            executar_monitoramento_acervo_global()
+                # Ingestão de Documentos (Acervo Global): saiu daqui em 26/09/2026 -- o cron
+                # próprio monitorar_acervo_global (knowledge_graph.py) já faz a mesma varredura
+                # da Pasta de Deságue; rodar também aqui duplicava o trabalho.
 
-            sync_allcare_portal_bills(gs, sync_ref, logs)
+                sync_allcare_portal_bills(get_gmail_service(), sync_ref, logs)
 
             # E-mails de Pix/boletos e vínculo e-mail-ação (sync_gmail_work): extraídos daqui em
             # 24/09/2026 (ação e7fe01f4-6b7b-4789-8) -- agora rodam por conta própria via
@@ -3503,29 +3679,34 @@ def run_full_sync(trigger_reason='unspecified'):
             # google_calendar_id, sem IA). Mesma proteção: nunca derruba o restante do sync.
             try:
                 from email_action_linker import link_calendar_events_to_actions
-                link_calendar_events_to_actions(db, sync_ref, logs)
+                link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=tarefas_snapshot)
             except Exception as e_cal_link:
                 log_to_firestore(sync_ref, logs, f"[CAL-LINK][ERRO] Falha inesperada no vínculo calendar-ação: {e_cal_link}", True)
 
             # Triagem de conversas de WhatsApp capturadas por services/whatsapp-capture
             # (propõe vínculo com ações + grava digests vetorizados). Desligada por padrão
             # e sem efeito nenhum enquanto o worker local não estiver rodando/configurado.
-            try:
-                from whatsapp_ingest import triage_whatsapp_messages
-                triage_whatsapp_messages(db, sync_ref, logs)
-            except Exception as e_wa_ingest:
-                log_to_firestore(sync_ref, logs, f"[WA-INGEST][ERRO] Falha inesperada na triagem de WhatsApp: {e_wa_ingest}", True)
+            if escopo_completo:
+                try:
+                    from whatsapp_ingest import triage_whatsapp_messages
+                    triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=tarefas_snapshot)
+                except Exception as e_wa_ingest:
+                    log_to_firestore(sync_ref, logs, f"[WA-INGEST][ERRO] Falha inesperada na triagem de WhatsApp: {e_wa_ingest}", True)
 
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
             if current_pass == MAX_SYNC_PASSES:
                 log_to_firestore(sync_ref, logs, "[SYNC][!] Limite de reexecuções atingido; alterações restantes serão processadas na próxima sincronização.", True)
+            # Próximo passo: completo só se algum pedido enfileirado era completo; pedidos
+            # vindos só de mudança de horário de ação rodam no escopo de agenda.
+            pass_scope = SYNC_SCOPE_FULL if sync_state.get('pending_full_request') else SYNC_SCOPE_CALENDAR
 
         sync_ref.set({
             'status': 'completed',
             'last_success': datetime.now().isoformat(),
             'pending_request': False,
+            'pending_full_request': False,
             'active_run_id': None,
             'logs': logs
         }, merge=True)
@@ -3541,6 +3722,7 @@ def run_full_sync(trigger_reason='unspecified'):
             'status': 'error',
             'error_message': error_msg,
             'pending_request': False,
+            'pending_full_request': False,
             'active_run_id': None,
             'logs': logs + [error_msg]
         }, merge=True)
@@ -3562,7 +3744,20 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 
     if data.get('status') != 'requested': return
 
-    run_full_sync('firestore-request')
+    _atender_pedido_de_sync(data)
+
+
+def _atender_pedido_de_sync(data):
+    """Decide o escopo de um pedido gravado em system/sync com status 'requested'.
+
+    - `requested_scope: 'calendar'` vem só de on_tarefa_written (mudou horário/prazo de uma
+      ação): sync só de agenda.
+    - Qualquer outro pedido é o botão "Sincronizar" da interface (index.tsx faz setDoc sem
+      merge, então nunca carrega requested_scope): sync completo, forçando contatos.
+    """
+    if (data or {}).get('requested_scope') == SYNC_SCOPE_CALENDAR:
+        return run_full_sync('firestore-request:agenda', scope=SYNC_SCOPE_CALENDAR)
+    return run_full_sync('firestore-request', scope=SYNC_SCOPE_FULL, forcar_contatos=True)
 
 
 
@@ -3570,7 +3765,7 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
-    """Trigger agendado para rodar a cada 30 minutos"""
+    """Trigger agendado para rodar a cada 60 minutos"""
 
     run_full_sync('scheduled')
 
@@ -4326,23 +4521,42 @@ def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn
     db = get_db()
 
     # Checa alteração de horário de início/fim ou prazo para forçar trigger pro Google Tasks/Calendar
-    if (
+    _pedir_sync_por_mudanca_de_agenda(db, before, after)
+
+
+def _pedir_sync_por_mudanca_de_agenda(db, before, after):
+    """Pede um sync SÓ DE AGENDA (SYNC_SCOPE_CALENDAR) quando mudou horário/prazo da ação.
+
+    Achado de custo de 26/09/2026: antes cada mudança pedia um sync completo (contatos,
+    Allcare, WhatsApp...) só para levar um evento ao Calendar, e a própria sincronia inversa
+    do sync (agenda -> Hermes) disparava este gatilho de novo, somando até MAX_SYNC_PASSES
+    passos completos. Agora a escrita da sincronia inversa é reconhecida pela marca que ela
+    grava (ver _escrita_da_sincronia_inversa) e ignorada -- o push do mesmo passo já leva o
+    ajuste ao Tasks/Calendar. Devolve True quando pediu (ou enfileirou) um sync."""
+    if not (
         after.get('horario_inicio') != before.get('horario_inicio')
         or after.get('horario_fim') != before.get('horario_fim')
         or after.get('data_limite') != before.get('data_limite')
     ):
-        sync_ref = db.collection('system').document('sync')
-        sync_data = sync_ref.get().to_dict() or {}
-        current_status = sync_data.get('status')
+        return False
 
-        if current_status in ('processing', 'requested'):
-            queue_sync_request(db, 'task-schedule-change')
-        else:
-            sync_ref.set({
-                'status': 'requested',
-                'requested_at': datetime.now(timezone.utc).isoformat(),
-                'last_trigger': 'task-schedule-change'
-            }, merge=True)
+    if _escrita_da_sincronia_inversa(before, after):
+        return False
+
+    sync_ref = db.collection('system').document('sync')
+    sync_data = sync_ref.get().to_dict() or {}
+    current_status = sync_data.get('status')
+
+    if current_status in ('processing', 'requested'):
+        queue_sync_request(db, 'task-schedule-change', scope=SYNC_SCOPE_CALENDAR)
+    else:
+        sync_ref.set({
+            'status': 'requested',
+            'requested_scope': SYNC_SCOPE_CALENDAR,
+            'requested_at': datetime.now(timezone.utc).isoformat(),
+            'last_trigger': 'task-schedule-change'
+        }, merge=True)
+    return True
     
 @firestore_fn.on_document_updated(document="tarefas/{taskId}")
 def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -14828,7 +15042,7 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
                 if clean_p_phone:
                     by_phone[clean_p_phone] = p
 
-        stats = {"added": 0, "merged": 0, "errors": 0}
+        stats = {"added": 0, "merged": 0, "unchanged": 0, "errors": 0}
         
         for person in connections:
             try:
@@ -14891,12 +15105,12 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
                     update_payload = {
                         "google_contact_id": resource_name,
                         "google_etag": etag,
-                        "data_atualizacao": now_str
                     }
-                    
+
+                    # Cópia da lista: antes o append mutava direto o cache em memória,
+                    # o que impediria comparar com o valor gravado.
                     tags = existing_data.get('tags') or []
-                    if not isinstance(tags, list):
-                        tags = [tags]
+                    tags = list(tags) if isinstance(tags, list) else [tags]
                     if 'Contatos do Google' not in tags:
                         tags.append('Contatos do Google')
                     update_payload['tags'] = tags
@@ -14911,7 +15125,20 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
                         update_payload['avatar_color'] = avatar_color
                     if not existing_data.get('avatar_initials'):
                         update_payload['avatar_initials'] = initials
-                        
+
+                    # Achado de custo de 26/09/2026: antes TODO contato do Google era
+                    # regravado a cada ciclo (data_atualizacao=agora), mesmo com o mesmo etag.
+                    # Só grava -- e só então carimba data_atualizacao -- quando algum campo
+                    # de fato mudaria.
+                    # 'merged' segue contando todo contato já vinculado (a tela de contatos
+                    # mostra esse número como "Contatos Vinculados"); 'unchanged' é o subconjunto
+                    # que não precisou de escrita.
+                    if all(existing_data.get(k) == v for k, v in update_payload.items()):
+                        stats["merged"] += 1
+                        stats["unchanged"] += 1
+                        continue
+
+                    update_payload["data_atualizacao"] = now_str
                     doc_ref.update(update_payload)
                     
                     # Atualiza em cache
@@ -14953,7 +15180,7 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
                 print(f"[GOOGLE SYNC] Erro ao processar contato individual: {item_err}")
                 stats["errors"] += 1
                 
-        log_helper(f"[SYNC] Sincronização de contatos concluída: {stats['added']} importados, {stats['merged']} mesclados.")
+        log_helper(f"[SYNC] Sincronização de contatos concluída: {stats['added']} importados, {stats['merged']} mesclados ({stats['unchanged']} sem mudança, não regravados).")
         return stats
         
     except Exception as e:

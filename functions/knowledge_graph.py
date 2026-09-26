@@ -1622,13 +1622,17 @@ def executar_monitoramento_acervo_global(resetar_falhas_permanentes: bool = Fals
 
 
 @scheduler_fn.on_schedule(
-    schedule="every 15 minutes",
+    schedule="every 30 minutes",
     memory=options.MemoryOption.MB_512,
     timeout_sec=540,
 )
 def monitorar_acervo_global(*args, **kwargs) -> None:
     """
-    Cron Job — monitora a Pasta de Deságue no Google Drive a cada 15 minutos.
+    Cron Job — monitora a Pasta de Deságue no Google Drive a cada 30 minutos.
+
+    Desde 26/09/2026 é o único caminho automático desta varredura: o run_full_sync
+    (main.py) também a chamava a cada ciclo, duplicando o trabalho; saiu de lá e este
+    cron passou de 15 para 30 minutos (achado de custo).
     """
     executar_monitoramento_acervo_global()
 
@@ -1637,7 +1641,7 @@ def monitorar_acervo_global(*args, **kwargs) -> None:
 def sincronizar_acervo_manual(req: https_fn.CallableRequest):
     """
     Dispara sob demanda a mesma varredura da Pasta de Deságue feita pelo cron
-    de 15 minutos, para o usuário forçar uma sincronização (ex.: depois de
+    de 30 minutos, para o usuário forçar uma sincronização (ex.: depois de
     resolver um problema de acesso a um arquivo específico) sem esperar o cron.
 
     Diferente do cron, também dá uma nova cota de tentativas a documentos em

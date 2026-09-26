@@ -762,6 +762,31 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
         print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
 
 
+def _respostas_recebidas_do_chat(db, chat_id: str) -> list:
+    """Mensagens recebidas (from_me == False) de um chat que bastam para `avaliar_etapas`.
+
+    `avaliar_etapas` só pergunta se existe ALGUMA resposta com data >= data_prevista, e
+    isso equivale a olhar só a resposta mais recente. Achado de custo de 26/09/2026: antes
+    lia TODAS as mensagens recebidas de cada chat vinculado a cada ciclo de sync; agora lê
+    uma só (order_by timestamp desc, limit 1), com o índice composto
+    whatsapp_messages(chat_id, from_me, timestamp desc) de firestore.indexes.json.
+
+    Enquanto o índice não existir/estiver construindo (FailedPrecondition logo após o
+    deploy) ou em qualquer outra falha da consulta enxuta, cai na consulta antiga -- mesmo
+    resultado, só mais cara.
+    """
+    base = (
+        db.collection("whatsapp_messages")
+        .where("chat_id", "==", chat_id)
+        .where("from_me", "==", False)
+    )
+    try:
+        return list(base.order_by("timestamp", direction="DESCENDING").limit(1).stream())
+    except Exception as exc:
+        print(f"[Atencao] Consulta enxuta de mensagens de {chat_id} falhou ({exc}); usando a consulta completa.")
+        return list(base.stream())
+
+
 def detectar_aguardando_terceiro_vencido(db, tarefas_docs: list, hoje=None, settings: dict | None = None) -> None:
     """Detector de etapas 'aguardando_terceiro' vencidas.
 
@@ -804,12 +829,7 @@ def detectar_aguardando_terceiro_vencido(db, tarefas_docs: list, hoje=None, sett
     respostas_por_chat: dict[str, list[dict]] = {}
     for cid in chats_para_consultar:
         try:
-            msgs = list(
-                db.collection("whatsapp_messages")
-                .where("chat_id", "==", cid)
-                .where("from_me", "==", False)
-                .stream()
-            )
+            msgs = _respostas_recebidas_do_chat(db, cid)
             respostas_por_chat[cid] = [
                 {"timestamp": m.to_dict().get("timestamp"), "from_me": False}
                 for m in msgs

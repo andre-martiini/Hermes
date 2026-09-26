@@ -317,9 +317,12 @@ def _build_candidate(doc_id: str, data: dict) -> dict | None:
     }
 
 
-def _load_candidate_tasks(db) -> list[dict]:
+def _load_candidate_tasks(db, tarefas_docs=None) -> list[dict]:
+    """Candidatas a partir de `tarefas`. `tarefas_docs` (snapshots já lidos por quem chama,
+    hoje o `run_full_sync`) evita uma nova leitura completa da coleção no mesmo ciclo."""
     candidates = []
-    for doc in db.collection("tarefas").stream():
+    source_docs = tarefas_docs if tarefas_docs is not None else db.collection("tarefas").stream()
+    for doc in source_docs:
         candidate = _build_candidate(doc.id, doc.to_dict() or {})
         if candidate:
             candidates.append(candidate)
@@ -1552,7 +1555,7 @@ CALENDAR_EVENT_LOOKBACK_MINUTES = 180
 CALENDAR_QUERY_SLACK_MINUTES = 360
 
 
-def link_calendar_events_to_actions(db, sync_ref, logs):
+def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
     """
     Propõe registrar no diário de bordo o fechamento de reuniões vinculadas
     a uma ação. Matching determinístico por `tarefas.google_calendar_id` —
@@ -1586,7 +1589,7 @@ def link_calendar_events_to_actions(db, sync_ref, logs):
         return
 
     candidates_by_calendar_id = {
-        c["google_calendar_id"]: c for c in _load_candidate_tasks(db) if c.get("google_calendar_id")
+        c["google_calendar_id"]: c for c in _load_candidate_tasks(db, tarefas_docs) if c.get("google_calendar_id")
     }
     if not candidates_by_calendar_id:
         return
