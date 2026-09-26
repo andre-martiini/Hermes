@@ -82,24 +82,35 @@ def _descartar_sumidos(cenas: list[dict], quadros: dict[int, dict], servicos) ->
 
 
 def prompt_quadro(projeto: dict, cenas: list[dict], k: int, instrucao: str | None = None) -> str:
+    """Prompt de UM quadro, com a cena primeiro e a bíblia como apoio.
+
+    Duas prévias reais (26/09/2026) mostraram o modelo desenhando a personagem duas
+    vezes e acrescentando pessoas que ninguém pediu: (1) o prompt descrevia o fim
+    de uma cena e o começo da seguinte — agora cada quadro é um único instante; e
+    (2) a lista de personagens da bíblia e as imagens de referência eram lidas
+    como "ponha todos estes na imagem" / "copie esta composição". Por isso a cena
+    vem antes de tudo, com a ordem de mostrar só o que ela pede, e a bíblia e as
+    referências valem só para estilo e aparência.
+    """
     b = projeto.get("biblia") or {}
-    partes = [f"Estilo: {b.get('estilo')}."]
+    cena = cenas[0] if k == 0 else cenas[k - 1]
+    momento = "Primeiro instante do vídeo" if k == 0 else f"Último instante da cena {k}"
+    partes = [
+        "Ilustração de UM único quadro de vídeo (uma cena contínua, sem painéis nem montagem).",
+        f"{momento}: {cena.get('descricao_visual')}",
+        "Mostre SOMENTE o que a descrição acima pede: nenhuma pessoa, objeto ou texto a mais. "
+        "Cada pessoa aparece no máximo uma vez.",
+        f"Estilo: {b.get('estilo')}.",
+    ]
     if b.get("paleta"):
         partes.append(f"Paleta: {b['paleta']}.")
     if b.get("personagens"):
-        partes.append("Personagens (sempre iguais): " + "; ".join(b["personagens"]) + ".")
-    # Cada quadro descreve UM instante. Descrever o fim de uma cena e o começo da
-    # seguinte no mesmo prompt fez o modelo desenhar as duas situações numa imagem
-    # só (prévia real de 26/09/2026: a personagem aparecia duas vezes em K5 e K6).
-    # A transição é trabalho do Veo, que recebe o quadro inicial e o final.
-    if k == 0:
-        partes.append(f"Primeiro instante do vídeo: {cenas[0].get('descricao_visual')}")
-    else:
-        partes.append(f"Último instante da cena {k}: {cenas[k - 1].get('descricao_visual')}")
-    partes.append("Uma única cena contínua, sem montagem nem painéis; cada personagem aparece uma só vez.")
+        partes.append("Aparência fixa das personagens — vale SÓ para quem a cena menciona; quem não é "
+                      "mencionado não aparece: " + "; ".join(b["personagens"]) + ".")
     if k > 0:
-        partes.append("Mantenha EXATAMENTE a mesma personagem, roupa, cenário e estilo das imagens de "
-                      "referência; mude só pose, ação e enquadramento.")
+        partes.append("As imagens anexas são referência de estilo e da aparência das personagens: mantenha "
+                      "rosto, cabelo, roupa e traço idênticos, mas NÃO copie a composição, o cenário nem as "
+                      "outras pessoas delas.")
     if b.get("evitar"):
         partes.append(f"Evite: {b['evitar']}.")
     partes.append("Sem texto, letreiros ou legendas na imagem.")

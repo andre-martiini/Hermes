@@ -71,7 +71,11 @@ class TestPreviaCompleta(Base):
         self.assertIn("Último instante da cena 1: servidora lendo", self.srv.imagens[1][0])
         # Sem a descrição da cena seguinte no mesmo quadro (virava a personagem duas vezes).
         self.assertNotIn("tela do sistema", self.srv.imagens[1][0])
-        self.assertIn("cada personagem aparece uma só vez", self.srv.imagens[1][0])
+        self.assertIn("Cada pessoa aparece no máximo uma vez", self.srv.imagens[1][0])
+        # A bíblia vale só para quem a cena menciona, e a referência não é composição a copiar.
+        self.assertIn("quem não é mencionado não aparece", self.srv.imagens[1][0])
+        self.assertIn("NÃO copie a composição", self.srv.imagens[1][0])
+        self.assertNotIn("NÃO copie a composição", self.srv.imagens[0][0])  # K0 não tem referência
         self.assertIn("Evite: logotipos", self.srv.imagens[0][0])
 
     def test_vertical_sai_720x1280(self):
@@ -345,6 +349,40 @@ class TestMidiaPura(unittest.TestCase):
 
     def test_so_silencio_vira_vazio(self):
         self.assertEqual(midia.aparar_silencio(midia.silencio_pcm(1, 24000), 24000), b"")
+
+    def test_retentativa_so_para_erro_passageiro(self):
+        esperas = []
+
+        class Cota(Exception):
+            code = 429
+
+        chamadas = iter([Cota("RESOURCE_EXHAUSTED"), Cota("RESOURCE_EXHAUSTED"), "ok"])
+
+        def chamada():
+            r = next(chamadas)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        self.assertEqual(midia.com_retentativa(chamada, dormir=esperas.append), "ok")
+        self.assertEqual(esperas, [5, 15])
+        with self.assertRaises(ValueError):  # erro de verdade não é repetido
+            midia.com_retentativa(lambda: (_ for _ in ()).throw(ValueError("prompt inválido")),
+                                  dormir=esperas.append)
+        self.assertEqual(esperas, [5, 15])
+
+    def test_retentativa_desiste_depois_das_esperas(self):
+        class Cota(Exception):
+            code = 429
+
+        esperas = []
+
+        def sempre_cota():
+            raise Cota("RESOURCE_EXHAUSTED")
+
+        with self.assertRaises(Cota):
+            midia.com_retentativa(sempre_cota, dormir=esperas.append)
+        self.assertEqual(esperas, [5, 15, 30])
 
     def test_taxa_do_mime_do_tts(self):
         self.assertEqual(midia.taxa_do_mime("audio/L16;codec=pcm;rate=24000"), 24000)

@@ -145,6 +145,29 @@ class Servicos:
 BUCKET = "gestao-hermes-video"
 PASTA_DRIVE = "Hermes Vídeo"
 
+# Prévia real de 26/09/2026: `gemini-2.5-flash-image` na Vertex devolveu 429
+# RESOURCE_EXHAUSTED em rajadas (cota compartilhada), inclusive na 1ª chamada.
+# 429/503 são passageiros e não são cobrados: esperar e tentar de novo.
+ESPERAS_RETENTATIVA_S = (5, 15, 30)
+
+
+def _passageiro(exc: Exception) -> bool:
+    codigo = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return codigo in (429, 503) or "RESOURCE_EXHAUSTED" in str(exc) or "UNAVAILABLE" in str(exc)
+
+
+def com_retentativa(chamada, *, esperas=ESPERAS_RETENTATIVA_S, dormir=None):
+    import time
+
+    dormir = dormir or time.sleep
+    for espera in (*esperas, None):
+        try:
+            return chamada()
+        except Exception as exc:  # noqa: BLE001
+            if espera is None or not _passageiro(exc):
+                raise
+            dormir(espera)
+
 
 class ServicosVertex(Servicos):
     def __init__(self, db, projeto: str = "gestao-hermes", local: str = "us-central1", cliente=None):
@@ -162,7 +185,7 @@ class ServicosVertex(Servicos):
         from google.genai import types
 
         estilo = (voz or {}).get("estilo") or "neutro e claro"
-        resp = self._cli.models.generate_content(
+        resp = com_retentativa(lambda: self._cli.models.generate_content(
             model=modelo,
             contents=f"Leia em português do Brasil, em tom {estilo}: {texto}",
             config=types.GenerateContentConfig(
@@ -170,7 +193,7 @@ class ServicosVertex(Servicos):
                 speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=(voz or {}).get("nome") or "Kore"))),
             ),
-        )
+        ))
         dados = resp.candidates[0].content.parts[0].inline_data
         return Fala(pcm=dados.data, taxa=taxa_do_mime(dados.mime_type))
 
@@ -179,12 +202,12 @@ class ServicosVertex(Servicos):
 
         partes = [types.Part.from_bytes(data=r, mime_type="image/png") for r in referencias]
         partes.append(types.Part.from_text(text=prompt))
-        resp = self._cli.models.generate_content(
+        resp = com_retentativa(lambda: self._cli.models.generate_content(
             model=modelo,
             contents=[types.Content(role="user", parts=partes)],
             config=types.GenerateContentConfig(response_modalities=["IMAGE"],
                                                image_config=types.ImageConfig(aspect_ratio=formato)),
-        )
+        ))
         for parte in resp.candidates[0].content.parts:
             if getattr(parte, "inline_data", None) and parte.inline_data.data:
                 return parte.inline_data.data
