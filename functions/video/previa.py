@@ -154,8 +154,10 @@ def _entrar(db, projeto_id: str, agora: datetime):
     _txn(transaction)
 
 
-def _registrar(db, ref, doc_ref, campos: dict, custo: float, *, merge: bool = False):
-    """Checkpoint do item e custo dele no mesmo commit."""
+def _registrar(db, ref, doc_ref, campos: dict, custo: float, *, merge: bool = False, tipo: str = "previa"):
+    """Checkpoint do item, custo no projeto e uso do dia — tudo no mesmo commit."""
+    from video import uso
+
     batch = db.batch()
     if merge:
         batch.set(doc_ref, campos, merge=True)
@@ -164,6 +166,8 @@ def _registrar(db, ref, doc_ref, campos: dict, custo: float, *, merge: bool = Fa
     if custo:
         batch.update(ref, {"custo_real_usd": firestore.Increment(round(custo, 4)),
                            "custo_previa_usd": firestore.Increment(round(custo, 4))})
+        dia_ref, dia = uso.ref_dia(db)
+        batch.set(dia_ref, uso.campos(custo, tipo, dia), merge=True)
     batch.commit()
 
 
@@ -259,7 +263,8 @@ def _gerar_narracoes(db, ref, projeto, cenas, servicos, precos, projeto_id) -> t
                                   midia.pcm_para_wav(pcm, fala.taxa), "audio/wav")
             campos = {"audio_gcs": uri, "audio_versao": cena["versao"], "audio_duracao_s": round(dur, 2),
                       "duracao_s": clipe or 8, "dividir": clipe is None}
-            _registrar(db, ref, ref.collection("cenas").document(vp.id_cena(cena["ordem"])), campos, preco)
+            _registrar(db, ref, ref.collection("cenas").document(vp.id_cena(cena["ordem"])), campos, preco,
+                       tipo="narracao")
             gasto += preco
             cena.update(campos)
     return gasto, falhas
@@ -300,13 +305,14 @@ def _gerar_quadros(db, ref, projeto, cenas, quadros, servicos, precos, projeto_i
             uri = servicos.salvar(f"tmp/{projeto_id}/keyframes/K{k:02d}_v{versao}.png", png, "image/png")
         except Exception as exc:  # noqa: BLE001
             falhas.append(f"K{k}: imagem gerada mas não gravada ({exc})"[:300])
-            _registrar(db, ref, doc, {"indice": k, "pendente": True, "erro": str(exc)[:300]}, preco, merge=True)
+            _registrar(db, ref, doc, {"indice": k, "pendente": True, "erro": str(exc)[:300]}, preco, merge=True,
+                       tipo="quadro")
             gasto += preco
             continue
         registro = {"indice": k, "prompt": prompt, "versao": versao, "gcs_uri": uri, "pendente": False,
                     "erro": None, "instrucao": None, "instrucao_aplicada": instrucao,
                     "usa_referencias": [f"K{j}" for j in ((k - 1,) if k > 0 else ()) + ((0,) if k > 1 else ())]}
-        _registrar(db, ref, doc, registro, preco, merge=True)
+        _registrar(db, ref, doc, registro, preco, merge=True, tipo="quadro")
         gasto += preco
         imagens[k] = png
         quadros[k] = {**(q or {}), **registro}

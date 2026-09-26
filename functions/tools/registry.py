@@ -167,6 +167,10 @@ _CATALOG: dict[str, str] = {
     # Fase 2: prévia do storyboard (centavos por chamada, teto por prévia; roda como job).
     "video_gerar_previa": "Gera a prévia do storyboard de um projeto de vídeo: narração por cena, quadros-chave, folha de contato e MP3 no Drive (custo de centavos, com teto)",
     "video_ajustar": "Ajusta o storyboard de um projeto de vídeo (narração ou descrição de cena, instrução para um quadro) e refaz só o que mudou",
+    # Fase 4: pagas (piso de confirmação obrigatória) e cancelamento.
+    "video_renderizar": "Renderiza o vídeo aprovado no storyboard (clipes no Veo + montagem + Drive); pago, exige confirmação com o custo na prévia",
+    "video_refazer_cena": "Refaz o clipe de uma cena de um vídeo pronto (opcionalmente as seguintes) e remonta; pago, exige confirmação",
+    "video_cancelar": "Cancela um projeto de vídeo; se estiver renderizando, o worker para antes do próximo clipe",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -242,6 +246,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     # Prévia e ajustes: gravam cenas/quadros e publicam arquivos no Drive.
     "video_gerar_previa",
     "video_ajustar",
+    "video_renderizar",
+    "video_refazer_cena",
+    "video_cancelar",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -298,6 +305,10 @@ _VOICE_EXCLUDED: set[str] = {
     # A prévia se avalia olhando a folha de contato; o ajuste é por cena/quadro.
     "video_gerar_previa",
     "video_ajustar",
+    # Gasto de dólares não se aprova falando (mesmo motivo das escritas de investimento).
+    # Cancelar continua liberado por voz.
+    "video_renderizar",
+    "video_refazer_cena",
 }
 
 _schema_cache: dict[str, dict] = {}

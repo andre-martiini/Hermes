@@ -706,6 +706,18 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     if name == "pausar_conversa":
         from tools.pausar_conversa import preview as _preview
         return _preview(ctx, args)
+    if name in ("video_renderizar", "video_refazer_cena"):
+        # Custo e travas calculados SEM gastar nada; o "sim" executa (e confere de novo).
+        from video import comandos
+
+        try:
+            if name == "video_renderizar":
+                return comandos.avaliar_renderizacao(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""))
+            return comandos.avaliar_refacao(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""),
+                                            args.get("ordem"), refazer_seguintes=bool(args.get("refazer_seguintes")),
+                                            instrucao=args.get("instrucao"))
+        except comandos.Recusado as exc:
+            raise ValueError(str(exc)) from None
     if name == "schedule_whatsapp_message":
         destino = str(args.get("contact_number") or "").strip()
         resolved = _destinatario_whatsapp_previa(ctx, destino)
@@ -2397,6 +2409,28 @@ def _video_ajustar(ctx: ToolContext, args: dict):
     return previa.resposta_tool(resultado)
 
 
+# Fase 4 — pagas (piso de confirmação obrigatória: só rodam depois do "sim", via
+# confirmar_acao) e o cancelamento, que é livre.
+def _video_renderizar(ctx: ToolContext, args: dict):
+    from video import comandos, disparo
+
+    return comandos.renderizar(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), disparo.disparar_worker)
+
+
+def _video_refazer_cena(ctx: ToolContext, args: dict):
+    from video import comandos, disparo
+
+    return comandos.refazer_cena(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), args.get("ordem"),
+                                 disparo.disparar_worker, refazer_seguintes=bool(args.get("refazer_seguintes")),
+                                 instrucao=args.get("instrucao"))
+
+
+def _video_cancelar(ctx: ToolContext, args: dict):
+    from video import comandos
+
+    return comandos.cancelar(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), motivo=args.get("motivo"))
+
+
 # ---------------------------------------------------------------------------
 # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — thin
 # wrappers em torno das funções PURAS já existentes e testadas em
@@ -2699,6 +2733,9 @@ _HANDLERS: dict = {
     "video_status": _video_status,
     "video_gerar_previa": _video_gerar_previa,
     "video_ajustar": _video_ajustar,
+    "video_renderizar": _video_renderizar,
+    "video_refazer_cena": _video_refazer_cena,
+    "video_cancelar": _video_cancelar,
 }
 
 

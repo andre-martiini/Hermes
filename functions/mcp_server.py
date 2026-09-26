@@ -124,6 +124,13 @@ _access_cache: dict[str, object] | None = None
 # sobre escrita de dinheiro. Sem o piso, a sobra de um conserto de outra feature
 # governaria, calada, ferramentas que mexem em dinheiro.
 #
+# Hermes Video (26/09/2026, decisao explicita do dono no plano "Hermes Video"):
+# `video_renderizar` e `video_refazer_cena` entram no piso como efeito pago --
+# gastam dolares no Veo sem desfazer nenhum, o mesmo criterio das escritas de
+# investimento. A previa (hook em `hermes_tools.preview`) mostra o custo maximo,
+# o gasto do mes e o teto mensal antes do "sim"; a execucao confere tudo de novo.
+# Previa, ajuste, status e cancelar ficam fora (centavos com teto, ou nada).
+#
 # ESTE CONJUNTO NAO CRESCE POR HABITO (condicao do dono, 02/09/2026). Uma
 # candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
 # e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o

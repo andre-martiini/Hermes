@@ -70,11 +70,14 @@ class TestFloorIdenticoAoMcpServer(unittest.TestCase):
             frozenset(mcp_server._CONFIRMACAO_OBRIGATORIA),
         )
 
-    def test_floor_tem_exatamente_cinco_ferramentas(self):
+    def test_floor_tem_exatamente_sete_ferramentas(self):
         # Trava o tamanho também — "não cresce por hábito" (condição do
         # dono, 02/09/2026): uma mudança de tamanho sem tocar este teste
-        # não deveria acontecer por acidente.
-        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 5)
+        # não deveria acontecer por acidente. 5 → 7 em 26/09/2026, por
+        # decisão explícita do dono no plano "Hermes Vídeo": as duas tools
+        # que gastam dólares no Veo (video_renderizar, video_refazer_cena).
+        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 7)
+        self.assertTrue({"video_renderizar", "video_refazer_cena"} <= policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
 
     def test_classe_efeito_piso_cobre_exatamente_o_floor(self):
         # Achado da sub-entrega 12/N: `avaliar()` só consulta

@@ -1277,6 +1277,36 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="Idempotente: video/previa.py::ajustar só grava campo cujo texto mudou (texto igual não gera "
         "versão nova nem marca quadro pendente) e, sem mudança, responde 'Nada mudou' sem chamar a prévia.",
     ),
+    # Fase 4: as duas pagas estão no piso de confirmação obrigatória (autonomy/policy.py).
+    "video_renderizar": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+        "video_status acompanha clipe a clipe; o worker avisa no Telegram e anexa o MP4 à ação",
+        rede_servico="Cloud Run (hermes-video-worker) → Vertex AI (Veo), Cloud Storage, Google Drive, Telegram",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Irreversível: gasta dólares no Veo (US$ 0,05–0,15 por segundo de vídeo). Idempotente: a transição "
+        "para `renderizando` é transacional e só aceita aguardando_storyboard/erro — repetir enquanto renderiza "
+        "é recusado antes de disparar o worker; numa retomada, clipes prontos não são pagos de novo "
+        "(video/renderizacao.py, assinatura por clipe).",
+    ),
+    "video_refazer_cena": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+        "video_status acompanha; o vídeo novo substitui o link (o anterior fica em video_link_anterior)",
+        rede_servico="Cloud Run (hermes-video-worker) → Vertex AI (Veo), Cloud Storage, Google Drive, Telegram",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Não idempotente: cada execução soma 1 à `refacao` da cena, que muda a assinatura do clipe e paga "
+        "um clipe novo. O piso de confirmação é o que impede a repetição acidental: um confirmation_id executa "
+        "uma vez só, e a transição concluido→renderizando recusa um segundo pedido enquanto renderiza.",
+    ),
+    "video_cancelar": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "video_status mostra o estado cancelado; o worker confere o estado antes de cada envio ao Veo",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente: cancelar um projeto já cancelado responde 'Já estava cancelado' sem escrever. "
+        "Reversível no sentido prático — nada é apagado (cenas, quadros e clipes ficam) e o roteiro pode "
+        "virar outro projeto —, embora o estado `cancelado` em si seja final.",
+    ),
 }
 
 del _L, _R, _C
