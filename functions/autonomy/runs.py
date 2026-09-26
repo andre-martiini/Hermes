@@ -168,9 +168,18 @@ class AgentRun:
     #: chamador DEPOIS de já registrado, mudando silenciosamente o desfecho
     #: de um run supostamente terminal e imutável sem passar por nenhuma
     #: transição (achado de revisão adversarial, Codex, PR #336, P2).
-    #: Continua comparando igual a um `dict`/`list` equivalente
-    #: (`MappingProxyType`/`tuple` implementam `__eq__` contra o tipo
-    #: mutável correspondente).
+    #: `MappingProxyType` continua comparando igual a um `dict` equivalente
+    #: (`__eq__` delega para a mesma comparação de mapeamento). `tuple`,
+    #: porém, NÃO compara igual a uma `list` equivalente em Python puro
+    #: (`(1, 2) == [1, 2]` é `False`) -- achado de revisão adversarial (2a
+    #: rodada, verificação dos fixes do Codex, PR #336): comentário anterior
+    #: alegava isso também para `list`, o que é falso e induziria um teste
+    #: futuro a comparar `run.resultado == [...]` diretamente e falhar de
+    #: forma surpreendente. Comparação de "mesmo valor" para fins de
+    #: idempotência usa `autonomy.ledger._mesmo_valor_canonico` (que trata
+    #: list/tuple como equivalentes via serialização), nunca `==` cru contra
+    #: `run.resultado` -- só a leitura direta por um chamador externo é
+    #: afetada por esta diferença.
     resultado: Any = None
 
     def __post_init__(self) -> None:
