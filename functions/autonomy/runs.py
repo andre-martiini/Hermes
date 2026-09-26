@@ -163,7 +163,21 @@ class AgentRun:
         lease_token_limpo = str(self.lease_token or "").strip()
         if not lease_token_limpo:
             raise ValueError("lease_token é obrigatório.")
-        if self.generation < 1:
+        # Coagir para int ANTES de comparar -- achado de revisão adversarial:
+        # sem isto, um `generation` recebido como string (ex.: vindo de um
+        # corpo de requisição pouco tipado) levantava `TypeError` na
+        # comparação `< 1` em vez de um `ValueError` claro, quebrando a
+        # mesma promessa que este módulo copia de
+        # `autonomy.requests._exigir_tz_aware`: falhar cedo e com mensagem
+        # legível no ponto de entrada. Mesma técnica de coerção de
+        # `autonomy.requests.nova_lease` (`int(generation_anterior) + 1`).
+        try:
+            generation_normalizada = int(self.generation)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                f"generation deve ser um inteiro válido; recebido: {self.generation!r}"
+            )
+        if generation_normalizada < 1:
             raise ValueError("generation deve ser >= 1 (mesma convenção de autonomy.requests.Lease).")
         _exigir_tz_aware(self.iniciado_em, "iniciado_em")
         if self.finalizado_em is not None:
@@ -172,6 +186,7 @@ class AgentRun:
         object.__setattr__(self, "request_id", request_id_limpo)
         object.__setattr__(self, "executor_id", executor_id_limpo)
         object.__setattr__(self, "lease_token", lease_token_limpo)
+        object.__setattr__(self, "generation", generation_normalizada)
 
 
 def _fencing_run(run: AgentRun, lease_token: str, generation: int) -> None:
@@ -271,13 +286,21 @@ def concluir_run(
     vencimento natural da lease original. Resultado DIFERENTE para o mesmo
     run terminal, ou tentar concluir um run já terminal com um status
     diferente, levanta erro -- nunca sobrescreve."""
+    # Fencing primeiro, sempre -- mesma ordem de
+    # `autonomy.execution.registrar_resultado_observado`: identidade é
+    # verificada antes de qualquer decisão de negócio, inclusive antes de
+    # validar se `novo_status` é aceitável (achado de revisão adversarial:
+    # a ordem anterior validava `novo_status` antes do fencing, inconsistente
+    # com o módulo irmão -- não era uma falha de segurança, já que a checagem
+    # de `novo_status` não depende de nenhum dado do run, mas misturava a
+    # ordem das duas camadas de validação).
+    _fencing_run(run, lease_token, generation)
     if novo_status not in (AgentRunStatus.CONCLUIDO, AgentRunStatus.FALHA):
         raise ValueError(
             "concluir_run só aceita 'concluido' ou 'falha' como novo_status -- "
             "timeout é decidido por expirar_por_timeout, não por esta função."
         )
     if run.status in ESTADOS_TERMINAIS:
-        _fencing_run(run, lease_token, generation)
         if run.status == novo_status and run.resultado == resultado:
             return run
         raise RunFinalizado(
@@ -285,7 +308,6 @@ def concluir_run(
             "não pode transicionar de novo (nem para o mesmo status com "
             "resultado diferente, nem para outro status)."
         )
-    _fencing_run(run, lease_token, generation)
     ok, motivo = _validar_transicao(run.status, novo_status)
     if not ok:
         raise ValueError(motivo)
@@ -318,11 +340,16 @@ def expirar_por_timeout(
     oposta (declarar timeout cedo demais em vez de nunca declarar)."""
     if run.status == AgentRunStatus.TIMEOUT:
         return run
-    if run.status in ESTADOS_TERMINAIS:
-        raise RunFinalizado(
-            f"run '{run.run_id}' já está em estado terminal '{run.status.value}' -- "
-            "não pode ser marcado como timeout."
-        )
+    # Reusa a mesma tabela de transições de `concluir_run`/`marcar_em_andamento`
+    # em vez de checar `ESTADOS_TERMINAIS` ad hoc -- achado de revisão
+    # adversarial: a versão anterior funcionava hoje (todo estado ativo
+    # permite TIMEOUT em `_TRANSICOES_PERMITIDAS`), mas duplicava a decisão
+    # de "quem pode virar timeout" fora da tabela central, um risco de
+    # manutenção caso um estado ativo novo seja adicionado sem revisar
+    # este ponto.
+    ok, motivo = _validar_transicao(run.status, AgentRunStatus.TIMEOUT)
+    if not ok:
+        raise RunFinalizado(motivo)
     if not lease_expirada:
         raise ValueError(
             f"run '{run.run_id}' não pode expirar por timeout -- a lease do pedido "

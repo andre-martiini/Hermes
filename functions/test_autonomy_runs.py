@@ -49,6 +49,18 @@ class TestAgentRunConstrucao(unittest.TestCase):
         with self.assertRaises(ValueError):
             _run(generation=0)
 
+    def test_generation_nao_inteira_rejeitada_com_value_error(self):
+        # Achado de revisão adversarial: um generation não coercível (aqui
+        # nem sequer numérico) devia levantar ValueError, não TypeError
+        # vazando de uma comparação "<" sem coerção prévia.
+        with self.assertRaises(ValueError):
+            _run(generation="abc")
+
+    def test_generation_string_numerica_e_coagida_para_int(self):
+        run = _run(generation="3")
+        self.assertEqual(run.generation, 3)
+        self.assertIsInstance(run.generation, int)
+
     def test_iniciado_em_naive_rejeitado(self):
         with self.assertRaises(ValueError):
             _run(iniciado_em=datetime(2026, 9, 26, 9, 0, 0))
@@ -117,6 +129,14 @@ class TestMarcarEmAndamento(unittest.TestCase):
         with self.assertRaises(RunFinalizado):
             marcar_em_andamento(run, LEASE_TOKEN, GENERATION)
 
+    def test_repetido_com_token_errado_ainda_e_rejeitado(self):
+        # O atalho idempotente (já EM_ANDAMENTO) não pode pular o fencing --
+        # achado de revisão adversarial, verificado como já correto no
+        # código, só faltava o teste que prova isso.
+        run = _run(status=AgentRunStatus.EM_ANDAMENTO)
+        with self.assertRaises(RunLeaseInvalida):
+            marcar_em_andamento(run, "tok-errado", GENERATION)
+
 
 class TestConcluirRun(unittest.TestCase):
     def test_conclui_a_partir_de_em_andamento(self):
@@ -134,6 +154,14 @@ class TestConcluirRun(unittest.TestCase):
         run = _run(status=AgentRunStatus.INICIADO)
         falho = concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.FALHA, resultado="erro X")
         self.assertEqual(falho.status, AgentRunStatus.FALHA)
+
+    def test_conclui_a_partir_de_iniciado_sem_checkpoint(self):
+        # Simétrico ao caso de FALHA acima -- CONCLUIDO direto de INICIADO
+        # também é uma aresta permitida em _TRANSICOES_PERMITIDAS e não
+        # tinha teste cobrindo especificamente este destino.
+        run = _run(status=AgentRunStatus.INICIADO)
+        concluido = concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO, resultado="ok")
+        self.assertEqual(concluido.status, AgentRunStatus.CONCLUIDO)
 
     def test_novo_status_timeout_rejeitado(self):
         run = _run(status=AgentRunStatus.EM_ANDAMENTO)
