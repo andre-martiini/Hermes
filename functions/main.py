@@ -10139,73 +10139,52 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         def editar_plano_acao(
             task_id: str,
             novo_plano: list[dict],
-            justificativa_diario: str
+            justificativa_diario: str,
+            modo: str = "parcial",
+            confirmar_remocao: bool = False,
         ):
             """
-            Substitui/atualiza o plano de ação de uma tarefa existente.
-            Usa fuzzy matching para preservar o status de conclusão dos passos já concluídos.
-            Use APENAS depois que o usuário confirmar o draft do novo plano apresentado.
+            Edita etapas do plano de ação de uma tarefa existente.
+            Use APENAS depois que o usuário confirmar o draft apresentado.
             Parâmetros:
             - task_id: ID da tarefa no Firestore.
-            - novo_plano: Lista de dicionários no formato [{"id": "xyz", "text": "Passo 1"}, {"text": "Passo Novo sem id"}].
-              Cada passo aceita ainda, todos opcionais:
+            - novo_plano: lista de etapas a alterar, ex.: [{"id": "xyz", "estado": "feito"}, {"text": "Passo novo"}].
+              Por padrão (modo="parcial") SÓ as etapas enviadas mudam: as que você não mandar
+              ficam intactas, na posição em que estavam. Etapa com "id" existente é atualizada;
+              sem "id", o texto é comparado com as existentes (≥85% reaproveita a etapa) e, se
+              não casar, a etapa entra no fim do plano.
+              Cada etapa aceita, todos opcionais:
+                "text": novo texto
                 "data_prevista": "YYYY-MM-DD" — dia previsto para esta etapa; sem ela, herda a data da ação
                 "estado": "pendente" | "em_andamento" | "aguardando_terceiro" | "feito"
                 "aguardando_de": de quem se espera, quando o estado for "aguardando_terceiro"
+                "remover": true — tira a etapa do plano (exige o "id")
               Omitir um campo preserva o valor que a etapa já tinha; não o apaga.
               Para apagar data_prevista ou aguardando_de, envie null (ou "").
+              Reenviar o "id" de uma etapa removida a restaura com o histórico original.
             - justificativa_diario: Texto gerado pela IA explicando o motivo da alteração (será gravado no diário da tarefa).
-            Retorna 'OK' ou 'ERRO|{detalhe}'.
+            - modo: "parcial" (padrão) ou "substituir". Use "substituir" só para reordenar ou
+              reestruturar o plano inteiro: a lista enviada vira o plano completo, na ordem enviada.
+            - confirmar_remocao: no modo "substituir", etapas existentes que não vierem na lista só
+              são removidas com confirmar_remocao=true — passe true apenas quando o usuário tiver
+              confirmado o draft que mostra essas remoções.
+            Retorna 'OK|{o que mudou por etapa}' ou 'ERRO|{detalhe}'.
             """
             try:
-                from datetime import datetime as _dt, timezone as _tz
-                import subtarefas
+                from tools.telegram_extended import editar_plano_da_tarefa
 
-                task_ref = db.collection('tarefas').document(task_id)
-                task_doc = task_ref.get()
-                if not task_doc.exists:
-                    return f"ERRO|Tarefa '{task_id}' não encontrada."
-
-                task_data = task_doc.to_dict()
-                plano_atual = task_data.get('plano_acao', [])
-                now_iso = _dt.now(_tz.utc).isoformat()
-
-                # Match por id, depois por texto parecido (≥85%), depois inserção.
-                # A rotina vive em `subtarefas` porque existia igual em
-                # `tools/telegram_extended.py`, e as duas cópias remontavam a
-                # etapa como {id, text, completed} literal — apagando estado,
-                # data prevista e contador no primeiro ajuste de texto.
-                try:
-                    plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
-                except subtarefas.PlanoInvalido as exc:
-                    return f"ERRO|{exc} Nada foi gravado."
-
-                degenerado = subtarefas.parece_degenerado(plano_final)
-                if degenerado:
-                    return (f"ERRO|{degenerado} Nada foi gravado; o plano anterior "
-                            f"({len(plano_atual)} etapa(s)) está preservado.")
-
-                # Mesma guarda do canal MCP: apagar um plano existente exige
-                # intenção explícita, não pode ser efeito de uma lista vazia.
-                if subtarefas.esvaziaria_o_plano(plano_atual, plano_final):
-                    return (f"ERRO|A alteração apagaria as {len(plano_atual)} etapa(s) do "
-                            "plano e nada foi gravado. Envie as etapas em `novo_plano`.")
-
-                nota = f"[Copiloto Gaspar] Plano de ação atualizado: {justificativa_diario}"
-                avisos = subtarefas.inconsistencias(plano_final, task_data.get('prazo_final'))
-                if avisos:
-                    nota += "\n⚠️ " + "; ".join(avisos)
-
-                task_ref.update({
-                    'plano_acao': plano_final,
-                    'execution_lane': subtarefas.derivar_lane(
-                        plano_final, task_data.get('execution_lane')),
-                    'data_atualizacao': now_iso,
-                    'acompanhamento': firestore.ArrayUnion([{'data': now_iso, 'nota': nota}])
-                })
-
-                print(f"[Copiloto] Plano de ação da tarefa {task_id} atualizado ({len(plano_final)} passos).")
-                return "OK"
+                # Mesmo fluxo do canal MCP/Telegram. Antes havia uma cópia aqui,
+                # e cada guarda nova (plano degenerado, esvaziamento, remoção sem
+                # pedido) precisava ser lembrada nos dois lugares.
+                resultado = editar_plano_da_tarefa(db, {
+                    "task_id": task_id,
+                    "novo_plano": novo_plano,
+                    "justificativa_diario": justificativa_diario,
+                    "modo": modo,
+                    "confirmar_remocao": confirmar_remocao,
+                }, origem="Copiloto Gaspar")
+                print(f"[Copiloto] editar_plano_acao {task_id} (modo={modo}): {str(resultado)[:200]}")
+                return resultado
 
             except Exception as _ee:
                 print(f"[Copiloto] Erro ao editar plano: {_ee}")
@@ -10930,9 +10909,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "ETAPA 2 — CONFIRMAÇÃO:\n"
             "Só chame editar_plano_acao após confirmação explícita do usuário ('sim', 'confirma', 'pode atualizar', etc.).\n"
             "Ao montar novo_plano, inclua o campo 'id' para passos existentes (preserva status de conclusão via fuzzy match no backend).\n"
+            "Por padrão (modo parcial) envie SÓ os passos que mudam: os não enviados ficam intactos. Para remover um passo,\n"
+            "envie {\"id\": \"...\", \"remover\": true}. Para reordenar ou reestruturar o plano inteiro, envie a lista completa\n"
+            "com modo=\"substituir\" e, se o draft confirmado remove passos, confirmar_remocao=true.\n"
             "Omita o 'id' apenas para passos genuinamente novos.\n\n"
             "ETAPA 3 — COMMIT E CONFIRMAÇÃO:\n"
-            "Se editar_plano_acao retornar 'OK', responda:\n"
+            "Se editar_plano_acao retornar algo começando com 'OK', responda:\n"
             "  ✅ Plano de ação atualizado com sucesso.\n"
             "Se retornar 'ERRO|{detalhe}', responda:\n"
             "  ⚠️ Erro ao atualizar plano: {detalhe}\n\n"

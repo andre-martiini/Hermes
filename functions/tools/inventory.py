@@ -338,7 +338,19 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "`plano_final`), mas o handler faz `task_ref.update` com `firestore.ArrayUnion([{data, nota}])` em "
         "`acompanhamento`, INCONDICIONALMENTE, em toda chamada bem-sucedida -- mesmo padrão de append "
         "incondicional já aceito em `editar_acao` (sub-entrega 16/N) e `pausar_conversa`/`registrar_execucao_"
-        "investimento` (sub-entrega 17/N). Não idempotente (P03 sub-entrega 19/N).",
+        "investimento` (sub-entrega 17/N). Não idempotente (P03 sub-entrega 19/N). "
+        "Desde 27/09/2026 o padrão é `modo='parcial'` (etapa não citada fica); remover exige "
+        "`remover: true` ou `modo='substituir'` + `confirmar_remocao`, e a etapa removida vai para "
+        "`etapas_removidas` na própria tarefa, de onde volta com o id original -- por isso REVERSIVEL.",
+    ),
+    "editar_etapa": ToolInventoryEntry(
+        "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "etapa_id precisa existir no plano; estado fora do enum é recusado antes de gravar",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::editar_etapa_da_tarefa`, que delega a "
+        "`editar_plano_da_tarefa` (o mesmo fluxo de `editar_plano_acao`) no modo parcial com um item só -- "
+        "não tem como remover etapa. Não idempotente pelo mesmo motivo de `editar_plano_acao`: cada "
+        "chamada bem-sucedida faz `ArrayUnion` de uma entrada nova em `acompanhamento`.",
     ),
     "preparar_edicao_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA,

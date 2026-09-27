@@ -122,10 +122,16 @@ class TestMesclarPreservaOQueNaoConhece(unittest.TestCase):
         self.assertEqual(final[1].get("degradation_count"), None)
         self.assertNotEqual(final[1]["id"], final[0]["id"])
 
-    def test_etapa_removida_do_plano_novo_sai(self):
+    def test_etapa_removida_do_plano_novo_sai_no_modo_substituir(self):
+        atual = [_etapa("a"), _etapa("b")]
+        final = st.mesclar_plano(atual, [{"id": "a", "text": "a"}], modo="substituir")
+        self.assertEqual([f["text"] for f in final], ["a"])
+
+    def test_etapa_omitida_fica_no_modo_parcial(self):
+        """O padrão desde 27/09/2026: mandar uma etapa não apaga as outras."""
         atual = [_etapa("a"), _etapa("b")]
         final = st.mesclar_plano(atual, [{"id": "a", "text": "a"}])
-        self.assertEqual([f["text"] for f in final], ["a"])
+        self.assertEqual([f["text"] for f in final], ["a", "b"])
 
 
 class TestMesclarApagaDataEEspera(unittest.TestCase):
@@ -220,7 +226,7 @@ class TestDiferencas(unittest.TestCase):
     def test_adicionada_removida_e_reordenada(self):
         atual = [_etapa("a"), _etapa("b"), _etapa("c")]
         final = st.mesclar_plano(atual, [{"id": "c", "text": "c"}, {"id": "a", "text": "a"},
-                                         {"text": "coisa totalmente nova"}])
+                                         {"text": "coisa totalmente nova"}], modo="substituir")
         d = st.diferencas(atual, final)
         self.assertEqual(d["removidas"], ["b"])
         self.assertEqual(d["adicionadas"], [final[2]["id"]])
@@ -229,7 +235,8 @@ class TestDiferencas(unittest.TestCase):
 
     def test_so_reordenar_nao_e_nenhuma_mudanca(self):
         atual = [_etapa("a"), _etapa("b")]
-        final = st.mesclar_plano(atual, [{"id": "b", "text": "b"}, {"id": "a", "text": "a"}])
+        final = st.mesclar_plano(atual, [{"id": "b", "text": "b"}, {"id": "a", "text": "a"}],
+                                 modo="substituir")
         self.assertEqual(st.diferencas(atual, final), {"ordem_alterada": True})
 
     def test_estado_muda_sem_citar_completed_e_texto_longo_e_resumido(self):

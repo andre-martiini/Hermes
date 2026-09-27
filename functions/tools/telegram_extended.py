@@ -53,6 +53,201 @@ def _normalizar_status_acao(valor):
     return valor
 
 
+def _sim(valor) -> bool:
+    """Booleano vindo de LLM: `true`, "true", "sim", 1. `bool("false")` e True."""
+    if isinstance(valor, str):
+        return valor.strip().lower() in ("true", "1", "sim", "yes")
+    return valor is True or valor == 1
+
+
+def _lista_etapas(removidas) -> str:
+    return "; ".join(
+        f"{r['id'] or '(sem id)'}: {str(r['etapa'].get('text') or r['etapa'].get('texto') or '')[:80]!r}"
+        for r in removidas)
+
+
+def editar_plano_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar") -> str:
+    """Aplica `editar_plano_acao` a uma tarefa. Unica copia do fluxo de escrita.
+
+    Usada pelo servidor MCP/Telegram (via `execute`), pelo copiloto web
+    (`main.py`) e por `editar_etapa`. Antes o copiloto tinha a propria copia,
+    e cada guarda nova precisava ser lembrada duas vezes.
+
+    Semantica (27/09/2026): `modo="parcial"` (padrao) so mexe nas etapas
+    citadas; tirar uma etapa exige `{"id": ..., "remover": true}`.
+    `modo="substituir"` usa a lista enviada como plano inteiro (reordenar), e
+    se isso tirar etapas que nao foram marcadas para remocao, recusa sem gravar
+    ate vir `confirmar_remocao=true`. Toda etapa removida vai para
+    `etapas_removidas` na propria tarefa e volta, com id e campos originais,
+    se o id for reenviado.
+    """
+    import subtarefas
+
+    task_id = str(slots.get("task_id") or "")
+    # Apelidos aceitos porque sao os nomes que quem chama tenta primeiro —
+    # e chamar com `plano_acao=` fazia `novo_plano` chegar vazio, o que
+    # apagava o plano inteiro sem reclamar.
+    novo_plano = (slots.get("novo_plano") or slots.get("plano_acao")
+                  or slots.get("etapas") or [])
+    justificativa = str(slots.get("justificativa_diario")
+                        or slots.get("motivo") or "").strip()
+    modo = str(slots.get("modo") or subtarefas.MODO_PARCIAL).strip().lower()
+    if modo not in subtarefas.MODOS:
+        return (f"ERRO|modo {modo!r} invalido. Use 'parcial' (padrao: so as etapas enviadas "
+                "mudam) ou 'substituir' (a lista enviada vira o plano inteiro). Nada foi gravado.")
+    confirmar_esvaziar = _sim(slots.get("confirmar_esvaziar"))
+    confirmar_remocao = _sim(slots.get("confirmar_remocao")) or confirmar_esvaziar
+
+    task_ref = db.collection("tarefas").document(task_id)
+    task_doc = task_ref.get()
+    if not task_doc.exists:
+        return f"ERRO|Tarefa '{task_id}' não encontrada."
+    task_data = task_doc.to_dict() or {}
+    plano_atual = task_data.get("plano_acao", []) or []
+    lixeira = task_data.get("etapas_removidas") or []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        if modo == subtarefas.MODO_PARCIAL and not subtarefas.normalizar_entrada_plano(novo_plano):
+            return ("ERRO|novo_plano veio vazio e nada foi gravado. As etapas vao em "
+                    "`novo_plano` (lista de objetos {id?, text?, estado?, data_prevista?, "
+                    "aguardando_de?, remover?}); no modo padrao so as etapas enviadas mudam.")
+        # O merge vive em `subtarefas` porque esta rotina existia duplicada
+        # aqui e em `main.py`, e as duas remontavam cada etapa como {id, text,
+        # completed} literal — apagando estado, data prevista e contador.
+        edicao = subtarefas.editar_plano(plano_atual, novo_plano, modo=modo,
+                                         etapas_removidas=lixeira)
+    except subtarefas.PlanoInvalido as exc:
+        return f"ERRO|{exc} Nada foi gravado."
+    plano_final = edicao.plano
+
+    # Ultima barreira: mesmo com parse bem-sucedido, plano feito de etapas
+    # de um caractere so pode ter vindo de string iterada.
+    degenerado = subtarefas.parece_degenerado(plano_final)
+    if degenerado:
+        return (f"ERRO|{degenerado} Nada foi gravado; o plano anterior "
+                f"({len(plano_atual)} etapa(s)) esta preservado.")
+
+    # Recusa em vez de apagar. Esvaziar um plano existente e sempre possivel
+    # de propósito — mas exige dizer isso, nao acontecer por um parametro
+    # com nome errado.
+    if subtarefas.esvaziaria_o_plano(plano_atual, plano_final) and not confirmar_esvaziar:
+        return ("ERRO|A alteracao apagaria as "
+                f"{len(plano_atual)} etapa(s) do plano e nada foi gravado. "
+                "Se o plano veio vazio, confira o nome do parametro: as etapas "
+                "vao em `novo_plano` (lista de objetos {text, data_prevista?, "
+                "estado?}). Para apagar o plano de proposito, repita com "
+                "confirmar_esvaziar=true.")
+
+    # 27/09/2026: no modo substituir, etapa que so deixou de ser citada nao sai
+    # sem confirmacao. Foi exatamente assim que 4 de 5 etapas sumiram.
+    sem_pedido = edicao.removidas_sem_pedido
+    if sem_pedido and not confirmar_remocao:
+        return ("ERRO|Nada foi gravado: com modo='substituir' a lista enviada vira o plano "
+                f"inteiro, e {len(sem_pedido)} etapa(s) existente(s) ficariam de fora — "
+                f"{_lista_etapas(sem_pedido)}. Se era para mexer so em algumas etapas, "
+                "chame sem `modo` (parcial). Se a remocao e intencional, repita com "
+                "confirmar_remocao=true (as etapas ficam recuperaveis em etapas_removidas).")
+
+    # Inconsistência de data sinaliza, não bloqueia — e vai para o diário,
+    # onde uma observação sobre prazo fica visível na interface e sobrevive
+    # à conversa.
+    nota = f"[{origem}] Plano de ação atualizado: {justificativa}"
+    if edicao.removidas:
+        nota += ("\n🗑️ Etapa(s) removida(s) do plano (recuperáveis reenviando o id): "
+                 + _lista_etapas(edicao.removidas))
+    if edicao.restauradas:
+        nota += "\n↩️ Etapa(s) restaurada(s) com o id original: " + ", ".join(edicao.restauradas)
+    avisos = subtarefas.inconsistencias(plano_final, task_data.get("prazo_final"))
+    if avisos:
+        nota += "\n⚠️ " + "; ".join(avisos)
+
+    atualizacao = {
+        "plano_acao": plano_final,
+        "execution_lane": subtarefas.derivar_lane(plano_final, task_data.get("execution_lane")),
+        "data_atualizacao": now_iso,
+        "acompanhamento": firestore.ArrayUnion([{"data": now_iso, "nota": nota}]),
+    }
+    if edicao.removidas or edicao.restauradas:
+        atualizacao["etapas_removidas"] = subtarefas.atualizar_lixeira(lixeira, edicao, now_iso)
+    task_ref.update(atualizacao)
+
+    # Devolve o que mudou por etapa: sem isso, um campo que o merge ignorou
+    # respondia o mesmo "OK" de uma edição que gravou.
+    alteracoes = subtarefas.diferencas(plano_atual, plano_final)
+    if edicao.restauradas:
+        restauradas = set(edicao.restauradas)
+        adicionadas = [e for e in alteracoes.get("adicionadas", []) if e not in restauradas]
+        if adicionadas:
+            alteracoes["adicionadas"] = adicionadas
+        else:
+            alteracoes.pop("adicionadas", None)
+        alteracoes["restauradas"] = list(edicao.restauradas)
+    if not alteracoes:
+        return "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais."
+    return "OK|" + json.dumps(alteracoes, ensure_ascii=False)
+
+
+_CAMPOS_EDITAR_ETAPA = ("text", "estado", "data_prevista", "aguardando_de")
+
+
+def editar_etapa_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar") -> str:
+    """`editar_etapa`: muda UMA etapa, sem tocar nas outras.
+
+    O caso comum — marcar feita, em andamento ou aguardando terceiro — nao
+    precisa montar lista nenhuma, e por isso nao tem como apagar etapa por
+    engano. Por baixo e `editar_plano_acao` no modo parcial com um item so.
+    """
+    import subtarefas
+
+    task_id = str(slots.get("task_id") or "").strip()
+    etapa_id = str(slots.get("etapa_id") or slots.get("id") or "").strip()
+    if not task_id:
+        return "ERRO|Informe task_id."
+    if not etapa_id:
+        return "ERRO|Informe etapa_id (o id da etapa, visível em obter_acao)."
+
+    item = {"id": etapa_id}
+    for campo in _CAMPOS_EDITAR_ETAPA:
+        if campo in slots:
+            item[campo] = slots[campo]
+    if "texto" in slots and "text" not in item:
+        item["text"] = slots["texto"]
+    if len(item) == 1:
+        return ("ERRO|Nada para mudar: envie ao menos um de estado, text, data_prevista "
+                "ou aguardando_de.")
+    estado = str(item.get("estado") or "").strip().lower()
+    if "estado" in item and item["estado"] is not None and estado not in subtarefas.ESTADOS:
+        return (f"ERRO|estado {item['estado']!r} invalido. Use um de: "
+                f"{', '.join(subtarefas.ESTADOS)}. Nada foi gravado.")
+
+    task_doc = db.collection("tarefas").document(task_id).get()
+    if not task_doc.exists:
+        return f"ERRO|Tarefa '{task_id}' não encontrada."
+    task_data = task_doc.to_dict() or {}
+    plano = [p for p in (task_data.get("plano_acao") or []) if isinstance(p, dict)]
+    alvo = next((p for p in plano if str(p.get("id") or "") == etapa_id), None)
+    if alvo is None:
+        removida = any(isinstance(e, dict) and str(e.get("id") or "") == etapa_id
+                       for e in (task_data.get("etapas_removidas") or []))
+        if removida:
+            return (f"ERRO|A etapa '{etapa_id}' foi removida do plano. Para trazê-la de volta "
+                    f"com o histórico, use editar_plano_acao com novo_plano=[{{\"id\": \"{etapa_id}\"}}].")
+        existentes = "; ".join(f"{p.get('id')}: {subtarefas.texto_de(p)[:50]!r}" for p in plano)
+        return (f"ERRO|Etapa '{etapa_id}' não existe na ação {task_id}. "
+                f"Etapas atuais: {existentes or '(plano vazio)'}.")
+
+    justificativa = str(slots.get("justificativa_diario") or slots.get("motivo") or "").strip()
+    if not justificativa:
+        partes = [f"{c}={item[c]!r}" for c in _CAMPOS_EDITAR_ETAPA if c in item]
+        justificativa = f"etapa '{subtarefas.texto_de(alvo)[:60]}' — " + ", ".join(partes)
+    return editar_plano_da_tarefa(db, {
+        "task_id": task_id,
+        "novo_plano": [item],
+        "justificativa_diario": justificativa,
+    }, origem=origem)
+
+
 def execute(tool_name: str, slots: dict, db) -> str:
     if tool_name == "obter_contexto_tela":
         task_id = slots.get("task_id") or slots.get("id_tarefa")
@@ -377,72 +572,10 @@ def execute(tool_name: str, slots: dict, db) -> str:
         )
 
     if tool_name == "editar_plano_acao":
-        import subtarefas
+        return editar_plano_da_tarefa(db, slots)
 
-        task_id = str(slots.get("task_id") or "")
-        # Apelidos aceitos porque sao os nomes que quem chama tenta primeiro —
-        # e chamar com `plano_acao=` fazia `novo_plano` chegar vazio, o que
-        # apagava o plano inteiro sem reclamar.
-        novo_plano = (slots.get("novo_plano") or slots.get("plano_acao")
-                      or slots.get("etapas") or [])
-        justificativa = str(slots.get("justificativa_diario")
-                            or slots.get("motivo") or "").strip()
-        task_ref = db.collection("tarefas").document(task_id)
-        task_doc = task_ref.get()
-        if not task_doc.exists:
-            return f"ERRO|Tarefa '{task_id}' não encontrada."
-        task_data = task_doc.to_dict() or {}
-        plano_atual = task_data.get("plano_acao", [])
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        # O merge vive em `subtarefas` porque esta rotina existia duplicada aqui
-        # e em `main.py`, e as duas remontavam cada etapa como {id, text,
-        # completed} literal — apagando estado, data prevista e contador da
-        # subtarefa no primeiro ajuste de texto.
-        try:
-            plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
-        except subtarefas.PlanoInvalido as exc:
-            return f"ERRO|{exc} Nada foi gravado."
-
-        # Ultima barreira: mesmo com parse bem-sucedido, plano feito de etapas
-        # de um caractere so pode ter vindo de string iterada.
-        degenerado = subtarefas.parece_degenerado(plano_final)
-        if degenerado:
-            return (f"ERRO|{degenerado} Nada foi gravado; o plano anterior "
-                    f"({len(plano_atual)} etapa(s)) esta preservado.")
-
-        # Recusa em vez de apagar. Esvaziar um plano existente e sempre possivel
-        # de propósito — mas exige dizer isso, nao acontecer por um parametro
-        # com nome errado.
-        if subtarefas.esvaziaria_o_plano(plano_atual, plano_final):
-            if not slots.get("confirmar_esvaziar"):
-                return ("ERRO|A alteracao apagaria as "
-                        f"{len(plano_atual)} etapa(s) do plano e nada foi gravado. "
-                        "Se o plano veio vazio, confira o nome do parametro: as etapas "
-                        "vao em `novo_plano` (lista de objetos {text, data_prevista?, "
-                        "estado?}). Para apagar o plano de proposito, repita com "
-                        "confirmar_esvaziar=true.")
-
-        # Inconsistência de data sinaliza, não bloqueia — e vai para o diário,
-        # onde uma observação sobre prazo fica visível na interface e sobrevive
-        # à conversa.
-        nota = f"[Telegram Gaspar] Plano de ação atualizado: {justificativa}"
-        avisos = subtarefas.inconsistencias(plano_final, task_data.get("prazo_final"))
-        if avisos:
-            nota += "\n⚠️ " + "; ".join(avisos)
-
-        task_ref.update({
-            "plano_acao": plano_final,
-            "execution_lane": subtarefas.derivar_lane(plano_final, task_data.get("execution_lane")),
-            "data_atualizacao": now_iso,
-            "acompanhamento": firestore.ArrayUnion([{"data": now_iso, "nota": nota}]),
-        })
-        # Devolve o que mudou por etapa: sem isso, um campo que o merge ignorou
-        # respondia o mesmo "OK" de uma edição que gravou.
-        alteracoes = subtarefas.diferencas(plano_atual, plano_final)
-        if not alteracoes:
-            return "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais."
-        return "OK|" + json.dumps(alteracoes, ensure_ascii=False)
+    if tool_name == "editar_etapa":
+        return editar_etapa_da_tarefa(db, slots)
 
     if tool_name == "agendar_lembrete_acao":
         task_id = str(slots.get("task_id") or slots.get("id_tarefa") or "").strip()

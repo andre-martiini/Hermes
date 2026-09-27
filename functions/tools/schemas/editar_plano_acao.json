@@ -1,6 +1,6 @@
 {
   "name": "editar_plano_acao",
-  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam; para APAGAR data_prevista ou aguardando_de, envie null. Devolve 'OK|' seguido do que de fato mudou por etapa (ex.: {\"alteradas\": {\"id\": {\"data_prevista\": [\"2026-09-25\", null]}}}), ou 'OK|Nenhuma etapa mudou' quando nada mudou. ATENÇÃO: as etapas vão em novo_plano — enviar lista vazia é recusado, não apaga o plano.",
+  "description": "Edita etapas do plano de ação de uma tarefa existente. Por padrão (modo='parcial') SÓ as etapas enviadas em novo_plano mudam: as que você não mandar ficam intactas, com id, campos e posição. Etapa com 'id' existente é atualizada (campos omitidos preservam o valor atual; para APAGAR data_prevista ou aguardando_de, envie null); etapa sem 'id' é comparada pelo texto (≥85% de similaridade atualiza a existente) e, se não casar, entra no fim do plano. Para marcar uma única etapa (feita, em andamento, aguardando terceiro) prefira editar_etapa. REMOVER exige intenção explícita: {\"id\": \"...\", \"remover\": true} na etapa, ou modo='substituir' (a lista enviada vira o plano inteiro, na ordem enviada — é o jeito de reordenar) com confirmar_remocao=true; sem a confirmação, modo='substituir' que deixaria etapas de fora é recusado sem gravar e lista as etapas que sairiam. Etapas removidas ficam em etapas_removidas na ação; reenviar o id de uma delas a restaura com o id e o histórico originais. Devolve 'OK|' seguido do que mudou: {\"alteradas\": {id: {campo: [antes, depois]}}, \"adicionadas\": [ids], \"removidas\": [ids], \"restauradas\": [ids], \"ordem_alterada\": true}, ou 'OK|Nenhuma etapa mudou'. Lista vazia é recusada, não apaga o plano.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -10,17 +10,17 @@
       },
       "novo_plano": {
         "type": "array",
-        "description": "Lista de etapas. Envie o 'id' das que já existem para preservar histórico; etapa sem 'id' é tratada como nova (o texto ainda é comparado com as existentes, ≥85% de similaridade reaproveita a etapa).",
+        "description": "Etapas a alterar, adicionar ou remover. Modo parcial (padrão): só estas mudam. Modo substituir: esta lista é o plano completo, na ordem desejada. Envie o 'id' das que já existem; etapa sem 'id' é tratada como nova (o texto ainda é comparado com as existentes, ≥85% de similaridade reaproveita a etapa).",
         "items": {
           "type": "object",
           "properties": {
             "id": {
               "type": "string",
-              "description": "ID da etapa existente. Omita para criar uma nova"
+              "description": "ID da etapa existente (ou de uma etapa removida, para restaurá-la). Omita para criar uma nova"
             },
             "text": {
               "type": "string",
-              "description": "Texto da etapa"
+              "description": "Texto da etapa. Obrigatório para etapa nova; numa etapa existente, omitir preserva o texto atual"
             },
             "data_prevista": {
               "type": "string",
@@ -41,16 +41,29 @@
               "type": "string",
               "nullable": true,
               "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'. null (ou \"\") apaga; omitir preserva."
+            },
+            "remover": {
+              "type": "boolean",
+              "description": "true remove esta etapa do plano (exige o 'id'). Ela fica recuperável em etapas_removidas"
             }
-          },
-          "required": [
-            "text"
-          ]
+          }
         }
       },
       "justificativa_diario": {
         "type": "string",
         "description": "Justificativa que será gravada no diário"
+      },
+      "modo": {
+        "type": "string",
+        "enum": [
+          "parcial",
+          "substituir"
+        ],
+        "description": "'parcial' (padrão): só as etapas enviadas mudam. 'substituir': a lista enviada vira o plano inteiro, na ordem enviada (use para reordenar); etapas existentes que ficarem de fora só saem com confirmar_remocao=true"
+      },
+      "confirmar_remocao": {
+        "type": "boolean",
+        "description": "Com modo='substituir', true autoriza remover as etapas existentes que não vieram na lista. Sem ele a chamada é recusada e lista o que sairia"
       },
       "plano_acao": {
         "type": "array",

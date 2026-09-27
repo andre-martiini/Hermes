@@ -34,6 +34,7 @@ from __future__ import annotations
 import difflib
 import json
 import uuid
+from dataclasses import dataclass, field
 
 PENDENTE = "pendente"
 EM_ANDAMENTO = "em_andamento"
@@ -46,7 +47,9 @@ ESTADOS = (PENDENTE, EM_ANDAMENTO, AGUARDANDO_TERCEIRO, FEITO)
 # e o que e de outra pessoa — tudo o que nao estiver aqui e preservado intacto.
 _CAMPOS_CONHECIDOS = frozenset(
     {"id", "text", "texto", "completed", "estado", "aguardando_de",
-     "data_prevista", "degradation_count"}
+     "data_prevista", "degradation_count",
+     # Instrucao de quem edita, nao dado da etapa: nunca e gravada.
+     "remover"}
 )
 
 # Campos que quem edita pode APAGAR mandando `null` ou "". Nos outros, vazio
@@ -278,61 +281,253 @@ def converter_plano(plano) -> list[dict]:
     return saida
 
 
-def mesclar_plano(plano_atual, novo_plano) -> list[dict]:
-    """Aplica um plano novo preservando o que ja se sabia de cada etapa.
+MODO_PARCIAL = "parcial"
+MODO_SUBSTITUIR = "substituir"
+MODOS = (MODO_PARCIAL, MODO_SUBSTITUIR)
 
-    Tres caminhos, na ordem: id igual, texto parecido (>=85%), etapa nova. Os
-    dois primeiros herdam **o item inteiro** do original — nao so `completed`,
-    como as duas implementacoes anteriores faziam. Era por ali que `estado`,
-    `data_prevista` e `aguardando_de` sumiriam na primeira vez que o copiloto
-    reescrevesse o texto de um passo.
+# Quantas etapas removidas ficam guardadas na acao para poderem voltar. O
+# campo vive no proprio documento da tarefa, entao precisa de teto; as mais
+# antigas saem primeiro.
+LIMITE_ETAPAS_REMOVIDAS = 30
 
-    Campos vindos no item novo tem precedencia sobre os herdados: quem edita
-    esta dizendo o que quer. Campo ausente preserva o herdado; `data_prevista`
-    ou `aguardando_de` presentes com `null` ou "" apagam o herdado.
+
+@dataclass
+class EdicaoPlano:
+    """O resultado de aplicar uma edicao: o plano novo e o que saiu dele.
+
+    `removidas` guarda a etapa **inteira** (com id, contador, historico), para
+    que a remocao possa ser desfeita. `explicita` distingue quem pediu
+    (`remover: true`) de quem so deixou de citar a etapa no modo `substituir`
+    — esse segundo caso e o que exige `confirmar_remocao`.
     """
-    novo_plano = normalizar_entrada_plano(novo_plano)
-    atual = [p for p in (plano_atual or []) if isinstance(p, dict)]
-    por_id = {p.get("id"): p for p in atual if p.get("id")}
-    textos = [texto_de(p) for p in atual]
 
-    final = []
-    for item in (novo_plano or []):
+    plano: list
+    removidas: list = field(default_factory=list)
+    restauradas: list = field(default_factory=list)
+
+    @property
+    def removidas_sem_pedido(self) -> list:
+        return [r for r in self.removidas if not r["explicita"]]
+
+
+def _pede_remocao(item: dict) -> bool:
+    valor = item.get("remover")
+    if isinstance(valor, str):
+        return valor.strip().lower() in ("true", "1", "sim", "yes")
+    return valor is True or valor == 1
+
+
+def _mesclar_item(original: dict, item: dict, id_fallback: str | None = None) -> dict | None:
+    """Herda o original inteiro e deixa o item novo sobrepor o que trouxer.
+
+    Campo ausente preserva o herdado; `data_prevista`/`aguardando_de` com
+    `null` ou "" apagam. Texto ausente (edicao so de estado, por exemplo)
+    mantem o texto que a etapa ja tinha.
+    """
+    mesclado = {**original}
+    for chave, valor in item.items():
+        if chave in ("id", "remover"):
+            continue
+        if chave in _CAMPOS_APAGAVEIS and (valor is None or str(valor).strip() == ""):
+            mesclado.pop(chave, None)
+        elif valor is not None and valor != "":
+            mesclado[chave] = valor
+    texto = texto_de(item) or texto_de(original)
+    mesclado.pop("texto", None)
+    mesclado["text"] = texto
+    return normalizar(mesclado, id_existente=original.get("id") or id_fallback or None)
+
+
+def _parecido(texto: str, candidatos: list[tuple[int, str]]) -> int | None:
+    """Indice da etapa com texto >=85% parecido, ou None."""
+    textos = [t for _, t in candidatos]
+    achados = difflib.get_close_matches(texto, textos, n=1, cutoff=0.85)
+    if not achados:
+        return None
+    return candidatos[textos.index(achados[0])][0]
+
+
+def _descrever(item: dict) -> str:
+    eid = str(item.get("id") or "").strip()
+    texto = texto_de(item)
+    if eid and texto:
+        return f"{eid} ({texto[:60]!r})"
+    return eid or repr(texto[:60])
+
+
+def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
+                 etapas_removidas=None) -> EdicaoPlano:
+    """Aplica uma edicao ao plano, no modo pedido.
+
+    **`parcial` (padrao).** So as etapas citadas mudam; as outras ficam
+    intactas, na posicao em que estavam. Ate 27/09/2026 o unico modo era o de
+    substituicao, e a descricao da tool dizia que "campos omitidos preservam o
+    valor atual da etapa" — quem chamava lia isso como "mande so a etapa que
+    mudou", mandava uma, e as outras quatro sumiam com retorno OK. Aconteceu
+    com o dono e com o proprio Claude. Etapa citada casa por id, depois por
+    texto parecido (>=85%); sem casar, e anexada ao fim. `{"id": ...,
+    "remover": true}` e a unica forma de tirar uma etapa neste modo.
+
+    **`substituir`.** A lista enviada passa a ser o plano inteiro, na ordem
+    enviada — e o modo de reordenar. Etapa existente que nao aparecer sai do
+    plano; quem chama (o handler) decide se isso exige confirmacao, olhando
+    `removidas_sem_pedido`.
+
+    Nos dois modos, um id que esteja em `etapas_removidas` (a lixeira da acao)
+    traz a etapa de volta com o id e os campos originais — contador de
+    adiamento e historico inclusos — em vez de criar uma etapa nova.
+
+    Levanta `PlanoInvalido` quando a edicao cita uma etapa que nao existe de um
+    jeito que nao da para interpretar como etapa nova (remover id
+    desconhecido, ou id desconhecido sem texto).
+    """
+    modo = str(modo or MODO_PARCIAL).strip().lower()
+    if modo not in MODOS:
+        raise PlanoInvalido(f"modo {modo!r} invalido; use 'parcial' ou 'substituir'.")
+
+    entrada = normalizar_entrada_plano(novo_plano)
+    atual = list(plano_atual or [])
+    idx_por_id = {p.get("id"): i for i, p in enumerate(atual)
+                  if isinstance(p, dict) and p.get("id")}
+    candidatos = [(i, texto_de(p)) for i, p in enumerate(atual)
+                  if isinstance(p, dict) and texto_de(p)]
+    lixeira = {str(e.get("id")): e for e in (etapas_removidas or [])
+               if isinstance(e, dict) and e.get("id") and isinstance(e.get("etapa"), dict)}
+
+    # Posicao i do plano atual -> etapa mesclada (quando citada).
+    atualizadas: dict[int, dict] = {}
+    remover_idx: set[int] = set()
+    # (posicao_de_insercao, etapa) no parcial; no substituir tudo vai em `ordem`.
+    restauradas: list[tuple[int, dict]] = []
+    novas: list[dict] = []
+    ordem: list = []  # substituir: ("atual", i) | ("etapa", dict)
+
+    for item in entrada:
         if isinstance(item, str):
             item = {"text": item}
         if not isinstance(item, dict):
             continue
-        texto_novo = texto_de(item)
-        if not texto_novo:
-            continue
-
         item_id = str(item.get("id") or "").strip()
-        original = None
-        if item_id and item_id in por_id:
-            original = por_id[item_id]
-        else:
-            parecidos = difflib.get_close_matches(texto_novo, textos, n=1, cutoff=0.85)
-            if parecidos:
-                original = atual[textos.index(parecidos[0])]
+        texto = texto_de(item)
 
-        if original is None:
-            final.append(normalizar(item))
+        if _pede_remocao(item):
+            idx = idx_por_id.get(item_id) if item_id else None
+            if idx is None and not item_id and texto:
+                idx = next((i for i, t in candidatos if t.casefold() == texto.casefold()), None)
+            if idx is None:
+                raise PlanoInvalido(
+                    f"Etapa a remover nao encontrada no plano: {_descrever(item)}. "
+                    "Use o id exato da etapa (veja obter_acao).")
+            remover_idx.add(idx)
             continue
 
-        # Herda o original inteiro, depois deixa o item novo sobrepor o que
-        # trouxer explicitamente.
-        mesclado = {**original}
-        for chave, valor in item.items():
-            if chave == "id":
-                continue
-            if chave in _CAMPOS_APAGAVEIS and valor in (None, ""):
-                mesclado.pop(chave, None)
-            elif valor is not None and valor != "":
-                mesclado[chave] = valor
-        mesclado["text"] = texto_novo
-        final.append(normalizar(mesclado, id_existente=original.get("id") or item_id or None))
+        if item_id and item_id in idx_por_id:
+            idx = idx_por_id[item_id]
+            base = atualizadas.get(idx, atual[idx])
+            atualizadas[idx] = _mesclar_item(base, item)
+            if modo == MODO_SUBSTITUIR:
+                ordem.append(("atual", idx))
+            continue
 
-    return [f for f in final if f]
+        if item_id and item_id in lixeira:
+            entrada_lixeira = lixeira.pop(item_id)
+            etapa = _mesclar_item(entrada_lixeira["etapa"], item, id_fallback=item_id)
+            if etapa:
+                if modo == MODO_SUBSTITUIR:
+                    ordem.append(("etapa", etapa))
+                else:
+                    restauradas.append((int(entrada_lixeira.get("posicao") or 0), etapa))
+            continue
+
+        if not texto:
+            if item_id:
+                raise PlanoInvalido(
+                    f"Etapa {item_id!r} nao existe no plano e veio sem texto — nao da para "
+                    "saber se e uma etapa nova. Confira o id (obter_acao) ou envie 'text'.")
+            continue
+
+        # Etapa ja citada nesta mesma chamada nao e candidata de novo: duas
+        # etapas novas parecidas com a mesma antiga virariam uma so (ou, antes
+        # disto, duas com o mesmo id).
+        idx = _parecido(texto, [c for c in candidatos
+                                if c[0] not in remover_idx and c[0] not in atualizadas])
+        if idx is not None:
+            base = atualizadas.get(idx, atual[idx])
+            atualizadas[idx] = _mesclar_item(base, item, id_fallback=item_id)
+            if modo == MODO_SUBSTITUIR:
+                ordem.append(("atual", idx))
+            continue
+
+        nova = normalizar(item)
+        if nova:
+            if modo == MODO_SUBSTITUIR:
+                ordem.append(("etapa", nova))
+            else:
+                novas.append(nova)
+
+    if modo == MODO_PARCIAL:
+        plano = [atualizadas.get(i, p) for i, p in enumerate(atual) if i not in remover_idx]
+        plano = [p for p in plano if p]
+        for posicao, etapa in sorted(restauradas, key=lambda r: r[0]):
+            plano.insert(min(max(posicao, 0), len(plano)), etapa)
+        plano.extend(novas)
+        mantidos = set(range(len(atual))) - remover_idx
+    else:
+        plano = []
+        mantidos = set()
+        for tipo, valor in ordem:
+            if tipo == "atual":
+                if valor in remover_idx or valor in mantidos:
+                    continue
+                mantidos.add(valor)
+                etapa = atualizadas.get(valor)
+            else:
+                etapa = valor
+            if etapa:
+                plano.append(etapa)
+
+    removidas = []
+    for i, p in enumerate(atual):
+        if i in mantidos or not isinstance(p, dict) or not texto_de(p):
+            continue
+        removidas.append({
+            "id": str(p.get("id") or ""),
+            "etapa": dict(p),
+            "posicao": i,
+            "explicita": i in remover_idx,
+        })
+
+    restauradas_ids = [e["id"] for e in (etapas_removidas or [])
+                       if isinstance(e, dict) and e.get("id")
+                       and str(e.get("id")) not in lixeira and isinstance(e.get("etapa"), dict)]
+    return EdicaoPlano(plano=plano, removidas=removidas, restauradas=restauradas_ids)
+
+
+def mesclar_plano(plano_atual, novo_plano, modo: str = MODO_PARCIAL) -> list[dict]:
+    """O plano resultante de `editar_plano` — atalho para quem so quer a lista.
+
+    Desde 27/09/2026 o padrao e o modo `parcial`: etapa nao citada fica. Quem
+    manda a lista inteira para reordenar passa `modo="substituir"`.
+    """
+    return editar_plano(plano_atual, novo_plano, modo=modo).plano
+
+
+def atualizar_lixeira(etapas_removidas, edicao: EdicaoPlano, agora_iso: str) -> list[dict]:
+    """A lixeira da acao depois da edicao: sai o que voltou, entra o que saiu.
+
+    Cada entrada guarda a etapa inteira, a posicao que ela ocupava e quando
+    saiu. Teto em `LIMITE_ETAPAS_REMOVIDAS`, descartando as mais antigas.
+    """
+    restauradas = set(edicao.restauradas)
+    saida = [e for e in (etapas_removidas or [])
+             if isinstance(e, dict) and str(e.get("id") or "") not in restauradas]
+    for r in edicao.removidas:
+        eid = r["id"] or str(uuid.uuid4())[:8]
+        etapa = {**r["etapa"], "id": eid}
+        saida = [e for e in saida if str(e.get("id") or "") != eid]
+        saida.append({"id": eid, "etapa": etapa, "posicao": r["posicao"],
+                      "removida_em": agora_iso})
+    return saida[-LIMITE_ETAPAS_REMOVIDAS:]
 
 
 def _resumo_valor(valor):
