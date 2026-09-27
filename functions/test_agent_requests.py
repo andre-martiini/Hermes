@@ -362,6 +362,147 @@ class TestConcluir(unittest.TestCase):
         self.assertEqual(res["status"], "not_found")
 
 
+class TestConcluirProtocoloNovo(unittest.TestCase):
+    """P04 sub-entrega 8/N (passo 5 do pacote): pedidos já migrados para o
+    protocolo novo (`schema_version` >= `autonomy.requests.SCHEMA_VERSION_ATUAL`)
+    recusam `concluir` legado enquanto não forem terminais -- ver a docstring
+    de `ar.concluir` e de `ar._protocolo_novo_ativo`."""
+
+    def setUp(self):
+        self.db = _MockDB()
+        self.col = self.db.collection(ar.COLLECTION)
+
+    def test_recusa_quando_pendente_e_protocolo_novo(self):
+        self.col._docs["req-novo"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+        }
+
+        res = ar.concluir(self.db, "req-novo", resultado="algo")
+        self.assertEqual(res["status"], "protocolo_novo_exige_lease")
+        self.assertEqual(res["estado_atual"], ar.STATUS_PENDENTE)
+        self.assertIn("lease", res["erro"])
+
+        d = self.col.document("req-novo").get().to_dict()
+        self.assertEqual(d["status"], ar.STATUS_PENDENTE)
+        self.assertNotIn("resultado", d)
+
+    def test_recusa_quando_em_andamento_e_protocolo_novo(self):
+        self.col._docs["req-novo"] = {
+            "status": ar.STATUS_EM_ANDAMENTO,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+        }
+
+        res = ar.concluir(self.db, "req-novo", erro="falhou")
+        self.assertEqual(res["status"], "protocolo_novo_exige_lease")
+
+        d = self.col.document("req-novo").get().to_dict()
+        self.assertEqual(d["status"], ar.STATUS_EM_ANDAMENTO)
+
+    def test_recusa_com_versao_futura_tambem(self):
+        self.col._docs["req-futuro"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL + 1,
+        }
+        res = ar.concluir(self.db, "req-futuro", resultado="algo")
+        self.assertEqual(res["status"], "protocolo_novo_exige_lease")
+
+    def test_recusa_com_schema_version_como_string_numerica(self):
+        # Firestore não distingue tipos numéricos por engano com a mesma
+        # rigidez de um schema tipado -- uma escrita externa (ou um bug de
+        # serialização) poderia gravar "2" em vez de 2. int() normaliza.
+        self.col._docs["req-string"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": str(ar.SCHEMA_VERSION_ATUAL),
+        }
+        res = ar.concluir(self.db, "req-string", resultado="algo")
+        self.assertEqual(res["status"], "protocolo_novo_exige_lease")
+
+    def test_permite_quando_ja_terminal_apesar_de_protocolo_novo(self):
+        # Reentrega idempotente: um pedido do protocolo novo que já chegou a
+        # 'concluido' (mesmo valor de string usado pelo legado) continua
+        # respondendo 'already_decided', sem bloqueio -- não há reserva ativa
+        # para proteger num pedido já terminal.
+        self.col._docs["req-novo-feito"] = {
+            "status": ar.STATUS_CONCLUIDO,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+            "resultado": "resultado original",
+        }
+        res = ar.concluir(self.db, "req-novo-feito", resultado="outro resultado")
+        self.assertEqual(res["status"], "already_decided")
+
+        d = self.col.document("req-novo-feito").get().to_dict()
+        self.assertEqual(d["resultado"], "resultado original")
+
+    def test_bloqueia_terminal_novo_que_legado_nao_reconhece(self):
+        # 'falha_final'/'cancelado' são terminais no protocolo novo mas não
+        # em ar.STATUS_TERMINAIS (legado) -- continuam caindo no bloqueio de
+        # protocolo novo em vez do 'status inválido' genérico.
+        self.col._docs["req-falha-final"] = {
+            "status": "falha_final",
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+        }
+        res = ar.concluir(self.db, "req-falha-final", resultado="algo")
+        self.assertEqual(res["status"], "protocolo_novo_exige_lease")
+
+    def test_schema_version_ausente_e_legado_normal(self):
+        self.col._docs["req-legado"] = {"status": ar.STATUS_PENDENTE}
+        res = ar.concluir(self.db, "req-legado", resultado="ok legado")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["novo_status"], ar.STATUS_CONCLUIDO)
+
+    def test_schema_version_menor_que_atual_e_legado_normal(self):
+        self.col._docs["req-legado-v1"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": 1,
+        }
+        res = ar.concluir(self.db, "req-legado-v1", resultado="ok legado v1")
+        self.assertEqual(res["status"], "ok")
+
+    def test_schema_version_malformado_nao_bloqueia(self):
+        self.col._docs["req-malformado"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": "abacate",
+        }
+        res = ar.concluir(self.db, "req-malformado", resultado="ok mesmo assim")
+        self.assertEqual(res["status"], "ok")
+
+    def test_protocolo_novo_exige_lease_participa_de_sem_fallback(self):
+        # Mesma proteção A04 de sempre: se a transação falhar de verdade,
+        # nenhuma escrita acontece -- independentemente de o pedido ser
+        # protocolo novo ou legado.
+        self.col._docs["req-novo-tx-quebrada"] = {
+            "status": ar.STATUS_PENDENTE,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+        }
+        db_quebrado = _MockDBTransacaoQuebrada()
+        db_quebrado._collections[ar.COLLECTION] = self.col
+
+        res = ar.concluir(db_quebrado, "req-novo-tx-quebrada", resultado="algo")
+        self.assertEqual(res["status"], "erro_transacao")
+
+
+class TestProtocoloNovoAtivoLogicaPura(unittest.TestCase):
+    """Testes diretos de `ar._protocolo_novo_ativo`, sem Firestore."""
+
+    def test_ausente_e_falso(self):
+        self.assertFalse(ar._protocolo_novo_ativo({}))
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": None}))
+
+    def test_igual_ou_maior_e_verdadeiro(self):
+        self.assertTrue(ar._protocolo_novo_ativo({"schema_version": ar.SCHEMA_VERSION_ATUAL}))
+        self.assertTrue(ar._protocolo_novo_ativo({"schema_version": ar.SCHEMA_VERSION_ATUAL + 5}))
+
+    def test_menor_e_falso(self):
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": ar.SCHEMA_VERSION_ATUAL - 1}))
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": 0}))
+
+    def test_malformado_e_falso(self):
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": "abacate"}))
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": [1, 2]}))
+        self.assertFalse(ar._protocolo_novo_ativo({"schema_version": object()}))
+
+
 class TestSemFallbackParaEscritaDesprotegida(unittest.TestCase):
     """Achado A04 (P01 passo 3): quando a transação atômica falha (ou não
     existe), enfileirar_ou_atualizar/concluir devem retornar erro explícito
@@ -473,6 +614,50 @@ class TestListarEContar(unittest.TestCase):
     def test_contar_pendentes(self):
         self.assertEqual(ar.contar_pendentes(self.db), 2)
         self.assertEqual(ar.contar_pendentes(self.db, tipo=ar.TIPO_CONSOLIDAR_AUDIO), 1)
+
+
+class TestListarEContarProtocoloNovo(unittest.TestCase):
+    """P04 sub-entrega 8/N: achado real do Codex na PR #359 -- um pedido do
+    protocolo novo ainda 'pendente' não deve aparecer em `listar_pendentes`
+    nem inflar `contar_pendentes`, mesmo status compartilhado com o legado.
+    Sem isto, `consultar_pedidos_agente` (MCP) oferecia o pedido ao
+    executor legado do fluxo agendado, que produzia todo o efeito de
+    trabalho antes de `concluir` recusar no final -- ver a docstring de
+    `listar_pendentes`."""
+
+    def setUp(self):
+        self.db = _MockDB()
+        self.col = self.db.collection(ar.COLLECTION)
+        self.col._docs["r-legado"] = {
+            "status": ar.STATUS_PENDENTE,
+            "tipo": ar.TIPO_CONSOLIDAR_AUDIO,
+            "criado_em": datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+        }
+        self.col._docs["r-novo"] = {
+            "status": ar.STATUS_PENDENTE,
+            "tipo": ar.TIPO_CONSOLIDAR_AUDIO,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+            "criado_em": datetime(2026, 9, 3, 9, 0, tzinfo=timezone.utc),
+        }
+
+    def test_listar_pendentes_exclui_protocolo_novo(self):
+        res = ar.listar_pendentes(self.db)
+        self.assertEqual(res["total"], 1)
+        ids = [p["id"] for p in res["pedidos"]]
+        self.assertEqual(ids, ["r-legado"])
+        self.assertNotIn("r-novo", ids)
+
+    def test_contar_pendentes_exclui_protocolo_novo(self):
+        self.assertEqual(ar.contar_pendentes(self.db), 1)
+        self.assertEqual(
+            ar.contar_pendentes(self.db, tipo=ar.TIPO_CONSOLIDAR_AUDIO), 1
+        )
+
+    def test_listar_pendentes_so_protocolo_novo_devolve_vazio(self):
+        self.col._docs.pop("r-legado")
+        res = ar.listar_pendentes(self.db)
+        self.assertEqual(res["total"], 0)
+        self.assertEqual(res["pedidos"], [])
 
 
 if __name__ == "__main__":
