@@ -72,7 +72,9 @@ class TestRenderizar(Base):
 
     def test_teto_mensal(self):
         ref, dia = uso.ref_dia(self.db, AGORA)
-        self.db.docs[f"system_usage/video/daily/{dia}"]["estimated_usd"] = 29.9  # a prévia já gravou o dia
+        # A prévia do setUp grava o uso no dia REAL de hoje, não em AGORA: fora de 26/09 o doc
+        # do dia de AGORA não existe ainda, então é criado aqui.
+        self.db.docs.setdefault(f"system_usage/video/daily/{dia}", {})["estimated_usd"] = 29.9
         with self.assertRaises(comandos.Recusado) as ctx:
             comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA)
         self.assertIn("Teto mensal", str(ctx.exception))
