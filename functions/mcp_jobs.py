@@ -150,13 +150,26 @@ def avaliar_job_travado(dados: dict, *, agora: datetime) -> dict | None:
     sub-entregas 1/N-9/N deste mesmo pacote.
 
     `dados` e o dict cru de `snapshot.to_dict()` (mesma forma que
-    `_reivindicar_job` le e que `autonomy/mcp_jobs_adapter.py` consome).
-    Fail-closed em qualquer formato inesperado -- devolve `None` (nao
+    `_reivindicar_job` le e que `autonomy/mcp_jobs_adapter.py` consome) --
+    dado EXTERNO (Firestore), NUNCA confiavel o bastante para travar a
+    funcao: fail-closed em qualquer formato inesperado, devolve `None` (nao
     travado, nada a fazer) em vez de adivinhar ou levantar excecao; um
     documento realmente travado continua elegivel na proxima varredura, o
     que e seguro, ao contrario de marcar como travado um job que so tem um
     campo em formato inesperado mas pode estar legitimamente em andamento.
+
+    `agora` e diferente -- e um parametro do PROPRIO CHAMADOR (a hora atual
+    que ele decidiu passar), nao dado externo, entao o mesmo fail-closed
+    NAO se aplica a ele: um `agora` sem tzinfo e erro de programacao de quem
+    for escrever a sub-entrega de wiring (ex.: `datetime.now()` em vez de
+    `datetime.now(timezone.utc)`), nao um dado corrompido do Firestore, e
+    devolver `None` em silencio esconderia esse bug -- a varredura real
+    nunca detectaria NENHUM job travado, sempre, sem nenhum sinal do motivo.
+    Levanta `ValueError` explicito em vez disso (achado de revisao
+    adversarial desta sub-entrega).
     """
+    if agora.tzinfo is None:
+        raise ValueError("agora precisa ser timezone-aware (ex.: datetime.now(timezone.utc)).")
     dados_seguros = dados or {}
     if dados_seguros.get("status") != "processing":
         return None

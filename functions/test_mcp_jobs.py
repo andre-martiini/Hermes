@@ -694,6 +694,21 @@ class TestAvaliarJobTravado(unittest.TestCase):
         }
         self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
 
+    def test_agora_naive_levanta_value_error_em_vez_de_esconder_o_bug(self):
+        # Achado de revisão adversarial: `agora` é parâmetro do PRÓPRIO
+        # CHAMADOR (não dado externo do Firestore como `dados`) -- um
+        # `agora` naive é erro de programação de quem escrever a sub-entrega
+        # de wiring, não dado corrompido; devolver None em silêncio
+        # esconderia esse bug para sempre (a varredura real nunca detectaria
+        # nenhum job travado). Levanta explicitamente em vez de fail-closed.
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+        }
+        agora_naive = dt.datetime(2026, 9, 27, 12, 0, 0)
+        with self.assertRaises(ValueError):
+            mcp_jobs.avaliar_job_travado(dados, agora=agora_naive)
+
     def test_reivindicado_em_tipo_inesperado_nao_e_travado(self):
         for valor in (12345, "2026-09-27T00:00:00Z", [], {}):
             with self.subTest(valor=valor):
