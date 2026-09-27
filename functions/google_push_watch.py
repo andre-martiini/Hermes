@@ -9,32 +9,35 @@ caminhos ficam DESLIGADOS por padrão, atrás de flags em `system/settings`:
 - `calendar_watch.enabled` (+ `calendar_watch.url`, a URL pública de `on_calendar_push`);
 - `drive_watch.enabled` (+ `drive_watch.url`, a URL pública de `on_drive_push`).
 
-Com o flag desligado o endpoint responde 200 sem fazer nada e o renovador não registra canal.
+Com o flag desligado o endpoint não faz nada (notificação de canal válido recebe 200, o resto 403 --
+a resposta não revela se o flag está ligado) e o renovador não registra canal.
 
 Calendar (`on_calendar_push`): um canal `events.watch()` por agenda lida pelo sync
 (`get_sync_calendar_ids`: 'primary' + a agenda do Hermes). A notificação só diz "algo mudou nesta
 agenda"; o endpoint então:
 
-1. valida canal + token (segredo aleatório por instalação em `system/calendar_watch.channel_token`,
-   comparado com `hmac.compare_digest`) -- qualquer outra coisa recebe 403 sem tocar em API do
-   Google;
+1. valida canal + token + resource id (segredo aleatório por instalação em
+   `system/calendar_watch.channel_token`, comparado com `hmac.compare_digest`) -- qualquer outra
+   coisa recebe 403 sem tocar em API do Google. A leitura usada na validação fica num cache de
+   60 s por instância (endpoint público: requisição forjada não custa leitura do Firestore);
 2. ignora a notificação `sync` (handshake de criação do canal);
 3. ignora enquanto `system/sync` estiver `processing`/`requested` -- é o que corta o LOOP: o push
    do próprio sync (`sync_google_tasks_push`) faz `events().update()` em todo evento de ação com
    horário a cada rodada, e cada update gera uma notificação. Sem isto, cada sync pediria outro;
-4. lista só o que mudou desde o último cursor (`events.list(updatedMin=...)`) e descarta os ecos
-   do próprio Hermes: evento criado pelo Hermes (`hermes_task_id`) cuja agenda não faria a
-   sincronia inversa agir (mesma condição de `sync_google_calendar`);
+4. lista só o que mudou desde o último cursor / fim do último sync (`events.list(updatedMin=...)`)
+   e descarta os ecos do próprio Hermes: evento criado pelo Hermes (`hermes_task_id`) cuja agenda
+   não faria a sincronia inversa agir (mesma condição de `sync_google_calendar`);
 5. sobrando mudança real, pede um sync SÓ DE AGENDA pelo mesmo caminho do `on_tarefa_written`
-   (`system/sync.status = 'requested'`, `requested_scope = 'calendar'` -> `on_sync_request`), com
-   debounce de 60 s e teto de pedidos por hora. O sync nunca roda dentro do request.
+   (`system/sync.status = 'requested'`, `requested_scope = 'calendar'` -> `on_sync_request`), numa
+   transação, com debounce de 60 s, teto de pedidos por hora e pausa de 15 min depois de um sync
+   que terminou em erro. O sync nunca roda dentro do request.
 
 Drive (`on_drive_push`): um canal `files.watch()` na Pasta de Deságue (`drop_folder_id`) -- e não
 `changes.watch()`, que notificaria QUALQUER alteração em qualquer arquivo do Drive do André (cada
 autosave de um Google Docs). Para pasta, o Drive manda `X-Goog-Changed: children` quando entra ou
 sai arquivo; só isso dispara `executar_monitoramento_acervo_global` (debounce de 60 s, lock próprio
 `drive_acervo_lock`, compartilhado com o cron de 30 min). O canal de arquivo expira em no máximo
-1 dia, por isso o renovador do Drive roda a cada 12 h.
+1 dia (pedimos 23 h), por isso o renovador do Drive roda a cada 12 h.
 
 Os crons de sempre continuam como rede de segurança: `scheduled_sync` (60 min) e
 `monitorar_acervo_global` (30 min). Mudança que chegar enquanto um sync roda, ou que cair no
@@ -46,6 +49,7 @@ from __future__ import annotations
 import hmac
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -63,8 +67,9 @@ FUNCTION_REGION_PADRAO = 'us-central1'
 # Calendar: canal de 7 dias, renovado 1x/dia quando faltar menos de 2 dias.
 CALENDAR_WATCH_TTL_S = 7 * 24 * 3600
 CALENDAR_RENOVAR_ANTES_S = 2 * 24 * 3600
-# Drive (files.watch): a API aceita no máximo 1 dia; renovador a cada 12 h, renova com < 14 h.
-DRIVE_WATCH_TTL_S = 24 * 3600
+# Drive (files.watch): a API aceita no máximo 1 dia; pedimos 23 h (folga para o relógio do
+# Google) e o renovador roda a cada 12 h, renovando quando faltar menos de 14 h.
+DRIVE_WATCH_TTL_S = 23 * 3600
 DRIVE_RENOVAR_ANTES_S = 14 * 3600
 
 DEBOUNCE_S = 60
@@ -78,8 +83,22 @@ CALENDAR_MAX_EVENTOS_HERMES_CHECADOS = 50
 # Disjuntor: no máximo N pedidos de sync por hora vindos do webhook (se o filtro de eco falhar
 # de um jeito não previsto, o pior caso fica limitado; o cron de 60 min segue cobrindo).
 CALENDAR_MAX_PEDIDOS_POR_HORA = 20
+# Sync que terminou em erro (credencial revogada, API fora): não pede outro por este tempo --
+# repetir logo só repete o erro.
+CALENDAR_PAUSA_APOS_ERRO_S = 15 * 60
+
+# Cache das leituras usadas na validação (settings + doc do watch), por instância.
+CACHE_TTL_S = 60
+# Canal desconhecido no cache: relê do Firestore no máximo a cada N s (canal recém-renovado por
+# outra instância precisa ser reconhecido logo; requisição forjada não pode forçar leitura).
+CACHE_RELEITURA_MIN_S = 5
+# Log de requisição recusada: no máximo uma linha por N s.
+LOG_RECUSA_INTERVALO_S = 60
 
 _ESTADOS_SYNC_OCUPADO = ('processing', 'requested')
+
+_cache_docs: dict = {}
+_log_recusas = {'ultimo': None, 'suprimidas': 0}
 
 
 # ── utilitários ─────────────────────────────────────────────────────────────────────────────
@@ -150,13 +169,48 @@ def token_confere(esperado, recebido) -> bool:
     return hmac.compare_digest(esperado.encode('utf-8'), recebido.encode('utf-8'))
 
 
+def _ler_doc(db, doc_id: str) -> dict:
+    doc = db.collection('system').document(doc_id).get()
+    return (doc.to_dict() or {}) if doc.exists else {}
+
+
 def _ler_settings(db) -> dict:
     try:
-        doc = db.collection('system').document('settings').get()
-        return (doc.to_dict() or {}) if doc.exists else {}
+        return _ler_doc(db, 'settings')
     except Exception as exc:
         print(f"[PUSH] Falha ao ler system/settings: {exc}")
         return {}
+
+
+def limpar_cache() -> None:
+    _cache_docs.clear()
+    _log_recusas.update({'ultimo': None, 'suprimidas': 0})
+
+
+def _ler_doc_cacheado(db, doc_id: str, *, reler=False, relogio=None) -> dict:
+    """system/{doc_id} com cache de CACHE_TTL_S por instância. `reler=True` força nova leitura,
+    mas no máximo a cada CACHE_RELEITURA_MIN_S."""
+    chave = (id(db), doc_id)
+    agora = (relogio or time.monotonic)()
+    item = _cache_docs.get(chave)
+    if item is not None:
+        idade = agora - item[0]
+        if (not reler and idade < CACHE_TTL_S) or (reler and idade < CACHE_RELEITURA_MIN_S):
+            return item[1]
+    dados = _ler_doc(db, doc_id)
+    _cache_docs[chave] = (agora, dados)
+    return dados
+
+
+def _logar_recusa(prefixo: str, motivo: str, relogio=None) -> None:
+    agora = (relogio or time.monotonic)()
+    ultimo = _log_recusas['ultimo']
+    if ultimo is not None and agora - ultimo < LOG_RECUSA_INTERVALO_S:
+        _log_recusas['suprimidas'] += 1
+        return
+    extra = f" (+{_log_recusas['suprimidas']} recusa(s) sem log desde a anterior)" if _log_recusas['suprimidas'] else ''
+    print(f"{prefixo} Notificação recusada (403): {motivo}{extra}")
+    _log_recusas.update({'ultimo': agora, 'suprimidas': 0})
 
 
 def _cfg(settings: dict, chave: str) -> dict:
@@ -187,6 +241,29 @@ def _main():
     """main.py só é importado depois da validação do canal (e só no caminho que precisa dele)."""
     import main
     return main
+
+
+def _executar_transacao(db, fn):
+    """Roda fn(transaction) numa transação do Firestore (leituras antes das escritas)."""
+    from firebase_admin import firestore
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _rodar(tx):
+        return fn(tx)
+
+    return _rodar(transaction)
+
+
+# ── Calendar: validação ────────────────────────────────────────────────────────────────────
+
+def _canal_calendar_valido(watch_data: dict, channel_id: str, token: str, resource_id: str) -> bool:
+    """Canal conhecido, completo (calendar_id + resource_id: entrada sem isso é zumbi) e com
+    token e resource id conferindo."""
+    canal = (watch_data.get('canais') or {}).get(channel_id)
+    if not isinstance(canal, dict) or not canal.get('calendar_id') or not canal.get('resource_id'):
+        return False
+    return token_confere(watch_data.get('channel_token'), token) and token_confere(canal.get('resource_id'), resource_id)
 
 
 # ── Calendar: filtro de eco ────────────────────────────────────────────────────────────────
@@ -283,39 +360,86 @@ def _ha_mudanca_real(db, eventos: list, extrair_agenda, is_iso_after) -> bool:
     )
 
 
-def pedir_sync_agenda(db, watch_ref, watch_data: dict, agora: datetime) -> str:
+# ── Calendar: pedido de sync ───────────────────────────────────────────────────────────────
+
+def pedir_sync_agenda(db, agora: datetime) -> str:
     """Pede um sync só de agenda (mesmo contrato de _pedir_sync_por_mudanca_de_agenda em
-    main.py: `on_sync_request` atende `status='requested'` + `requested_scope='calendar'`).
-    Devolve 'solicitado', 'sync_em_andamento', 'debounce' ou 'limite_por_hora'."""
+    main.py: `on_sync_request` atende `status='requested'` + `requested_scope='calendar'`), numa
+    transação sobre system/sync e system/calendar_watch. Nunca sobrescreve um sync
+    `processing` nem um pedido já `requested` (que pode ser completo -- rebaixá-lo para agenda
+    perderia contatos/Allcare/WhatsApp). Devolve 'solicitado', 'sync_em_andamento',
+    'ja_solicitado', 'erro_recente', 'debounce' ou 'limite_por_hora'."""
     sync_ref = db.collection('system').document('sync')
-    sync_data = sync_ref.get().to_dict() or {}
-    if sync_data.get('status') in _ESTADOS_SYNC_OCUPADO:
-        return 'sync_em_andamento'
+    watch_ref = db.collection('system').document(CALENDAR_WATCH_DOC_ID)
 
-    ultimo = _parse_iso(watch_data.get('ultimo_pedido_sync_em'))
-    if ultimo and (agora - ultimo).total_seconds() < DEBOUNCE_S:
-        return 'debounce'
+    def _tx(tx):
+        sync_snap = sync_ref.get(transaction=tx)
+        watch_snap = watch_ref.get(transaction=tx)
+        sync_data = (sync_snap.to_dict() or {}) if sync_snap.exists else {}
+        watch_data = (watch_snap.to_dict() or {}) if watch_snap.exists else {}
 
-    inicio_janela = _parse_iso(watch_data.get('pedidos_janela_inicio'))
-    pedidos = int(watch_data.get('pedidos_na_janela') or 0)
-    if not inicio_janela or (agora - inicio_janela).total_seconds() >= 3600:
-        inicio_janela, pedidos = agora, 0
-    if pedidos >= CALENDAR_MAX_PEDIDOS_POR_HORA:
+        status = sync_data.get('status')
+        if status == 'processing':
+            return 'sync_em_andamento'
+        if status == 'requested':
+            return 'ja_solicitado'
+        if status == 'error':
+            fim = _parse_iso(sync_data.get('finished_at'))
+            if fim and (agora - fim).total_seconds() < CALENDAR_PAUSA_APOS_ERRO_S:
+                return 'erro_recente'
+
+        ultimo = _parse_iso(watch_data.get('ultimo_pedido_sync_em'))
+        if ultimo and (agora - ultimo).total_seconds() < DEBOUNCE_S:
+            return 'debounce'
+
+        inicio_janela = _parse_iso(watch_data.get('pedidos_janela_inicio'))
+        pedidos = int(watch_data.get('pedidos_na_janela') or 0)
+        if not inicio_janela or (agora - inicio_janela).total_seconds() >= 3600:
+            inicio_janela, pedidos = agora, 0
+        if pedidos >= CALENDAR_MAX_PEDIDOS_POR_HORA:
+            return 'limite_por_hora'
+
+        tx.set(sync_ref, {
+            'status': 'requested',
+            'requested_scope': 'calendar',
+            'requested_at': _iso(agora),
+            'last_trigger': 'calendar-push',
+        }, merge=True)
+        tx.set(watch_ref, {
+            'ultimo_pedido_sync_em': _iso(agora),
+            'pedidos_janela_inicio': _iso(inicio_janela),
+            'pedidos_na_janela': pedidos + 1,
+        }, merge=True)
+        return 'solicitado'
+
+    resultado = _executar_transacao(db, _tx)
+    if resultado == 'erro_recente':
+        print(f"[CAL-PUSH] Último sync terminou em erro há menos de {CALENDAR_PAUSA_APOS_ERRO_S // 60} min; "
+              "pedido não enviado (fica para o cron).")
+    elif resultado == 'limite_por_hora':
         print(f"[CAL-PUSH] Teto de {CALENDAR_MAX_PEDIDOS_POR_HORA} pedidos de sync/hora atingido; fica para o cron.")
-        return 'limite_por_hora'
+    return resultado
 
-    sync_ref.set({
-        'status': 'requested',
-        'requested_scope': 'calendar',
-        'requested_at': _iso(agora),
-        'last_trigger': 'calendar-push',
-    }, merge=True)
-    watch_ref.set({
-        'ultimo_pedido_sync_em': _iso(agora),
-        'pedidos_janela_inicio': _iso(inicio_janela),
-        'pedidos_na_janela': pedidos + 1,
-    }, merge=True)
-    return 'solicitado'
+
+def _avancar_cursor_calendar(db, channel_id: str, agora: datetime) -> bool:
+    """Avança o cursor do canal só se ele ainda existir (a renovação pode tê-lo trocado entre a
+    validação e aqui) -- senão o update recriaria uma entrada zumbi sem calendar_id."""
+    watch_ref = db.collection('system').document(CALENDAR_WATCH_DOC_ID)
+
+    def _tx(tx):
+        snap = watch_ref.get(transaction=tx)
+        canais = ((snap.to_dict() or {}) if snap.exists else {}).get('canais') or {}
+        if not isinstance(canais.get(channel_id), dict):
+            return False
+        tx.update(watch_ref, {f'canais.{channel_id}.ultimo_delta_em': _iso(agora),
+                              'last_notification_at': _iso(agora)})
+        return True
+
+    try:
+        return bool(_executar_transacao(db, _tx))
+    except Exception as exc:
+        print(f"[CAL-PUSH] Falha ao avançar cursor do canal {channel_id}: {exc}")
+        return False
 
 
 def processar_notificacao_calendar(db, headers, *, agora=None, calendar_service_factory=None,
@@ -323,51 +447,50 @@ def processar_notificacao_calendar(db, headers, *, agora=None, calendar_service_
     """Núcleo de on_calendar_push, sem Flask. Devolve (status_http, detalhe)."""
     agora = _agora_utc(agora)
     h = _headers_normalizados(headers)
-    settings = _ler_settings(db)
+    channel_id = h.get('x-goog-channel-id', '')
+    token = h.get('x-goog-channel-token', '')
+    resource_id = h.get('x-goog-resource-id', '')
+    if not channel_id or not token or not resource_id:
+        return 403, {'motivo': 'sem_credencial'}
+
+    try:
+        watch_data = _ler_doc_cacheado(db, CALENDAR_WATCH_DOC_ID)
+        if not _canal_calendar_valido(watch_data, channel_id, token, resource_id):
+            watch_data = _ler_doc_cacheado(db, CALENDAR_WATCH_DOC_ID, reler=True)
+            if not _canal_calendar_valido(watch_data, channel_id, token, resource_id):
+                return 403, {'motivo': 'canal_ou_token_invalido'}
+        settings = _ler_doc_cacheado(db, 'settings')
+    except Exception as exc:
+        print(f"[CAL-PUSH] Falha ao ler configuração: {exc}")
+        return 500, {'motivo': 'erro_leitura'}
     if not calendar_watch_habilitado(settings):
         return 200, {'motivo': 'desligado'}
 
-    channel_id = h.get('x-goog-channel-id', '')
-    token = h.get('x-goog-channel-token', '')
-    if not channel_id or not token:
-        return 403, {'motivo': 'sem_credencial'}
-    watch_ref = db.collection('system').document(CALENDAR_WATCH_DOC_ID)
-    try:
-        watch_doc = watch_ref.get()
-        watch_data = (watch_doc.to_dict() or {}) if watch_doc.exists else {}
-    except Exception as exc:
-        print(f"[CAL-PUSH] Falha ao ler system/{CALENDAR_WATCH_DOC_ID}: {exc}")
-        return 500, {'motivo': 'erro_leitura'}
-    canal = (watch_data.get('canais') or {}).get(channel_id)
-    if not isinstance(canal, dict) or not token_confere(watch_data.get('channel_token'), token):
-        return 403, {'motivo': 'canal_ou_token_invalido'}
-    resource_id = h.get('x-goog-resource-id', '')
-    if resource_id and canal.get('resource_id') and resource_id != canal.get('resource_id'):
-        return 403, {'motivo': 'resource_id_invalido'}
-
-    estado = h.get('x-goog-resource-state', '')
-    if estado == 'sync':
+    if h.get('x-goog-resource-state', '') == 'sync':
         return 200, {'motivo': 'sync_ignorado'}
 
     try:
-        sync_data = db.collection('system').document('sync').get().to_dict() or {}
+        sync_data = _ler_doc(db, 'sync')
+        canal = ((_ler_doc(db, CALENDAR_WATCH_DOC_ID).get('canais') or {}).get(channel_id)) or {}
     except Exception as exc:
         print(f"[CAL-PUSH] Falha ao ler system/sync: {exc}")
-        sync_data = {}
+        return 500, {'motivo': 'erro_leitura'}
     if sync_data.get('status') in _ESTADOS_SYNC_OCUPADO:
         # O sync que está rodando/pendente já vai ler a agenda; e as notificações que chegam
         # agora são, na maioria, eco do próprio push dele.
         return 200, {'motivo': 'sync_em_andamento'}
 
-    # Janela do delta: do cursor do canal (recuado pela margem) ou do fim do último sync, o que
-    # for mais recente -- o que mudou antes disso o sync já leu (ou foi eco do push dele).
+    # Janela do delta: do cursor do canal (recuado pela margem) ou do fim do último sync (com
+    # sucesso ou erro), o que for mais recente -- o que mudou antes disso o sync já leu ou foi
+    # eco do push dele.
     candidatos = []
     cursor = _parse_iso(canal.get('ultimo_delta_em'))
     if cursor:
         candidatos.append(cursor - timedelta(seconds=CALENDAR_MARGEM_DELTA_S))
-    fim_sync = _parse_iso(sync_data.get('last_success'))
-    if fim_sync:
-        candidatos.append(fim_sync)
+    for campo in ('last_success', 'finished_at'):
+        fim_sync = _parse_iso(sync_data.get(campo))
+        if fim_sync:
+            candidatos.append(fim_sync)
     desde = max(candidatos) if candidatos else agora - timedelta(seconds=CALENDAR_JANELA_INICIAL_S)
 
     relevante = True
@@ -388,21 +511,13 @@ def processar_notificacao_calendar(db, headers, *, agora=None, calendar_service_
         relevante = True
 
     if not relevante:
-        _avancar_cursor_calendar(watch_ref, channel_id, agora)
+        _avancar_cursor_calendar(db, channel_id, agora)
         return 200, {'motivo': 'eco'}
 
-    resultado = pedir_sync_agenda(db, watch_ref, watch_data, agora)
+    resultado = pedir_sync_agenda(db, agora)
     if resultado == 'solicitado':
-        _avancar_cursor_calendar(watch_ref, channel_id, agora)
+        _avancar_cursor_calendar(db, channel_id, agora)
     return 200, {'motivo': resultado}
-
-
-def _avancar_cursor_calendar(watch_ref, channel_id: str, agora: datetime) -> None:
-    try:
-        watch_ref.update({f'canais.{channel_id}.ultimo_delta_em': _iso(agora),
-                          'last_notification_at': _iso(agora)})
-    except Exception as exc:
-        print(f"[CAL-PUSH] Falha ao avançar cursor do canal {channel_id}: {exc}")
 
 
 # ── Calendar: registro/renovação ───────────────────────────────────────────────────────────
@@ -411,7 +526,8 @@ def renovar_calendar_watch(db, service, *, agora=None, calendar_ids=None, forcar
     """Registra/renova um canal events.watch() por agenda sincronizada. Só age se faltar canal,
     a URL/lista de agendas mudou ou algum canal expira em menos de CALENDAR_RENOVAR_ANTES_S.
     Cria o canal novo antes de parar o antigo (channels.stop); agenda cuja renovação falhar
-    mantém o canal antigo. Sem efeito com system/settings.calendar_watch.enabled desligado."""
+    mantém o canal antigo. Entrada sem calendar_id (zumbi) é descartada. Sem efeito com
+    system/settings.calendar_watch.enabled desligado."""
     agora = _agora_utc(agora)
     settings = _ler_settings(db)
     if not calendar_watch_habilitado(settings):
@@ -419,8 +535,7 @@ def renovar_calendar_watch(db, service, *, agora=None, calendar_ids=None, forcar
 
     watch_ref = db.collection('system').document(CALENDAR_WATCH_DOC_ID)
     try:
-        doc = watch_ref.get()
-        data = (doc.to_dict() or {}) if doc.exists else {}
+        data = _ler_doc(db, CALENDAR_WATCH_DOC_ID)
         if calendar_ids is None:
             calendar_ids = _main().get_sync_calendar_ids(db)
     except Exception as exc:
@@ -428,24 +543,32 @@ def renovar_calendar_watch(db, service, *, agora=None, calendar_ids=None, forcar
         return {'habilitado': True, 'renovado': False, 'erro': str(exc)}
 
     url, origem = url_do_endpoint(settings, 'calendar_watch', CALENDAR_PUSH_FUNCTION_NAME)
-    canais_atuais = {cid: c for cid, c in (data.get('canais') or {}).items() if isinstance(c, dict)}
+    todos = {cid: c for cid, c in (data.get('canais') or {}).items() if isinstance(c, dict)}
+    canais_atuais = {cid: c for cid, c in todos.items() if c.get('calendar_id')}
+    zumbis = [(cid, c) for cid, c in todos.items() if cid not in canais_atuais]
     por_agenda = {c.get('calendar_id'): (cid, c) for cid, c in canais_atuais.items()}
 
-    precisa = (
-        forcar
-        or url != data.get('url')
-        or set(calendar_ids) != set(por_agenda)
-        or any(_expira_em_breve(c.get('expiration'), agora, CALENDAR_RENOVAR_ANTES_S) for c in canais_atuais.values())
-    )
+    url_mudou = url != data.get('url')
+
+    def _agenda_precisa(calendar_id) -> bool:
+        anterior = por_agenda.get(calendar_id)
+        return (forcar or url_mudou or anterior is None
+                or _expira_em_breve(anterior[1].get('expiration'), agora, CALENDAR_RENOVAR_ANTES_S))
+
+    precisa = bool(zumbis) or set(calendar_ids) != set(por_agenda) or any(_agenda_precisa(c) for c in calendar_ids)
     if not precisa:
         return {'habilitado': True, 'renovado': False, 'motivo': 'em_dia'}
 
     token = data.get('channel_token') or secrets.token_urlsafe(32)
     novos: dict = {}
-    parar: list = []
+    parar: list = list(zumbis)
     erros: dict = {}
     for calendar_id in calendar_ids:
         anterior = por_agenda.get(calendar_id)
+        if anterior and not _agenda_precisa(calendar_id):
+            # Canal em dia: fica como está (a rodada só está limpando zumbi/agenda removida).
+            novos[anterior[0]] = anterior[1]
+            continue
         channel_id = uuid.uuid4().hex
         try:
             resposta = service.events().watch(calendarId=calendar_id, body={
@@ -455,6 +578,8 @@ def renovar_calendar_watch(db, service, *, agora=None, calendar_ids=None, forcar
                 'token': token,
                 'params': {'ttl': str(CALENDAR_WATCH_TTL_S)},
             }).execute()
+            if not resposta.get('resourceId'):
+                raise RuntimeError('events.watch sem resourceId na resposta')
             novos[channel_id] = {
                 'calendar_id': calendar_id,
                 'resource_id': resposta.get('resourceId'),
@@ -496,8 +621,12 @@ def renovar_calendar_watch(db, service, *, agora=None, calendar_ids=None, forcar
 def _parar_canais(service, canais: list, prefixo: str) -> int:
     parados = 0
     for channel_id, canal in canais:
+        resource_id = (canal or {}).get('resource_id')
+        if not channel_id or not resource_id:
+            # channels.stop exige os dois; sem resource id o canal só expira sozinho.
+            continue
         try:
-            service.channels().stop(body={'id': channel_id, 'resourceId': canal.get('resource_id')}).execute()
+            service.channels().stop(body={'id': channel_id, 'resourceId': resource_id}).execute()
             parados += 1
         except Exception as exc:
             # Canal já expirado/parado: 404 é normal. Ele expira sozinho de qualquer jeito.
@@ -520,8 +649,7 @@ def renovar_drive_watch(db, service, *, agora=None, forcar=False) -> dict:
 
     watch_ref = db.collection('system').document(DRIVE_WATCH_DOC_ID)
     try:
-        doc = watch_ref.get()
-        data = (doc.to_dict() or {}) if doc.exists else {}
+        data = _ler_doc(db, DRIVE_WATCH_DOC_ID)
     except Exception as exc:
         return {'habilitado': True, 'renovado': False, 'erro': str(exc)}
 
@@ -529,6 +657,7 @@ def renovar_drive_watch(db, service, *, agora=None, forcar=False) -> dict:
     precisa = (
         forcar
         or not data.get('channel_id')
+        or not data.get('resource_id')
         or url != data.get('url')
         or folder_id != data.get('folder_id')
         or _expira_em_breve(data.get('expiration'), agora, DRIVE_RENOVAR_ANTES_S)
@@ -547,6 +676,8 @@ def renovar_drive_watch(db, service, *, agora=None, forcar=False) -> dict:
             'token': token,
             'expiration': expiracao_ms,
         }).execute()
+        if not resposta.get('resourceId'):
+            raise RuntimeError('files.watch sem resourceId na resposta')
     except Exception as exc:
         print(f"[DRIVE-WATCH] Falha ao registrar canal: {exc}")
         try:
@@ -555,7 +686,7 @@ def renovar_drive_watch(db, service, *, agora=None, forcar=False) -> dict:
             pass
         return {'habilitado': True, 'renovado': False, 'erro': str(exc)}
 
-    anterior = (data.get('channel_id'), {'resource_id': data.get('resource_id')}) if data.get('channel_id') else None
+    anterior = (data.get('channel_id'), {'resource_id': data.get('resource_id')})
     try:
         watch_ref.set({
             'channel_token': token,
@@ -572,7 +703,7 @@ def renovar_drive_watch(db, service, *, agora=None, forcar=False) -> dict:
     except Exception as exc:
         print(f"[DRIVE-WATCH] Falha ao gravar canal: {exc}")
         return {'habilitado': True, 'renovado': False, 'erro': str(exc)}
-    parados = _parar_canais(service, [anterior], '[DRIVE-WATCH]') if anterior else 0
+    parados = _parar_canais(service, [anterior], '[DRIVE-WATCH]')
     return {'habilitado': True, 'renovado': True, 'parados': parados, 'expiration': resposta.get('expiration')}
 
 
@@ -594,40 +725,49 @@ def executar_monitoramento_acervo_com_lock(db, trigger: str, executar=None) -> d
         m.release_sync_lock(db, run_id, lock_doc_id=DRIVE_ACERVO_LOCK_DOC_ID)
 
 
+def _canal_drive_valido(data: dict, channel_id: str, token: str, resource_id: str) -> bool:
+    if not data.get('resource_id'):
+        return False
+    return (token_confere(data.get('channel_id'), channel_id)
+            and token_confere(data.get('channel_token'), token)
+            and token_confere(data.get('resource_id'), resource_id))
+
+
 def processar_notificacao_drive(db, headers, *, agora=None, executar=None) -> tuple[int, dict]:
     """Núcleo de on_drive_push, sem Flask. Devolve (status_http, detalhe)."""
     agora = _agora_utc(agora)
     h = _headers_normalizados(headers)
-    settings = _ler_settings(db)
+    channel_id = h.get('x-goog-channel-id', '')
+    token = h.get('x-goog-channel-token', '')
+    resource_id = h.get('x-goog-resource-id', '')
+    if not channel_id or not token or not resource_id:
+        return 403, {'motivo': 'sem_credencial'}
+    try:
+        data = _ler_doc_cacheado(db, DRIVE_WATCH_DOC_ID)
+        if not _canal_drive_valido(data, channel_id, token, resource_id):
+            data = _ler_doc_cacheado(db, DRIVE_WATCH_DOC_ID, reler=True)
+            if not _canal_drive_valido(data, channel_id, token, resource_id):
+                return 403, {'motivo': 'canal_ou_token_invalido'}
+        settings = _ler_doc_cacheado(db, 'settings')
+    except Exception as exc:
+        print(f"[DRIVE-PUSH] Falha ao ler configuração: {exc}")
+        return 500, {'motivo': 'erro_leitura'}
     if not drive_watch_habilitado(settings):
         return 200, {'motivo': 'desligado'}
 
-    channel_id = h.get('x-goog-channel-id', '')
-    token = h.get('x-goog-channel-token', '')
-    if not channel_id or not token:
-        return 403, {'motivo': 'sem_credencial'}
-    watch_ref = db.collection('system').document(DRIVE_WATCH_DOC_ID)
-    try:
-        doc = watch_ref.get()
-        data = (doc.to_dict() or {}) if doc.exists else {}
-    except Exception as exc:
-        print(f"[DRIVE-PUSH] Falha ao ler system/{DRIVE_WATCH_DOC_ID}: {exc}")
-        return 500, {'motivo': 'erro_leitura'}
-    if not token_confere(data.get('channel_id'), channel_id) or not token_confere(data.get('channel_token'), token):
-        return 403, {'motivo': 'canal_ou_token_invalido'}
-    resource_id = h.get('x-goog-resource-id', '')
-    if resource_id and data.get('resource_id') and resource_id != data.get('resource_id'):
-        return 403, {'motivo': 'resource_id_invalido'}
-
-    estado = h.get('x-goog-resource-state', '')
-    if estado == 'sync':
+    if h.get('x-goog-resource-state', '') == 'sync':
         return 200, {'motivo': 'sync_ignorado'}
     mudou = [p.strip() for p in h.get('x-goog-changed', '').split(',') if p.strip()]
     if mudou and 'children' not in mudou:
         # Renomear a pasta, mudar permissão etc.: nada a varrer.
         return 200, {'motivo': 'sem_arquivo_novo'}
 
-    ultima = _parse_iso(data.get('ultima_varredura_em'))
+    watch_ref = db.collection('system').document(DRIVE_WATCH_DOC_ID)
+    try:
+        ultima = _parse_iso(_ler_doc(db, DRIVE_WATCH_DOC_ID).get('ultima_varredura_em'))
+    except Exception as exc:
+        print(f"[DRIVE-PUSH] Falha ao ler system/{DRIVE_WATCH_DOC_ID}: {exc}")
+        return 500, {'motivo': 'erro_leitura'}
     if ultima and (agora - ultima).total_seconds() < DEBOUNCE_S:
         return 200, {'motivo': 'debounce'}
 
@@ -652,39 +792,41 @@ def processar_notificacao_drive(db, headers, *, agora=None, executar=None) -> tu
 
 # ── Cloud Functions ────────────────────────────────────────────────────────────────────────
 
-def _resposta(status: int, detalhe: dict):
-    return https_fn.Response(str(detalhe.get('motivo') or ''), status=status)
+_CORPO_POR_STATUS = {200: 'ok', 403: 'forbidden', 405: 'method not allowed', 500: 'error'}
 
 
-@https_fn.on_request(timeout_sec=60, memory=options.MemoryOption.MB_256)
-def on_calendar_push(req: https_fn.Request) -> https_fn.Response:
-    """Receptor das push notifications do Google Calendar (ver docstring do módulo)."""
+def _resposta(status: int):
+    """Corpo genérico: o motivo interno (flag desligado, debounce...) nunca vai na resposta."""
+    return https_fn.Response(_CORPO_POR_STATUS.get(status, 'error'), status=status)
+
+
+def _atender(req, processar, prefixo: str):
     if req.method != 'POST':
-        return https_fn.Response('Method Not Allowed', status=405)
+        return _resposta(405)
     try:
-        status, detalhe = processar_notificacao_calendar(_get_db(), req.headers)
+        status, detalhe = processar(_get_db(), req.headers)
     except Exception as exc:
         # 200 de propósito: 5xx faz o Google reenviar em backoff; o cron cobre a mudança.
-        print(f"[CAL-PUSH] Erro inesperado: {exc}")
+        print(f"{prefixo} Erro inesperado: {exc}")
         status, detalhe = 200, {'motivo': 'erro'}
-    if status != 200:
-        print(f"[CAL-PUSH] Notificação recusada ({status}): {detalhe.get('motivo')}")
-    return _resposta(status, detalhe)
+    if status == 403:
+        _logar_recusa(prefixo, detalhe.get('motivo') or '')
+    return _resposta(status)
 
 
-@https_fn.on_request(timeout_sec=300, memory=options.MemoryOption.MB_512)
+# max_instances baixo: endpoint público; o volume legítimo é de poucas notificações por minuto.
+@https_fn.on_request(timeout_sec=60, memory=options.MemoryOption.MB_256, max_instances=3)
+def on_calendar_push(req: https_fn.Request) -> https_fn.Response:
+    """Receptor das push notifications do Google Calendar (ver docstring do módulo)."""
+    return _atender(req, processar_notificacao_calendar, '[CAL-PUSH]')
+
+
+# 512 MB (e não 256): a varredura roda aqui dentro e carrega acervo_global inteira, com os
+# embeddings de cada documento -- mesma memória do cron monitorar_acervo_global.
+@https_fn.on_request(timeout_sec=300, memory=options.MemoryOption.MB_512, max_instances=3)
 def on_drive_push(req: https_fn.Request) -> https_fn.Response:
     """Receptor das push notifications do Drive para a Pasta de Deságue."""
-    if req.method != 'POST':
-        return https_fn.Response('Method Not Allowed', status=405)
-    try:
-        status, detalhe = processar_notificacao_drive(_get_db(), req.headers)
-    except Exception as exc:
-        print(f"[DRIVE-PUSH] Erro inesperado: {exc}")
-        status, detalhe = 200, {'motivo': 'erro'}
-    if status != 200:
-        print(f"[DRIVE-PUSH] Notificação recusada ({status}): {detalhe.get('motivo')}")
-    return _resposta(status, detalhe)
+    return _atender(req, processar_notificacao_drive, '[DRIVE-PUSH]')
 
 
 @scheduler_fn.on_schedule(schedule="every 24 hours", timeout_sec=120, memory=options.MemoryOption.MB_256)
@@ -705,7 +847,7 @@ def renovar_calendar_watch_diario(event: scheduler_fn.ScheduledEvent) -> None:
 
 @scheduler_fn.on_schedule(schedule="every 12 hours", timeout_sec=120, memory=options.MemoryOption.MB_256)
 def renovar_drive_watch_periodico(event: scheduler_fn.ScheduledEvent) -> None:
-    """Renova o canal do Drive (dura no máximo 1 dia). Sem efeito enquanto
+    """Renova o canal do Drive (pedido com 23 h de validade). Sem efeito enquanto
     system/settings.drive_watch.enabled for False."""
     db = _get_db()
     if not drive_watch_habilitado(_ler_settings(db)):

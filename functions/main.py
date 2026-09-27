@@ -3714,6 +3714,10 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
         sync_ref.set({
             'status': 'completed',
             'last_success': datetime.now().isoformat(),
+            # Fim da rodada (sucesso OU erro), em UTC com fuso: é a partir daqui que o webhook
+            # do Calendar (google_push_watch.py) procura mudanças -- o que veio antes, o sync já
+            # leu ou é eco do push dele.
+            'finished_at': datetime.now(timezone.utc).isoformat(),
             'pending_request': False,
             'pending_full_request': False,
             'active_run_id': None,
@@ -3730,6 +3734,7 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
         sync_ref.set({
             'status': 'error',
             'error_message': error_msg,
+            'finished_at': datetime.now(timezone.utc).isoformat(),
             'pending_request': False,
             'pending_full_request': False,
             'active_run_id': None,

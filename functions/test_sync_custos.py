@@ -225,6 +225,22 @@ class TestRunFullSyncEscopos(unittest.TestCase):
         # Execução de contatos registrada para o intervalo de 6h.
         self.assertIn("ultima_execucao", db.store("system")[main.CONTACTS_SYNC_STATE_DOC_ID])
 
+    def test_fim_da_rodada_grava_finished_at_no_sucesso_e_no_erro(self):
+        # O webhook do Calendar (google_push_watch.py) começa a procurar mudanças do fim da
+        # última rodada -- inclusive de uma que terminou em erro.
+        for falhar in (False, True):
+            db = _Db()
+            antes = datetime.now(timezone.utc)
+            with _Patches(db) as m:
+                if falhar:
+                    m["cal"].side_effect = RuntimeError("Calendar fora")
+                self.assertEqual(main.run_full_sync("scheduled"), not falhar)
+            sync = db.store("system")["sync"]
+            self.assertEqual(sync["status"], "error" if falhar else "completed")
+            fim = datetime.fromisoformat(sync["finished_at"])
+            self.assertIsNotNone(fim.tzinfo)
+            self.assertGreaterEqual(fim, antes)
+
     def test_escopo_agenda_pula_contatos_allcare_e_whatsapp(self):
         db = _Db()
         with _Patches(db) as m:

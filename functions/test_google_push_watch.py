@@ -33,7 +33,8 @@ class _DocRef:
             raise RuntimeError("already exists")
         self._store[self._key] = dict(data)
 
-    def get(self):
+    def get(self, transaction=None):
+        self._store.setdefault('__leituras__', []).append(self._key)
         return _Snap(self._store.get(self._key))
 
     def set(self, data, merge=False):
@@ -72,6 +73,33 @@ class _Db:
 
     def system(self, doc_id):
         return self.dados.setdefault('system', {}).get(doc_id)
+
+
+class _FakeTx:
+    def set(self, ref, data, merge=False):
+        ref.set(data, merge=merge)
+
+    def update(self, ref, data):
+        ref.update(data)
+
+
+def _transacao_fake(db, fn):
+    return fn(_FakeTx())
+
+
+class _Base(unittest.TestCase):
+    """Cache de validação zerado e transação do Firestore trocada por uma execução direta."""
+
+    def setUp(self):
+        gpw.limpar_cache()
+        patcher = mock.patch.object(gpw, '_executar_transacao', side_effect=_transacao_fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(gpw.limpar_cache)
+
+
+def _leituras(db, doc_id):
+    return db.dados.get('system', {}).get('__leituras__', []).count(doc_id)
 
 
 class _Exec:
@@ -185,7 +213,7 @@ def _headers(canal='canal1', token='segredo-certo', estado='exists', **extra):
     return {k: v for k, v in h.items() if v is not None}
 
 
-class TestTokenConfere(unittest.TestCase):
+class TestTokenConfere(_Base):
     def test_vazios_e_diferentes_nao_conferem(self):
         self.assertFalse(gpw.token_confere('abc', ''))
         self.assertFalse(gpw.token_confere('', ''))
@@ -199,26 +227,31 @@ class TestTokenConfere(unittest.TestCase):
         cd.assert_called_once()
 
 
-class TestCalendarPush(unittest.TestCase):
+class TestCalendarPush(_Base):
     def _processar(self, db, headers, cal=None, **kw):
         cal = cal if cal is not None else _FakeCalendar()
         return gpw.processar_notificacao_calendar(
             db, headers, agora=kw.pop('agora', AGORA), calendar_service_factory=lambda: cal,
             extrair_agenda=_extrair_agenda, is_iso_after=_is_iso_after, **kw)
 
-    def test_flag_desligado_e_noop_200(self):
+    def test_flag_desligado_e_noop_200_para_canal_valido(self):
         db = _db_calendar(enabled=False)
         cal = _FakeCalendar(itens=[{'id': 'reuniao1', 'status': 'confirmed'}])
-        status, det = self._processar(db, _headers(token='errado'), cal)
+        status, det = self._processar(db, _headers(), cal)
         self.assertEqual((status, det['motivo']), (200, 'desligado'))
         self.assertEqual(cal.list_calls, [])
         self.assertEqual(db.system('sync')['status'], 'completed')
+
+    def test_flag_desligado_nao_se_revela_para_requisicao_forjada(self):
+        db = _db_calendar(enabled=False)
+        status, _ = self._processar(db, _headers(token='errado'))
+        self.assertEqual(status, 403)
 
     def test_token_ausente_errado_e_canal_desconhecido_recebem_403(self):
         db = _db_calendar()
         cal = _FakeCalendar()
         for headers in (_headers(token=None), _headers(token='errado'), _headers(canal='outro'),
-                        _headers(canal=None)):
+                        _headers(canal=None), _headers(**{'X-Goog-Resource-ID': None})):
             status, _ = self._processar(db, headers, cal)
             self.assertEqual(status, 403, headers)
         self.assertEqual(cal.list_calls, [], "403 não pode chegar à API do Google")
@@ -226,7 +259,54 @@ class TestCalendarPush(unittest.TestCase):
     def test_resource_id_diferente_recebe_403(self):
         db = _db_calendar()
         status, det = self._processar(db, _headers(**{'X-Goog-Resource-ID': 'res-de-outro'}))
-        self.assertEqual((status, det['motivo']), (403, 'resource_id_invalido'))
+        self.assertEqual(status, 403)
+
+    def test_entrada_zumbi_sem_calendar_id_ou_resource_id_recebe_403(self):
+        for canal in ({'resource_id': 'res-primary'}, {'calendar_id': 'primary'},
+                      {'ultimo_delta_em': AGORA.isoformat()}):
+            gpw.limpar_cache()
+            db = _db_calendar(canais={'canal1': canal})
+            cal = _FakeCalendar(itens=[{'id': 'reuniao1'}])
+            status, _ = self._processar(db, _headers(), cal)
+            self.assertEqual(status, 403, canal)
+            self.assertEqual(cal.list_calls, [])
+
+    def test_janela_comeca_no_fim_de_sync_que_terminou_em_erro(self):
+        db = _db_calendar(sync={'status': 'error', 'last_success': '2026-09-27T09:00:00',
+                                'finished_at': '2026-09-27T11:58:30+00:00'})
+        cal = _FakeCalendar(itens=[])
+        self._processar(db, _headers(), cal)
+        self.assertEqual(cal.list_calls[0]['updatedMin'], '2026-09-27T11:58:30Z')
+
+    def test_sync_que_terminou_em_erro_ha_menos_de_15_min_nao_gera_pedido(self):
+        db = _db_calendar(sync={'status': 'error', 'finished_at': (AGORA - timedelta(minutes=14)).isoformat()})
+        cal = _FakeCalendar(itens=[{'id': 'reuniao1'}])
+        with mock.patch('builtins.print') as p:
+            status, det = self._processar(db, _headers(), cal)
+        self.assertEqual((status, det['motivo']), (200, 'erro_recente'))
+        self.assertEqual(db.system('sync')['status'], 'error')
+        self.assertTrue(any('terminou em erro' in str(c) for c in p.call_args_list))
+
+    def test_sync_que_terminou_em_erro_ha_mais_de_15_min_libera_pedido(self):
+        db = _db_calendar(sync={'status': 'error', 'finished_at': (AGORA - timedelta(minutes=16)).isoformat()})
+        _, det = self._processar(db, _headers(), _FakeCalendar(itens=[{'id': 'reuniao1'}]))
+        self.assertEqual(det['motivo'], 'solicitado')
+        self.assertEqual(db.system('sync')['status'], 'requested')
+
+    def test_cursor_nao_avanca_nem_recria_canal_removido(self):
+        db = _db_calendar()
+        self.assertFalse(gpw._avancar_cursor_calendar(db, 'canal-que-nao-existe', AGORA))
+        self.assertNotIn('canal-que-nao-existe', db.system('calendar_watch')['canais'])
+        self.assertTrue(gpw._avancar_cursor_calendar(db, 'canal1', AGORA))
+
+    def test_corpo_da_resposta_nao_revela_flag(self):
+        fn = inspect.unwrap(gpw.on_calendar_push)
+        db = _db_calendar(enabled=False)
+        with mock.patch.object(gpw, '_get_db', return_value=db):
+            r_ok = fn(mock.Mock(method='POST', headers=_headers()))
+            r_forjada = fn(mock.Mock(method='POST', headers=_headers(token='errado')))
+        self.assertEqual((r_ok.status_code, r_ok.get_data(as_text=True)), (200, 'ok'))
+        self.assertEqual((r_forjada.status_code, r_forjada.get_data(as_text=True)), (403, 'forbidden'))
 
     def test_notificacao_sync_ignorada(self):
         db = _db_calendar()
@@ -347,7 +427,73 @@ class TestCalendarPush(unittest.TestCase):
             self.assertEqual(fn(mock.Mock(method='POST', headers=_headers(token='errado'))).status_code, 403)
 
 
-class TestRenovarCalendarWatch(unittest.TestCase):
+class TestPedirSyncAgenda(_Base):
+    def test_nao_rebaixa_pedido_completo_nem_mexe_em_sync_rodando(self):
+        for sync in ({'status': 'requested'}, {'status': 'requested', 'requested_scope': 'full'},
+                     {'status': 'requested', 'requested_scope': 'calendar'}, {'status': 'processing'}):
+            db = _db_calendar(sync=dict(sync))
+            resultado = gpw.pedir_sync_agenda(db, AGORA)
+            self.assertIn(resultado, ('ja_solicitado', 'sync_em_andamento'))
+            self.assertEqual(db.system('sync'), sync)
+            self.assertNotIn('ultimo_pedido_sync_em', db.system('calendar_watch'))
+
+    def test_pedido_usa_transacao(self):
+        db = _db_calendar()
+        self.assertEqual(gpw.pedir_sync_agenda(db, AGORA), 'solicitado')
+        gpw._executar_transacao.assert_called()
+
+
+class TestCacheDeValidacao(_Base):
+    def test_requisicoes_forjadas_nao_custam_leitura_a_cada_uma(self):
+        db = _db_calendar()
+        with mock.patch.object(gpw.time, 'monotonic', return_value=1000.0):
+            for _ in range(10):
+                status, _ = gpw.processar_notificacao_calendar(db, _headers(token='errado'), agora=AGORA)
+                self.assertEqual(status, 403)
+        self.assertEqual(_leituras(db, 'calendar_watch'), 1)
+        self.assertEqual(_leituras(db, 'settings'), 0)
+
+    def test_canal_novo_de_outra_instancia_e_reconhecido_apos_releitura(self):
+        db = _db_calendar()
+        cal = _FakeCalendar(itens=[])
+        kw = dict(calendar_service_factory=lambda: cal, extrair_agenda=_extrair_agenda, is_iso_after=_is_iso_after)
+        with mock.patch.object(gpw.time, 'monotonic', return_value=1000.0):
+            self.assertEqual(gpw.processar_notificacao_calendar(db, _headers(), agora=AGORA, **kw)[0], 200)
+        # Renovação em outra instância troca o canal.
+        watch = db.system('calendar_watch')
+        watch['canais'] = {'canal2': {'calendar_id': 'primary', 'resource_id': 'res-primary'}}
+        with mock.patch.object(gpw.time, 'monotonic', return_value=1001.0):
+            self.assertEqual(gpw.processar_notificacao_calendar(db, _headers(canal='canal2'), agora=AGORA, **kw)[0], 403)
+        with mock.patch.object(gpw.time, 'monotonic', return_value=1006.0):
+            self.assertEqual(gpw.processar_notificacao_calendar(db, _headers(canal='canal2'), agora=AGORA, **kw)[0], 200)
+
+    def test_log_de_recusa_limitado(self):
+        with mock.patch('builtins.print') as p:
+            for t in (0.0, 10.0, 20.0):
+                gpw._logar_recusa('[X]', 'canal_ou_token_invalido', relogio=lambda t=t: t)
+            self.assertEqual(p.call_count, 1)
+            gpw._logar_recusa('[X]', 'canal_ou_token_invalido', relogio=lambda: 61.0)
+        self.assertEqual(p.call_count, 2)
+        self.assertIn('+2', str(p.call_args_list[-1]))
+
+
+class TestRenovarCalendarWatch(_Base):
+    def test_entrada_zumbi_e_descartada_e_stop_nunca_vai_sem_resource_id(self):
+        db = _db_calendar(canais={
+            'canal1': {'calendar_id': 'primary', 'resource_id': 'r1', 'expiration': _exp_ms(timedelta(days=5))},
+            'zumbi': {'ultimo_delta_em': AGORA.isoformat()},
+            'zumbi2': {'resource_id': 'r-z'},
+        })
+        cal = _FakeCalendar()
+        r = gpw.renovar_calendar_watch(db, cal, agora=AGORA, calendar_ids=['primary'])
+        canais = db.system('calendar_watch')['canais']
+        self.assertNotIn('zumbi', canais)
+        self.assertNotIn('zumbi2', canais)
+        self.assertIn('canal1', canais, "canal em dia continua; só os zumbis saem")
+        self.assertEqual(cal.watch_calls, [])
+        self.assertEqual(cal.stop_calls, [{'id': 'zumbi2', 'resourceId': 'r-z'}])
+        self.assertFalse(r['renovado'])
+
     def test_flag_desligado_nao_registra(self):
         db = _db_calendar(enabled=False, canais={})
         cal = _FakeCalendar()
@@ -486,8 +632,9 @@ class _LockMain:
             ref.delete()
 
 
-class TestDrivePush(unittest.TestCase):
+class TestDrivePush(_Base):
     def setUp(self):
+        super().setUp()
         self.execucoes = []
 
     def _executar(self):
@@ -502,9 +649,16 @@ class TestDrivePush(unittest.TestCase):
 
     def test_flag_desligado_e_noop(self):
         db = _db_drive(enabled=False)
-        (status, det), _ = self._processar(db, _h_drive(token='errado'))
+        (status, det), _ = self._processar(db, _h_drive())
         self.assertEqual((status, det['motivo']), (200, 'desligado'))
+        (status, _), _ = self._processar(db, _h_drive(token='errado'))
+        self.assertEqual(status, 403)
         self.assertEqual(self.execucoes, [])
+
+    def test_doc_sem_resource_id_e_zumbi(self):
+        db = _db_drive(watch={'channel_id': 'dcanal', 'channel_token': 'tok-drive'})
+        (status, _), _ = self._processar(db, _h_drive())
+        self.assertEqual(status, 403)
 
     def test_token_ou_canal_invalido_403(self):
         db = _db_drive()
@@ -561,7 +715,7 @@ class TestDrivePush(unittest.TestCase):
         self.assertIn('Drive fora', db.system('drive_watch')['last_erro'])
 
 
-class TestRenovarDriveWatch(unittest.TestCase):
+class TestRenovarDriveWatch(_Base):
     def test_flag_desligado_nao_registra(self):
         db = _db_drive(enabled=False)
         ds = _FakeDrive()
@@ -580,9 +734,15 @@ class TestRenovarDriveWatch(unittest.TestCase):
         self.assertEqual(body['token'], watch['channel_token'])
         self.assertEqual(body['id'], watch['channel_id'])
         self.assertEqual(body['address'], 'https://exemplo.test/on_drive_push')
-        self.assertEqual(body['expiration'], int((AGORA + timedelta(days=1)).timestamp() * 1000))
+        self.assertEqual(body['expiration'], int((AGORA + timedelta(hours=23)).timestamp() * 1000))
         self.assertEqual(watch['resource_id'], 'res-pasta')
         self.assertEqual(watch['folder_id'], 'pasta123')
+        self.assertEqual(ds.stop_calls, [])
+
+    def test_canal_anterior_sem_resource_id_nao_chama_stop(self):
+        db = _db_drive(watch={'channel_id': 'dcanal', 'channel_token': 'tok-drive'})
+        ds = _FakeDrive()
+        self.assertTrue(gpw.renovar_drive_watch(db, ds, agora=AGORA)['renovado'])
         self.assertEqual(ds.stop_calls, [])
 
     def test_em_dia_nao_renova(self):
@@ -612,7 +772,7 @@ class TestRenovarDriveWatch(unittest.TestCase):
         self.assertEqual(ds.stop_calls, [])
 
 
-class TestCronAcervoUsaLock(unittest.TestCase):
+class TestCronAcervoUsaLock(_Base):
     def test_cron_pula_quando_webhook_segura_o_lock(self):
         import knowledge_graph
         db = _Db()
