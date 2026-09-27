@@ -709,6 +709,21 @@ class TestAvaliarJobTravado(unittest.TestCase):
         with self.assertRaises(ValueError):
             mcp_jobs.avaliar_job_travado(dados, agora=agora_naive)
 
+    def test_agora_naive_levanta_mesmo_quando_dados_ja_devolveria_none(self):
+        # Gap de cobertura apontado pela rodada 2 de revisão adversarial: o
+        # teste acima usa `dados` que chegaria até a subtração de qualquer
+        # forma, então não prova que o guard de `agora` roda ANTES dos
+        # guards de `dados` (incondicional), só que ele acontece em algum
+        # momento. Este caso usa `dados` que já devolveria `None` por conta
+        # própria (status != "processing") -- se o guard de `agora` viesse
+        # DEPOIS dos guards de `dados`, este caso devolveria `None` em
+        # silêncio em vez de levantar, escondendo o mesmo bug que a correção
+        # existe para expor.
+        with self.assertRaises(ValueError):
+            mcp_jobs.avaliar_job_travado(
+                {"status": "done"}, agora=dt.datetime(2026, 9, 27, 12, 0, 0)
+            )
+
     def test_reivindicado_em_tipo_inesperado_nao_e_travado(self):
         for valor in (12345, "2026-09-27T00:00:00Z", [], {}):
             with self.subTest(valor=valor):
