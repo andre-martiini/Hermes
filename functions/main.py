@@ -1802,6 +1802,16 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
 # (sem valor em R$, XP). Separado de `ids` porque `ids` também é lido por sync_boletos_gmail.
 PIX_IGNORADOS_FIELD = 'pix_ignorados_ids'
 
+# Tamanho máximo das listas de system/processed_emails. `ids` é compartilhada por
+# sync_pix_emails e sync_boletos_gmail: antes cada uma truncava num tamanho diferente
+# (1000 e 500) e uma aparava os ids da outra.
+PROCESSED_EMAILS_MAX_IDS = 1000
+
+
+def _mesclar_ids_processados(antigos, novos):
+    """Junta as listas preservando a ordem (dedupe) e mantém só os PROCESSED_EMAILS_MAX_IDS mais recentes."""
+    return list(dict.fromkeys(list(antigos) + list(novos)))[-PROCESSED_EMAILS_MAX_IDS:]
+
 
 def sync_pix_emails(service, sync_ref, logs):
     """
@@ -2160,9 +2170,9 @@ def sync_pix_emails(service, sync_ref, logs):
         # Dedupe preservando a ordem (antes `list(set)[-1000:]` descartava ids ao acaso).
         payload_processados = {}
         if new_processed_ids:
-            payload_processados['ids'] = list(dict.fromkeys(processed_ids_list + new_processed_ids))[-1000:]
+            payload_processados['ids'] = _mesclar_ids_processados(processed_ids_list, new_processed_ids)
         if new_ignorados_ids:
-            payload_processados[PIX_IGNORADOS_FIELD] = list(dict.fromkeys(ignorados_list + new_ignorados_ids))[-1000:]
+            payload_processados[PIX_IGNORADOS_FIELD] = _mesclar_ids_processados(ignorados_list, new_ignorados_ids)
         if payload_processados:
             db.collection('system').document('processed_emails').set(payload_processados, merge=True)
 
@@ -2324,15 +2334,28 @@ def sync_boletos_gmail(service, sync_ref, logs):
     query = '{has:attachment filename:pdf from:boleto@allcaregestoradesaude.com.br} (subject:(boleto OR fatura OR bill OR pagamento OR "o seu boleto" OR "sua fatura" OR "vencimento") OR "boleto" OR "fatura")'
     
     try:
-        results = service.users().messages().list(userId='me', q=query, maxResults=15).execute(num_retries=3)
-        messages = results.get('messages', [])
-        
+        # Candidatos (custo): sem `in:inbox`, a busca devolvia sempre os mesmos 15 e-mails
+        # antigos (já lançados e arquivados) e cada rodada varria fixed_bills e rearquivava
+        # todos. Agora são duas buscas, como em sync_pix_emails: o que ainda está no INBOX +
+        # os últimos 3 dias (boleto que o André arquivou à mão antes de o sync passar).
+        messages = []
+        vistos = set()
+        inbox_ids = set()
+        for origem, q in (('inbox', f'in:inbox {query}'), ('recentes', f'newer_than:3d {query}')):
+            results = service.users().messages().list(userId='me', q=q, maxResults=15).execute(num_retries=3)
+            for m_info in results.get('messages', []) or []:
+                if origem == 'inbox':
+                    inbox_ids.add(m_info['id'])
+                if m_info['id'] not in vistos:
+                    vistos.add(m_info['id'])
+                    messages.append(m_info)
+
         if not messages:
             log_to_firestore(sync_ref, logs, "Nenhum boleto recente encontrado no Gmail.")
             return
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
-        processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
+        processed_ids = list((processed_emails_doc.to_dict() or {}).get('ids') or []) if processed_emails_doc.exists else []
 
         # Custo: se todos os candidatos já estão em processed_ids, o laço abaixo só faria
         # `continue` em cada um (os que viraram boleto já foram arquivados ao serem lançados) --
@@ -2391,7 +2414,14 @@ def sync_boletos_gmail(service, sync_ref, logs):
         for m_info in messages:
             msg_id = m_info['id']
             if msg_id in existing_bill_google_ids:
-                archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-ja-lancado")
+                # Arquivar um e-mail que já está fora do INBOX é no-op na API: só chama para
+                # quem ainda está lá.
+                if msg_id in inbox_ids:
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-ja-lancado")
+                if msg_id not in processed_set:
+                    # Já lançado (google_message_id em fixed_bills) mas fora da lista de
+                    # processados: registra, senão ele força o caminho caro em toda rodada.
+                    new_processed_ids.append(msg_id)
                 continue
             if msg_id in processed_set: continue
             
@@ -2713,8 +2743,9 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 # do parser precisam poder ser recuperados na próxima sincronização.
 
         if new_processed_ids:
-            # Dedupe preservando a ordem (antes `list(set)[-500:]` descartava ids ao acaso).
-            updated_ids = list(dict.fromkeys(processed_ids + new_processed_ids))[-500:]
+            # Dedupe preservando a ordem, no mesmo tamanho usado por sync_pix_emails (a lista
+            # `ids` é compartilhada; truncar em 500 aqui descartava ids de Pix).
+            updated_ids = _mesclar_ids_processados(processed_ids, new_processed_ids)
             db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
 
         if processed_count > 0:

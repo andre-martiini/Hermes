@@ -524,5 +524,105 @@ class TestSyncBoletosSaidaCedo(unittest.TestCase):
         self.assertFalse(FINANCEIRAS.intersection(db.streamed))
 
 
+class TestSyncBoletosSemRearquivar(unittest.TestCase):
+    """Boletos já lançados e arquivados não podem forçar o caminho caro em toda rodada."""
+
+    def _rodar(self, db, gs):
+        keys = mock.Mock(exists=True)
+        keys.to_dict.return_value = {"gemini_api_key": "chave-de-teste"}
+        with mock.patch("main.get_db", return_value=db), \
+             mock.patch("main.log_to_firestore") as m_log, \
+             mock.patch("main.emit_notification_backend"), \
+             mock.patch("main.get_genai_module"), \
+             mock.patch("main._cached_doc_get", return_value=keys) as m_keys:
+            resultado = main.sync_boletos_gmail(gs, mock.Mock(), [])
+        self.assertIsNot(resultado, False, [str(c.args[2]) for c in m_log.call_args_list])
+        return m_keys
+
+    def test_duas_buscas_inbox_e_ultimos_3_dias(self):
+        db = _Db()
+        gs = _gmail_listas({})
+        self._rodar(db, gs)
+        queries = [kw["q"] for _, kw in gs.users.return_value.messages.return_value.list.call_args_list]
+        self.assertEqual(len(queries), 2, queries)
+        self.assertTrue(queries[0].startswith("in:inbox "), queries)
+        self.assertTrue(queries[1].startswith("newer_than:3d "), queries)
+        self.assertTrue(all("boleto@allcaregestoradesaude.com.br" in q for q in queries))
+
+    def test_ja_lancado_e_registrado_e_nao_rearquivado_na_rodada_seguinte(self):
+        db = _Db()
+        db.collection("system").document("processed_emails").set({"ids": ["velho"]})
+        db.collection("fixed_bills").document("f1").set(
+            {"description": "Luz", "amount": 100.0, "dueDay": 10, "month": 8, "year": 2026,
+             "google_message_id": "b1"}
+        )
+        # 1ª rodada: b1 já lançado, recebido nos últimos 3 dias e fora do INBOX.
+        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        self._rodar(db, gs)
+        self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["velho", "b1"])
+        self.assertEqual(_arquivados(gs), [])  # fora do INBOX: arquivar seria no-op
+        gs.users.return_value.messages.return_value.get.assert_not_called()
+
+        # 2ª rodada: mesmo candidato -> saída cedo, sem Gemini, sem fixed_bills, sem arquivar.
+        db.streamed.clear()
+        gs2 = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        m_keys = self._rodar(db, gs2)
+        m_keys.assert_not_called()
+        self.assertFalse(FINANCEIRAS.intersection(db.streamed), db.streamed)
+        self.assertEqual(_arquivados(gs2), [])
+
+    def test_ja_lancado_ainda_no_inbox_e_arquivado_uma_vez(self):
+        db = _Db()
+        db.collection("system").document("processed_emails").set({"ids": []})
+        db.collection("fixed_bills").document("f1").set(
+            {"description": "Luz", "amount": 100.0, "google_message_id": "b1"}
+        )
+        gs = _gmail_listas({"in:inbox": ["b1"], "newer_than:3d": ["b1"]})
+        self._rodar(db, gs)
+        self.assertEqual(_arquivados(gs), ["b1"])
+        self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["b1"])
+
+    def test_emails_antigos_ja_arquivados_nao_voltam_como_candidatos(self):
+        """Cenário do log de 27/09: os e-mails antigos saíram do INBOX e têm mais de 3 dias."""
+        db = _Db()
+        db.collection("fixed_bills").document("f1").set({"description": "x", "google_message_id": "antigo"})
+        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": []})
+        m_keys = self._rodar(db, gs)
+        m_keys.assert_not_called()
+        self.assertFalse(FINANCEIRAS.intersection(db.streamed))
+        self.assertEqual(_arquivados(gs), [])
+
+
+class TestTruncagemProcessedEmailsCompartilhada(unittest.TestCase):
+    def test_helper_preserva_ordem_e_limita_ao_maximo(self):
+        antigos = [f"a{i}" for i in range(main.PROCESSED_EMAILS_MAX_IDS)]
+        res = main._mesclar_ids_processados(antigos, ["a5", "novo"])
+        self.assertEqual(len(res), main.PROCESSED_EMAILS_MAX_IDS)
+        self.assertEqual(res[-1], "novo")
+        self.assertEqual(res[0], "a1")  # só o mais antigo sai
+        self.assertEqual(res.count("a5"), 1)
+
+    def test_boletos_nao_apara_ids_de_pix_em_500(self):
+        db = _Db()
+        ids_pix = [f"pix{i}" for i in range(700)]
+        db.collection("system").document("processed_emails").set({"ids": list(ids_pix)})
+        db.collection("fixed_bills").document("f1").set({"description": "x", "google_message_id": "b1"})
+        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        TestSyncBoletosSemRearquivar._rodar(self, db, gs)
+        self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ids_pix + ["b1"])
+
+    def test_pix_nao_apara_ids_de_boletos(self):
+        db = _Db()
+        ids = [f"bol{i}" for i in range(700)]
+        db.collection("system").document("processed_emails").set({"ids": list(ids)})
+        db.collection("finance_transactions").document("t1").set(
+            {"description": "Pix: x", "amount": 10.0, "date": "2026-09-20T10:00:00+00:00",
+             "google_message_id": "p1"}
+        )
+        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["p1"]})
+        TestSyncPixSaidaCedo._rodar(self, db, gs)
+        self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ids + ["p1"])
+
+
 if __name__ == "__main__":
     unittest.main()
