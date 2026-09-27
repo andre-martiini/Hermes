@@ -90,6 +90,18 @@ class TestRequestStatusDeJob(unittest.TestCase):
         with self.assertRaises(StatusMcpJobDesconhecido):
             request_status_de_job(None)
 
+    def test_status_lista_nao_hashavel_levanta_excecao_do_dominio(self):
+        # Achado do Codex (PR #361, P2): `status` corrompido como lista
+        # (não-hasheável) não deve escapar como TypeError bruto -- tem que
+        # cair no mesmo StatusMcpJobDesconhecido fail-closed dos demais
+        # valores desconhecidos.
+        with self.assertRaises(StatusMcpJobDesconhecido):
+            request_status_de_job({"status": ["processing"]})
+
+    def test_status_dict_nao_hashavel_levanta_excecao_do_dominio(self):
+        with self.assertRaises(StatusMcpJobDesconhecido):
+            request_status_de_job({"status": {"valor": "processing"}})
+
     def test_status_desconhecido_preserva_valor_bruto_na_excecao(self):
         try:
             request_status_de_job({"status": "pausado"})

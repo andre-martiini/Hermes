@@ -104,10 +104,20 @@ def request_status_de_job(dados: dict) -> RequestStatus:
     Só lê `status` e `reivindicado_em`; ignora qualquer outro campo do
     documento (`tool`, `arguments`, `resultado`, etc. não afetam a
     tradução). Levanta `StatusMcpJobDesconhecido` para um `status` fora do
-    conjunto conhecido -- nunca devolve um `RequestStatus` adivinhado."""
+    conjunto conhecido -- nunca devolve um `RequestStatus` adivinhado.
+
+    A checagem de tipo (`isinstance(status_bruto, str)`) vem ANTES do teste
+    de pertencimento ao frozenset, não depois -- achado de revisão do Codex
+    (PR #361, P2): um documento corrompido ou de uma versão futura pode
+    gravar `status` como lista ou dict (não-hasháveis); testar
+    `valor not in frozenset` diretamente levantaria `TypeError` bruto nesse
+    caso, quebrando o próprio contrato "fail-closed" que este módulo
+    documenta -- o chamador receberia uma exceção de tipo genérica em vez
+    de `StatusMcpJobDesconhecido`, a única exceção que este módulo promete
+    levantar para status desconhecido."""
     dados_seguros = dados or {}
     status_bruto = dados_seguros.get("status")
-    if status_bruto not in _STATUS_MCP_CONHECIDOS:
+    if not isinstance(status_bruto, str) or status_bruto not in _STATUS_MCP_CONHECIDOS:
         raise StatusMcpJobDesconhecido(status_bruto)
     if status_bruto == "done":
         return RequestStatus.CONCLUIDO
