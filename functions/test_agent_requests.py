@@ -616,5 +616,49 @@ class TestListarEContar(unittest.TestCase):
         self.assertEqual(ar.contar_pendentes(self.db, tipo=ar.TIPO_CONSOLIDAR_AUDIO), 1)
 
 
+class TestListarEContarProtocoloNovo(unittest.TestCase):
+    """P04 sub-entrega 8/N: achado real do Codex na PR #359 -- um pedido do
+    protocolo novo ainda 'pendente' não deve aparecer em `listar_pendentes`
+    nem inflar `contar_pendentes`, mesmo status compartilhado com o legado.
+    Sem isto, `consultar_pedidos_agente` (MCP) oferecia o pedido ao
+    executor legado do fluxo agendado, que produzia todo o efeito de
+    trabalho antes de `concluir` recusar no final -- ver a docstring de
+    `listar_pendentes`."""
+
+    def setUp(self):
+        self.db = _MockDB()
+        self.col = self.db.collection(ar.COLLECTION)
+        self.col._docs["r-legado"] = {
+            "status": ar.STATUS_PENDENTE,
+            "tipo": ar.TIPO_CONSOLIDAR_AUDIO,
+            "criado_em": datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+        }
+        self.col._docs["r-novo"] = {
+            "status": ar.STATUS_PENDENTE,
+            "tipo": ar.TIPO_CONSOLIDAR_AUDIO,
+            "schema_version": ar.SCHEMA_VERSION_ATUAL,
+            "criado_em": datetime(2026, 9, 3, 9, 0, tzinfo=timezone.utc),
+        }
+
+    def test_listar_pendentes_exclui_protocolo_novo(self):
+        res = ar.listar_pendentes(self.db)
+        self.assertEqual(res["total"], 1)
+        ids = [p["id"] for p in res["pedidos"]]
+        self.assertEqual(ids, ["r-legado"])
+        self.assertNotIn("r-novo", ids)
+
+    def test_contar_pendentes_exclui_protocolo_novo(self):
+        self.assertEqual(ar.contar_pendentes(self.db), 1)
+        self.assertEqual(
+            ar.contar_pendentes(self.db, tipo=ar.TIPO_CONSOLIDAR_AUDIO), 1
+        )
+
+    def test_listar_pendentes_so_protocolo_novo_devolve_vazio(self):
+        self.col._docs.pop("r-legado")
+        res = ar.listar_pendentes(self.db)
+        self.assertEqual(res["total"], 0)
+        self.assertEqual(res["pedidos"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

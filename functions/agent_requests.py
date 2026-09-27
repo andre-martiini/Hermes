@@ -210,6 +210,19 @@ def listar_pendentes(db, tipo: str | None = None, limite: int = 20) -> dict:
     """Lista pedidos em status 'pendente', opcionalmente filtrando por tipo.
 
     Ordena por criado_em crescente (mais antigo primeiro).
+
+    P04 sub-entrega 8/N (achado real do Codex na PR #359, revisão da própria
+    sub-entrega -- passo 5 do pacote): pula pedidos do protocolo novo
+    (`_protocolo_novo_ativo`), mesmo que estejam em status 'pendente' (mesma
+    string usada pelos dois protocolos). Sem este filtro, `consultar_pedidos_agente`
+    (MCP, backed por esta função) continuaria oferecendo um pedido já
+    migrado para o executor legado do fluxo agendado -- que produziria todo
+    o EFEITO de trabalho (consolidação, diário, resolução de atenção) antes
+    de `concluir_pedido_agente` recusar no final (`_protocolo_novo_ativo` em
+    `concluir`, ver acima), deixando o pedido `pendente` de novo para um
+    segundo executor (agora sim pelo protocolo novo, com lease) repetir o
+    mesmo trabalho -- exatamente a duplicação que o passo 5 existe para
+    impedir, só que pelo caminho de leitura em vez do de escrita.
     """
     limite_ajustado = max(1, min(int(limite or 20), 50))
     query = db.collection(COLLECTION).where("status", "==", STATUS_PENDENTE)
@@ -221,6 +234,8 @@ def listar_pendentes(db, tipo: str | None = None, limite: int = 20) -> dict:
 
     for doc in docs:
         d = doc.to_dict() or {}
+        if _protocolo_novo_ativo(d):
+            continue
         pedidos.append({
             "id": doc.id,
             "tipo": d.get("tipo"),
@@ -244,11 +259,18 @@ def listar_pendentes(db, tipo: str | None = None, limite: int = 20) -> dict:
 
 
 def contar_pendentes(db, tipo: str | None = None) -> int:
-    """Contagem rápida de pedidos pendentes para o resumo de estado."""
+    """Contagem rápida de pedidos pendentes para o resumo de estado.
+
+    Mesmo filtro de protocolo novo de `listar_pendentes` (ver sua docstring,
+    achado do Codex na PR #359) -- um pedido já migrado não deve inflar a
+    contagem que sinaliza "há trabalho legado esperando".
+    """
     query = db.collection(COLLECTION).where("status", "==", STATUS_PENDENTE)
     if tipo:
         query = query.where("tipo", "==", str(tipo).strip())
-    return len(list(query.stream()))
+    return sum(
+        1 for doc in query.stream() if not _protocolo_novo_ativo(doc.to_dict() or {})
+    )
 
 
 def concluir(
