@@ -78,6 +78,21 @@ ERRO_TIPO_POLITICA = "politica"  # bloqueado pelo preflight de autonomia antes d
 ERRO_TIPO_RESULTADO = "resultado_tool"  # a tool devolveu um resultado no formato de erro sem levantar excecao
 ERRO_TIPO_EXCECAO = "excecao"  # excecao nao tratada durante a execucao da tool
 ERRO_TIPO_CONFIGURACAO = "erro_configuracao"  # backend Firestore sem suporte a transacao real
+ERRO_TIPO_TRAVADO = "travado"  # job reivindicado que nunca chegou a concluir -- ver avaliar_job_travado
+
+# `on_mcp_job_created` tem `timeout_sec=540`. Se o trigger for encerrado
+# (timeout, OOM, queda do runtime) DEPOIS de `_reivindicar_job` marcar
+# `reivindicado_em` e ANTES de qualquer `ref.update(...)` de conclusao, o
+# `except Exception` deste arquivo nunca roda (o processo e encerrado pela
+# plataforma, nao por uma excecao Python) -- o documento fica para sempre em
+# `status="processing"`, com `reivindicado_em` preenchido e sem `expira_em`,
+# elegivel a TTL. Este e o cenario "job zumbi" ja documentado no docstring de
+# `autonomy/mcp_jobs_adapter.py` (P04 sub-entrega 9/N). Margem de 60s sobre o
+# timeout do proprio trigger: um job reivindicado ha menos tempo do que isso
+# ainda pode estar legitimamente em andamento (o trigger tem exatamente esse
+# tempo para terminar sozinho); so depois desse limiar e que a inatividade
+# deixa de ser explicavel por lentidao normal.
+LIMIAR_TRAVADO_SEC = 540 + 60
 
 
 def _db():
@@ -118,6 +133,69 @@ def _preparar_resultado(resultado):
     if len(texto) > _MAX_RESULTADO_CHARS:
         return texto[:_MAX_RESULTADO_CHARS] + "\n\n[...resultado truncado...]", True
     return (estruturado if estruturado is not None else texto), False
+
+
+def avaliar_job_travado(dados: dict, *, agora: datetime) -> dict | None:
+    """Decide se um documento `mcp_jobs` cru esta "travado" -- reivindicado
+    ha mais que `LIMIAR_TRAVADO_SEC` sem nunca ter concluido -- e, se
+    estiver, devolve o dict de atualizacao que o marca como falha definitiva
+    (elegivel a TTL, mesmo formato que `on_mcp_job_created` ja escreve para
+    qualquer outro erro). Devolve `None` quando nao ha nada a fazer.
+
+    PURA -- nao le nem escreve Firestore. Quem varre a colecao `mcp_jobs`
+    periodicamente, chama esta funcao para cada documento em
+    `status="processing"` e aplica a atualizacao devolvida fica para uma
+    sub-entrega futura de wiring -- mesmo padrao incremental (logica pura
+    primeiro) ja usado em `autonomy/sweep.py` (passo 7 do pacote P04) e nas
+    sub-entregas 1/N-9/N deste mesmo pacote.
+
+    `dados` e o dict cru de `snapshot.to_dict()` (mesma forma que
+    `_reivindicar_job` le e que `autonomy/mcp_jobs_adapter.py` consome) --
+    dado EXTERNO (Firestore), NUNCA confiavel o bastante para travar a
+    funcao: fail-closed em qualquer formato inesperado, devolve `None` (nao
+    travado, nada a fazer) em vez de adivinhar ou levantar excecao; um
+    documento realmente travado continua elegivel na proxima varredura, o
+    que e seguro, ao contrario de marcar como travado um job que so tem um
+    campo em formato inesperado mas pode estar legitimamente em andamento.
+
+    `agora` e diferente -- e um parametro do PROPRIO CHAMADOR (a hora atual
+    que ele decidiu passar), nao dado externo, entao o mesmo fail-closed
+    NAO se aplica a ele: um `agora` sem tzinfo e erro de programacao de quem
+    for escrever a sub-entrega de wiring (ex.: `datetime.now()` em vez de
+    `datetime.now(timezone.utc)`), nao um dado corrompido do Firestore, e
+    devolver `None` em silencio esconderia esse bug -- a varredura real
+    nunca detectaria NENHUM job travado, sempre, sem nenhum sinal do motivo.
+    Levanta `ValueError` explicito em vez disso (achado de revisao
+    adversarial desta sub-entrega).
+    """
+    if agora.tzinfo is None:
+        raise ValueError("agora precisa ser timezone-aware (ex.: datetime.now(timezone.utc)).")
+    dados_seguros = dados or {}
+    if dados_seguros.get("status") != "processing":
+        return None
+    if dados_seguros.get("expira_em") is not None:
+        # Ja tem um desfecho gravado (nunca deveria coexistir com
+        # status="processing", mas nunca sobrescrever um job que ja concluiu).
+        return None
+    reivindicado_em = dados_seguros.get("reivindicado_em")
+    if not isinstance(reivindicado_em, datetime) or reivindicado_em.tzinfo is None:
+        # Ainda nao reivindicado (None -- pendente, nao travado, e o caso mais
+        # comum), ou dado corrompido/formato inesperado -- nenhum dos dois e
+        # "travado" no sentido que esta funcao detecta.
+        return None
+    idade_segundos = (agora - reivindicado_em).total_seconds()
+    if idade_segundos < LIMIAR_TRAVADO_SEC:
+        return None
+    return {
+        "status": "error",
+        "erro": (
+            "Job travado -- reivindicado mas nunca concluido (provavel "
+            "timeout ou queda do runtime do trigger antes de terminar)."
+        ),
+        "erro_tipo": ERRO_TIPO_TRAVADO,
+        "concluido_em": int(agora.timestamp()),
+        "expira_em": agora + timedelta(seconds=_TTL_SEC),
+    }
 
 
 def criar_job(uid: str, tool: str, arguments: dict, *, session_id: str | None = None,
