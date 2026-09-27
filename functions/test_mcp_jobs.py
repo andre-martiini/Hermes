@@ -775,5 +775,215 @@ class TestAvaliarJobTravado(unittest.TestCase):
         self.assertIn("travado", atualizacao["erro"].lower())
 
 
+# ---------------------------------------------------------------------------
+# P04 sub-entrega 11/N: wiring de `avaliar_job_travado` -- a varredura real
+# que consulta `mcp_jobs`, aplica a decisão pura a cada documento e escreve o
+# resultado. Mesmo estilo de fake de query (where/limit/stream em memória)
+# já usado em test_daily_reset_job.py::_Consulta, adaptado para `.stream()`
+# em vez de `.get()` (`sweep_mcp_jobs_travados_core` usa `.stream()`, mesmo
+# padrão do resto do módulo -- ver agent_requests.py/agent_runs.py).
+# ---------------------------------------------------------------------------
+
+
+class _FakeSweepSnap:
+    def __init__(self, doc_id, data, ref):
+        self.id = doc_id
+        self._data = data
+        self.reference = ref
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _FakeSweepRef:
+    def __init__(self, doc_id, store):
+        self.id = doc_id
+        self._store = store
+
+    def update(self, data):
+        self._store[self.id].update(data)
+
+
+class _FakeSweepQuery:
+    def __init__(self, store, field=None, op=None, value=None, lim=None):
+        self._store = store
+        self._field = field
+        self._op = op
+        self._value = value
+        self._limit = lim
+
+    def where(self, field=None, op=None, value=None, filter=None):
+        if filter is not None:
+            field, op, value = filter.field_path, filter.op_string, filter.value
+        return _FakeSweepQuery(self._store, field, op, value, self._limit)
+
+    def limit(self, n):
+        return _FakeSweepQuery(self._store, self._field, self._op, self._value, n)
+
+    def stream(self):
+        casa = []
+        for doc_id, data in self._store.items():
+            if self._field is not None:
+                if self._op != "==":
+                    raise AssertionError(f"operador não suportado no fake: {self._op}")
+                if data.get(self._field) != self._value:
+                    continue
+            casa.append(_FakeSweepSnap(doc_id, data, _FakeSweepRef(doc_id, self._store)))
+        if self._limit is not None:
+            casa = casa[: self._limit]
+        return casa
+
+
+class _FakeSweepDb:
+    def __init__(self, docs):
+        self._store = {doc_id: dict(dados) for doc_id, dados in docs.items()}
+
+    def collection(self, nome):
+        assert nome == mcp_jobs.COLECAO
+        return _FakeSweepQuery(self._store)
+
+
+class TestSweepMcpJobsTravadosCore(unittest.TestCase):
+    """`sweep_mcp_jobs_travados_core` -- consulta `status="processing"`,
+    aplica `avaliar_job_travado` a cada documento e escreve a atualização
+    quando ela decidir que o job está travado."""
+
+    AGORA = dt.datetime(2026, 9, 27, 12, 0, 0, tzinfo=dt.timezone.utc)
+
+    def _reivindicado_ha(self, segundos):
+        return self.AGORA - dt.timedelta(seconds=segundos)
+
+    def test_marca_so_o_job_travado_e_ignora_o_resto(self):
+        db = _FakeSweepDb({
+            "job-travado": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+            "job-recente": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(10),
+            },
+            "job-pendente": {"status": "processing", "reivindicado_em": None},
+            "job-done": {"status": "done"},
+            "job-error": {
+                "status": "error",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+        })
+
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+
+        # Só os 3 documentos em status="processing" entram na consulta --
+        # job-done/job-error nunca chegam a ser lidos pelo fake (a query já
+        # filtra por status na consulta, mesmo padrão do Firestore real).
+        self.assertEqual(varridos, 3)
+        self.assertEqual(travados, 1)
+
+        travado = db._store["job-travado"]
+        self.assertEqual(travado["status"], "error")
+        self.assertEqual(travado["erro_tipo"], mcp_jobs.ERRO_TIPO_TRAVADO)
+        self.assertIn("expira_em", travado)
+
+        # Não travados: sem NENHUMA escrita -- o dict original permanece
+        # intacto, prova de que `update()` nunca foi chamado para eles.
+        self.assertEqual(
+            db._store["job-recente"],
+            {"status": "processing", "reivindicado_em": self._reivindicado_ha(10)},
+        )
+        self.assertEqual(
+            db._store["job-pendente"], {"status": "processing", "reivindicado_em": None}
+        )
+
+    def test_nenhum_job_processing_nao_e_erro(self):
+        db = _FakeSweepDb({"job-done": {"status": "done"}})
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+        self.assertEqual((varridos, travados), (0, 0))
+
+    def test_todos_travados_sao_marcados(self):
+        db = _FakeSweepDb({
+            f"job-{i}": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            }
+            for i in range(5)
+        })
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+        self.assertEqual((varridos, travados), (5, 5))
+        for i in range(5):
+            self.assertEqual(db._store[f"job-{i}"]["status"], "error")
+
+    def test_falha_ao_atualizar_um_documento_nao_aborta_o_resto_da_varredura(self):
+        # Achado de revisão adversarial: sem isolamento por documento, um
+        # `.update()` que falhar para um job aborta o laço inteiro e morre
+        # de fome todo documento ordenado depois dele na mesma varredura.
+        db = _FakeSweepDb({
+            "job-quebrado": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+            "job-travado-depois": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+        })
+
+        original_update = _FakeSweepRef.update
+
+        def update_que_falha(self, data):
+            if self.id == "job-quebrado":
+                raise RuntimeError("Firestore indisponível (simulado)")
+            return original_update(self, data)
+
+        with mock.patch.object(_FakeSweepRef, "update", update_que_falha):
+            varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+
+        self.assertEqual(varridos, 2)
+        # Só o documento que não falhou conta como travado -- a escrita do
+        # outro não foi confirmada.
+        self.assertEqual(travados, 1)
+        self.assertEqual(db._store["job-travado-depois"]["status"], "error")
+        # job-quebrado nunca teve a escrita commitada (a exceção interrompeu
+        # `update()` antes de `self.col._docs[...].update(data)` no double).
+        self.assertEqual(db._store["job-quebrado"]["status"], "processing")
+
+    def test_agora_invalido_propaga_em_vez_de_ser_engolido_pelo_isolamento_de_escrita(self):
+        # Achado da 2a rodada de revisão adversarial: o isolamento por
+        # documento cobre só a ESCRITA (snap.reference.update), nunca a
+        # chamada a avaliar_job_travado -- um `agora` sem tzinfo é erro de
+        # PROGRAMAÇÃO de quem chama (avaliar_job_travado levanta ValueError
+        # de propósito nesse caso, ver sua própria docstring), não uma
+        # falha transitória de escrita a engolir em silêncio. Sem esta
+        # separação, uma regressão futura (`datetime.now()` sem tz no lugar
+        # de `datetime.now(timezone.utc)`) faria a varredura marcar
+        # silenciosamente zero jobs, para sempre, sem nenhum sinal visível.
+        db = _FakeSweepDb({
+            "job-qualquer": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+        })
+        agora_naive = dt.datetime(2026, 9, 27, 12, 0, 0)
+        with self.assertRaises(ValueError):
+            mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=agora_naive)
+
+    def test_reentrante_segunda_passada_nao_reescreve_job_ja_marcado(self):
+        db = _FakeSweepDb({
+            "job-travado": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            },
+        })
+        mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+        primeira_passada = dict(db._store["job-travado"])
+
+        # Segunda varredura, mais tarde: o documento já está "error", então
+        # nem entra mais na consulta status="processing" -- mesma prova de
+        # idempotência que a docstring do módulo promete.
+        depois = self.AGORA + dt.timedelta(minutes=15)
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=depois)
+        self.assertEqual((varridos, travados), (0, 0))
+        self.assertEqual(db._store["job-travado"], primeira_passada)
+
+
 if __name__ == "__main__":
     unittest.main()
