@@ -70,6 +70,14 @@ from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import sweep_mcp_jobs_travados  # noqa: F401 — registra a Cloud Function
+# Fatias 2 e 3 da sincronização por webhook (Calendar/Drive, ação e7fe01f4): desligadas por
+# padrão (system/settings.calendar_watch.enabled / drive_watch.enabled).
+from google_push_watch import (  # noqa: F401 — registra as Cloud Functions
+    on_calendar_push,
+    on_drive_push,
+    renovar_calendar_watch_diario,
+    renovar_drive_watch_periodico,
+)
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -3744,6 +3752,10 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
         sync_ref.set({
             'status': 'completed',
             'last_success': datetime.now().isoformat(),
+            # Fim da rodada (sucesso OU erro), em UTC com fuso: é a partir daqui que o webhook
+            # do Calendar (google_push_watch.py) procura mudanças -- o que veio antes, o sync já
+            # leu ou é eco do push dele.
+            'finished_at': datetime.now(timezone.utc).isoformat(),
             'pending_request': False,
             'pending_full_request': False,
             'active_run_id': None,
@@ -3760,6 +3772,7 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
         sync_ref.set({
             'status': 'error',
             'error_message': error_msg,
+            'finished_at': datetime.now(timezone.utc).isoformat(),
             'pending_request': False,
             'pending_full_request': False,
             'active_run_id': None,

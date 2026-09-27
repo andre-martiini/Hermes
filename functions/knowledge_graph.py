@@ -1633,8 +1633,13 @@ def monitorar_acervo_global(*args, **kwargs) -> None:
     Desde 26/09/2026 é o único caminho automático desta varredura: o run_full_sync
     (main.py) também a chamava a cada ciclo, duplicando o trabalho; saiu de lá e este
     cron passou de 15 para 30 minutos (achado de custo).
+
+    Desde 27/09/2026 roda sob o lock `drive_acervo_lock`, o mesmo do webhook do Drive
+    (`on_drive_push`, google_push_watch.py): as duas varreduras nunca correm juntas. Continua
+    sendo a rede de segurança do webhook, ligado ou não.
     """
-    executar_monitoramento_acervo_global()
+    from google_push_watch import executar_monitoramento_acervo_com_lock
+    executar_monitoramento_acervo_com_lock(_get_db(), "cron", executar=executar_monitoramento_acervo_global)
 
 
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=300)
