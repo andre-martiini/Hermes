@@ -337,7 +337,7 @@ proximo_pacote: "P04 -- passo 6 do pacote: primeira fatia (adaptador puro mcp_jo
 plano: plano-hermes-autonomo-2026-09-06
 base_commit: a3ef7870fddf6fa2ebbaa07e5ab669d6a655fc55
 pacote: "P04 sub-entrega 10/N -- ainda dentro do passo 6 do pacote (\"Unificar o ciclo de jobs MCP atraves de adaptador ao protocolo, preservando job_id e sem fundir colecoes cegamente.\", secao 8 do plano), fechando a pendencia mais concreta deixada pela sub-entrega 9/N (adaptador puro mcp_jobs<->RequestStatus, PR #361): um job mcp_jobs pode ficar travado para sempre em status=\"processing\" se on_mcp_job_created cair (timeout de 540s, OOM, queda do runtime) depois de reivindicar e antes de concluir -- o except Exception do proprio arquivo nunca roda nesse caso (a plataforma encerra o processo, nao uma excecao Python), entao o documento nunca ganha expira_em e nunca fica elegivel a TTL. Ao inicio desta execucao, mcp__github__list_pull_requests (estado aberto) devolveu vazio -- SEM CONTAR uma colisao real com uma sessao CONCORRENTE (ver decisao p04-sub10-colisao-com-sessao-concorrente abaixo), que so apareceu depois, no meio da propria confirmacao do merge da PR #361."
-estado: pronto_para_revisao
+estado: validado
 inicio: "2026-09-27T14:16:38Z"
 fim: "2026-09-27T15:09:30Z"
 arquivos_alterados:
@@ -371,7 +371,7 @@ evidencias:
   - "2 rodadas de revisao adversarial independentes (Agent, general-purpose, sem contexto da implementacao alem do diff e do objetivo): rodada 1 achou 1 problema real (agora sem timezone, ver decisao p04-sub10-rodada1-agora-sem-timezone-nao-era-fail-closed); rodada 2 (sobre essa correcao) NAO achou nenhum bug real, so um gap de cobertura ja fechado (ver decisao p04-sub10-rodada2-gap-de-cobertura-nao-bug). Criterio de parada atingido -- 2 rodadas ao todo."
   - "Confirmacao do merge da PR #361 (passo 6, 1a fatia -- adaptador puro): sha f840d0f8a47bb58cab7dfadb9b5a763442237bf9, squash, mcp__github__merge_pull_request desta execucao. Thread do Codex (comment_id=4115165576) resolvido explicitamente antes do merge (mcp__github__resolve_review_thread)."
   - "Colisao com sessao concorrente (PR #362, ver decisao p04-sub10-colisao-com-sessao-concorrente): comentario postado explicando o CI vermelho pre-existente (https://github.com/andre-martiini/Hermes/pull/362#issuecomment-5856849333), PR mesclada por esta execucao (sha a3ef7870fddf6fa2ebbaa07e5ab669d6a655fc55, squash)."
-  - "PR desta sub-entrega (mcp_jobs sweep de jobs travados) ainda NAO aberta no momento em que este bloco foi escrito -- sera aberta, aguardada (janela de comentarios de bot) e mesclada na sequencia desta mesma execucao; ver bloco de confirmacao de merge que devera seguir este, se esta execucao concluir o ciclo completo."
+  - "PR #363 (mcp_jobs sweep de jobs travados) aberta e mesclada nesta mesma execucao: janela de espera observada (~8 min), Codex revisou o commit final (4e48ca3) e nao achou nada, CI vermelho pela mesma causa pre-existente e nao relacionada (test_teto_mensal, confirmado via job log do CI -- 3038/3038 relevantes) documentada em comentario na PR (https://github.com/andre-martiini/Hermes/pull/363#issuecomment-5857117079) antes do merge. MESCLADA por esta execucao (squash, mcp__github__merge_pull_request, sha 571b9010e82ed0c1e66518a7f2cf0f4acec870ae)."
 migracao:
   dry_run: null
   executada: false
