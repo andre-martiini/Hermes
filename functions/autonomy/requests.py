@@ -61,6 +61,21 @@ class RequestStatus(str, Enum):
     ERRO_LEGADO = "erro"
 
 
+#: Marca de versão do protocolo -- pedidos com `schema_version` ausente (ou
+#: menor que este valor) são o formato legado de `agent_requests.py` (sem
+#: lease, sem geração; transições concluir/erro diretas, sem passar por
+#: `RESERVADO`). Pedidos com `schema_version` >= `SCHEMA_VERSION_ATUAL` são o
+#: protocolo novo desta seção e exigem lease/geração para produzir qualquer
+#: efeito enquanto não terminais -- passo 5 do pacote P04 ("Preservar
+#: consultar/concluir legados. Pedidos schema_version novo exigem lease;
+#: executor legado não pode concluir um pedido reservado por outro."):
+#: `agent_requests.concluir` importa esta constante para recusar produzir
+#: efeito sobre um pedido já migrado para o protocolo novo enquanto ele não
+#: for terminal -- ver a docstring de `agent_requests.concluir` para os
+#: detalhes de quando o bloqueio se aplica.
+SCHEMA_VERSION_ATUAL = 2
+
+
 #: Estados finais: nenhuma transição de saída (seção 4.4: "concluido e erro
 #: são terminais (não regridem nem se sobrescrevem)" -- generalizado aqui
 #: para os demais terminais novos do pedido).

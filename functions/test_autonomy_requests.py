@@ -14,6 +14,7 @@ from autonomy.requests import (
     BACKOFF_BASE_SEGUNDOS,
     DEFAULT_LEASE_SEGUNDOS,
     ESTADOS_TERMINAIS,
+    SCHEMA_VERSION_ATUAL,
     Lease,
     RequestStatus,
     calcular_backoff_segundos,
@@ -24,6 +25,16 @@ from autonomy.requests import (
     transicoes_permitidas,
     validar_transicao,
 )
+
+
+class TestSchemaVersionAtual(unittest.TestCase):
+    """P04 sub-entrega 8/N (passo 5 do pacote): a constante que
+    `agent_requests.concluir` usa para reconhecer um pedido já migrado para
+    o protocolo novo -- ver test_agent_requests.TestConcluirProtocoloNovo."""
+
+    def test_e_inteiro_positivo(self):
+        self.assertIsInstance(SCHEMA_VERSION_ATUAL, int)
+        self.assertGreater(SCHEMA_VERSION_ATUAL, 0)
 
 
 class TestTransicoesPermitidas(unittest.TestCase):

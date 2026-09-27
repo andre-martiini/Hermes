@@ -3,12 +3,25 @@
 Enfileira tarefas autônomas (que não precisam de decisão prévia do dono)
 para serem executadas pela próxima sessão agendada do Claude (ex.: consolidação de áudios).
 Mantém estrita separação entre lógica pura e I/O com Firestore.
+
+P04 sub-entrega 8/N (passo 5 do pacote, "Preservar consultar/concluir
+legados. Pedidos schema_version novo exigem lease; executor legado não pode
+concluir um pedido reservado por outro."): `concluir` importa
+`autonomy.requests.SCHEMA_VERSION_ATUAL` para reconhecer um pedido já
+migrado para o protocolo novo e recusar produzir efeito sobre ele enquanto
+não for terminal -- ver a docstring de `concluir` para os detalhes. Nenhum
+pedido em produção tem `schema_version` hoje (a migração é o passo 9 do
+pacote, ainda não feita) -- esta sub-entrega é uma guarda preventiva para
+quando pedidos novos (passo 6, unificação do ciclo de jobs MCP) começarem a
+existir, não uma mudança de comportamento observável para os dados atuais.
 """
 
 from __future__ import annotations
 
 import datetime
 from firebase_admin import firestore
+
+from autonomy.requests import SCHEMA_VERSION_ATUAL
 
 COLLECTION = "agent_requests"
 
@@ -65,6 +78,33 @@ def _to_iso(dt: object) -> str | None:
     if hasattr(dt, "isoformat"):
         return dt.isoformat()
     return str(dt)
+
+
+def _protocolo_novo_ativo(data: dict) -> bool:
+    """`True` quando `data` (documento cru do Firestore) já foi migrado para
+    o protocolo novo do P04 (`schema_version` presente e >= `SCHEMA_VERSION_ATUAL`)
+    -- ver a constante em `autonomy.requests` e a docstring de `concluir`.
+
+    Ausência do campo (todo pedido legado hoje) devolve `False`. Um valor
+    malformado (string não numérica, lista, etc. -- nunca deveria acontecer
+    com escrita própria, mas este campo pode ter vindo de uma origem externa)
+    também devolve `False` em vez de levantar: falha fechada NO SENTIDO de
+    preservar o comportamento legado quando a evidência de protocolo novo é
+    inconclusiva, não de bloquear por precaução -- o inverso do fencing de
+    lease (`autonomy.requests.lease_pertence_ao_apresentante`), que falha
+    fechado recusando quando a evidência de identidade é inconclusiva. Aqui
+    quem decide "é protocolo novo" é sempre um campo gravado pelo próprio
+    servidor (nunca apresentado por um consumidor não confiável), então um
+    valor malformado é sinal de corrupção de dados, não de tentativa de
+    burlar o fencing -- não há motivo para tratar isso como mais um caso de
+    entrada hostil."""
+    valor = data.get("schema_version")
+    if valor is None:
+        return False
+    try:
+        return int(valor) >= SCHEMA_VERSION_ATUAL
+    except (TypeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +271,35 @@ def concluir(
     primeira escrever, sobrescreveria silenciosamente o resultado/erro já
     gravado. Sem suporte a transação real, recusa em vez de arriscar essa
     escrita desprotegida.
+
+    P04 sub-entrega 8/N (passo 5 do pacote, seção 4 do plano de autonomia):
+    um pedido já migrado para o protocolo novo (`_protocolo_novo_ativo`,
+    `schema_version` >= `autonomy.requests.SCHEMA_VERSION_ATUAL`) que ainda
+    não é terminal (`status_atual not in STATUS_TERMINAIS`, o conjunto
+    LEGADO -- ver detalhe abaixo) recusa esta chamada com status
+    `'protocolo_novo_exige_lease'`, sem escrever nada: este caminho legado
+    não recebe (nem pode validar) lease_token/generation, então nunca pode
+    provar que é o executor que detém a reserva atual -- use
+    `autonomy.execution.registrar_resultado_observado` (com o lease/geração
+    corretos) para concluir um pedido nesse protocolo. Isto cobre tanto "sem
+    reserva nenhuma ainda" quanto "reservado por outro executor" com a MESMA
+    recusa -- nenhum dos dois casos tem uma lease legítima para apresentar
+    aqui, e o plano exige lease para qualquer efeito sobre estes pedidos,
+    não só quando uma reserva concorrente está ativa no momento exato da
+    chamada.
+
+    Deliberadamente NÃO bloqueia quando `status_atual` já é um terminal
+    LEGADO (`STATUS_TERMINAIS` = {concluido, erro} -- que inclui o valor
+    "concluido" também usado pelo protocolo novo para o mesmo desfecho):
+    nesse caso a chamada segue para `validar_transicao`, que já devolve
+    'already_decided' sem tocar o documento, o mesmo no-op idempotente que
+    já valia antes desta sub-entrega para qualquer pedido terminal -- não há
+    risco de corromper uma reserva ativa (não há mais reserva ativa alguma
+    num pedido terminal) nem de mascarar uma leitura inofensiva. Um pedido
+    do protocolo novo em outro estado terminal (`falha_final`/`cancelado`,
+    que este módulo legado não reconhece como terminal) continua caindo no
+    bloqueio acima -- correto, e mais informativo que o 'status inválido'
+    genérico que essa combinação produziria sem esta sub-entrega.
     """
     request_id = str(request_id or "").strip()
     if not request_id:
@@ -263,6 +332,20 @@ def concluir(
 
             data = snap.to_dict() or {}
             status_atual = data.get("status")
+
+            if status_atual not in STATUS_TERMINAIS and _protocolo_novo_ativo(data):
+                return {
+                    "status": "protocolo_novo_exige_lease",
+                    "estado_atual": status_atual,
+                    "erro": (
+                        f"Pedido '{request_id}' usa o protocolo novo "
+                        f"(schema_version >= {SCHEMA_VERSION_ATUAL}) -- passo 5 do "
+                        "pacote P04 exige lease/geração para produzir efeito "
+                        "enquanto o pedido não é terminal. Use "
+                        "autonomy.execution.registrar_resultado_observado em vez "
+                        "de concluir_pedido_agente legado."
+                    ),
+                }
 
             valido, motivo = validar_transicao(status_atual)
             if not valido:
