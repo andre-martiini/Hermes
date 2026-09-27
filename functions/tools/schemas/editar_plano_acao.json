@@ -1,6 +1,6 @@
 {
   "name": "editar_plano_acao",
-  "description": "Edita etapas do plano de ação de uma tarefa existente. Por padrão (modo='parcial') SÓ as etapas enviadas em novo_plano mudam: as que você não mandar ficam intactas, com id, campos e posição. Etapa com 'id' existente é atualizada (campos omitidos preservam o valor atual; para APAGAR data_prevista ou aguardando_de, envie null); etapa sem 'id' só atualiza uma existente se o texto for IGUAL (ignorando acento, maiúsculas e espaços) e ela não estiver feita; senão entra no fim do plano como nova. Reescrever o texto de uma etapa exige o 'id' dela. Para marcar uma única etapa (feita, em andamento, aguardando terceiro) prefira editar_etapa. REMOVER exige intenção explícita: {\"id\": \"...\", \"remover\": true} na etapa, ou modo='substituir' (a lista enviada vira o plano inteiro, na ordem enviada — é o jeito de reordenar) com confirmar_remocao=true; sem a confirmação, modo='substituir' que deixaria etapas de fora é recusado sem gravar e lista as etapas que sairiam. Etapas removidas ficam em etapas_removidas na ação; reenviar o id de uma delas a restaura com o id e o histórico originais. Devolve 'OK|' seguido do que mudou: {\"alteradas\": {id: {campo: [antes, depois]}}, \"adicionadas\": [ids], \"removidas\": [ids], \"restauradas\": [ids], \"ordem_alterada\": true}, ou 'OK|Nenhuma etapa mudou'. Lista vazia é recusada, não apaga o plano.",
+  "description": "Edita etapas do plano de ação de uma tarefa existente. Por padrão (modo='parcial') SÓ as etapas enviadas em novo_plano mudam: as que você não mandar ficam intactas, com id, campos e posição. Etapa com 'id' existente é atualizada (campos omitidos preservam o valor atual; para APAGAR data_prevista ou aguardando_de, envie null); etapa sem 'id' só atualiza uma existente se o texto for IGUAL (ignorando acento, maiúsculas e espaços) e ela não estiver feita; senão entra no fim do plano como nova. Reescrever o texto de uma etapa exige o 'id' dela. Para marcar uma única etapa (feita, em andamento, aguardando terceiro) prefira editar_etapa. REMOVER exige intenção explícita: {\"id\": \"...\", \"remover\": true} na etapa (omitir a etapa NÃO a remove; remover e editar o mesmo id na mesma chamada é erro; remover de novo uma etapa já removida não faz nada e volta em ja_removidas). Para REORDENAR, use modo='substituir' com a lista inteira na nova ordem; se ela deixar etapas de fora, a chamada é recusada sem gravar e lista as etapas que sairiam (só confirmar_remocao=true as tira). Etapas removidas ficam em etapas_removidas na ação; {\"id\": \"...\", \"restaurar\": true} (ou reenviar o id com 'text') a restaura com o id e o histórico originais — um {id, estado} solto de etapa removida é recusado. Devolve 'OK|' seguido do que mudou: {\"alteradas\": {id: {campo: [antes, depois]}}, \"adicionadas\": [ids], \"removidas\": [ids], \"restauradas\": [ids], \"ordem_alterada\": true}, ou 'OK|Nenhuma etapa mudou' (nesse caso nada é gravado, nem no diário). Lista vazia é recusada, não apaga o plano.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -44,7 +44,11 @@
             },
             "remover": {
               "type": "boolean",
-              "description": "true remove esta etapa do plano (exige o 'id'). Ela fica recuperável em etapas_removidas"
+              "description": "true remove esta etapa do plano (exige o 'id'; não combine com outra edição da mesma etapa). Ela fica recuperável em etapas_removidas"
+            },
+            "restaurar": {
+              "type": "boolean",
+              "description": "true traz de volta, pelo 'id', uma etapa que está em etapas_removidas, com o histórico original"
             }
           }
         }
@@ -63,7 +67,7 @@
       },
       "confirmar_remocao": {
         "type": "boolean",
-        "description": "Com modo='substituir', true autoriza remover as etapas existentes que não vieram na lista. Sem ele a chamada é recusada e lista o que sairia"
+        "description": "Com modo='substituir', true autoriza remover as etapas existentes que não vieram na lista. Sem ele a chamada é recusada e lista o que sairia. Para remover etapas, prefira {\"id\": ..., \"remover\": true}"
       },
       "plano_acao": {
         "type": "array",

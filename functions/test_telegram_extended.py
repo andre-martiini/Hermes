@@ -2,7 +2,8 @@
 quarta fatia -- testes de handler para as classificações de
 `salvar_pop_global`, `atualizar_personalidade`, `resolver_conflito_memoria`
 (IDEMPOTENTE) e `resolver_conflito_procedimento`, `editar_plano_acao`
-(NAO_IDEMPOTENTE) em `functions/tools/inventory.py`.
+(NAO_IDEMPOTENTE) em `functions/tools/inventory.py`. `editar_plano_acao`
+passou a IDEMPOTENTE na revisão do PR #370 (edição sem efeito não grava).
 
 Nenhum dos cinco tinha teste de HANDLER dedicado antes desta sub-entrega
 (mesma classe de gap já vista em `strategy_tools.py` na sub-entrega 18/N) --
@@ -191,11 +192,10 @@ class TestResolverConflitoProcedimentoNaoIdempotente(unittest.TestCase):
         self.assertEqual(docs["proc-1"]["status"], "ativo")
 
 
-class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
-    """`editar_plano_acao` (P03 sub-entrega 19/N): `subtarefas.mesclar_plano`
-    em si converge, mas o handler acrescenta um `ArrayUnion` incondicional
-    em `acompanhamento` a cada chamada bem-sucedida -- mesmo padrão de
-    `editar_acao` (sub-entrega 16/N)."""
+class TestEditarPlanoAcaoIdempotente(unittest.TestCase):
+    """`editar_plano_acao`: era NAO_IDEMPOTENTE (P03 sub-entrega 19/N) pelo
+    `ArrayUnion` incondicional no diário. Desde a revisão do PR #370 a
+    chamada que não muda nada não grava nada, e a repetição converge."""
 
     def setUp(self):
         self.db = _MockDb()
@@ -215,7 +215,7 @@ class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
             self.db,
         )
 
-    def test_repetir_a_mesma_edicao_acrescenta_entrada_nova_no_diario_cada_vez(self):
+    def test_repetir_a_mesma_edicao_nao_grava_de_novo(self):
         r1 = self._editar()
         doc_apos_1 = dict(self.db.collection("tarefas")._docs["tarefa-1"])
         acompanhamento_1 = doc_apos_1["acompanhamento"]
@@ -232,12 +232,9 @@ class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
         self.assertTrue(r1.startswith('OK|{"adicionadas"'), r1)
         self.assertEqual(r2, "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais.")
         self.assertIsInstance(acompanhamento_1, firestore.ArrayUnion)
-        self.assertIsInstance(acompanhamento_2, firestore.ArrayUnion)
-        # Cada chamada monta o SEU PRÓPRIO ArrayUnion com uma entrada nova
-        # (nota+timestamp) -- não é o mesmo objeto reaproveitado, e não há
-        # nenhuma checagem que pule a 2ª escrita.
         self.assertEqual(len(acompanhamento_1.values), 1)
-        self.assertEqual(len(acompanhamento_2.values), 1)
+        # A 2a chamada não escreveu: o diário é o mesmo objeto da 1a.
+        self.assertIs(acompanhamento_2, acompanhamento_1)
         # O plano final (conteúdo de negócio) converge -- só o diário cresce.
         self.assertEqual(
             [item["text"] for item in doc_apos_1["plano_acao"]],

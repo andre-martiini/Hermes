@@ -119,11 +119,28 @@ class TestEditarPlanoParcial(unittest.TestCase):
                 self.assertEqual([r["id"] for r in ed.removidas], ["a"])
                 self.assertEqual(ed.removidas[0]["etapa"], atual[0])
 
-    def test_editar_por_id_etapa_marcada_para_remover_nao_a_mantem(self):
-        ed = st.editar_plano(_plano_real(), [{"id": "cc8cbccc", "estado": "feito"},
-                                             {"id": "cc8cbccc", "remover": True}])
-        self.assertNotIn("cc8cbccc", [p["id"] for p in ed.plano])
-        self.assertEqual(ed.removidas[0]["etapa"], _plano_real()[2])
+    def test_remover_e_editar_o_mesmo_id_na_mesma_chamada_e_erro(self):
+        for lista in ([{"id": "cc8cbccc", "estado": "feito"}, {"id": "cc8cbccc", "remover": True}],
+                      [{"id": "cc8cbccc", "remover": True}, {"id": "cc8cbccc", "estado": "feito"}]):
+            with self.subTest(lista=lista), self.assertRaises(st.PlanoInvalido):
+                st.editar_plano(_plano_real(), lista)
+
+    def test_duas_remocoes_por_texto_igual_tiram_duas_etapas(self):
+        atual = [{"id": "a", "text": "Ligar"}, {"id": "b", "text": "ligar "}, {"id": "c", "text": "Outra"}]
+        ed = st.editar_plano(atual, [{"text": "Ligar", "remover": True}, {"text": "LIGAR", "remover": True}])
+        self.assertEqual([p["id"] for p in ed.plano], ["c"])
+        self.assertEqual([r["id"] for r in ed.removidas], ["a", "b"])
+
+    def test_remocao_por_texto_continua_exigindo_texto_exato(self):
+        with self.assertRaises(st.PlanoInvalido):
+            st.editar_plano([{"id": "a", "text": "Ligar para o setor"}], [{"text": "Ligar pro setor", "remover": True}])
+
+    def test_remover_id_que_ja_esta_na_lixeira_e_repeticao_sem_efeito(self):
+        lixeira = [{"id": "zz", "etapa": {"id": "zz", "text": "Velha"}, "posicao": 0, "removida_em": "x"}]
+        ed = st.editar_plano(_plano_real(), [{"id": "zz", "remover": True}], etapas_removidas=lixeira)
+        self.assertEqual(ed.plano, _plano_real())
+        self.assertEqual(ed.removidas, [])
+        self.assertEqual(ed.ja_removidas, ["zz"])
 
     def test_remover_explicito_tira_a_etapa_e_guarda_ela_inteira(self):
         atual = _plano_real()
@@ -204,9 +221,9 @@ class TestLixeira(unittest.TestCase):
         self.assertEqual(lixeira[0]["removida_em"], "2026-09-27T12:00:00+00:00")
         self.assertEqual(lixeira[0]["etapa"]["degradation_count"], 4)
 
-    def test_reenviar_o_id_restaura_com_id_e_campos_originais_na_posicao(self):
+    def test_restaurar_true_restaura_com_id_e_campos_originais_na_posicao(self):
         plano, lixeira = self._remover()
-        ed = st.editar_plano(plano, [{"id": "0f176a57"}], etapas_removidas=lixeira)
+        ed = st.editar_plano(plano, [{"id": "0f176a57", "restaurar": True}], etapas_removidas=lixeira)
         self.assertEqual([p["id"] for p in ed.plano],
                          ["fa860a98", "0f176a57", "cc8cbccc", "33a5d2d2", "f9c2d7f4"])
         restaurada = ed.plano[1]
@@ -214,11 +231,28 @@ class TestLixeira(unittest.TestCase):
         self.assertEqual(restaurada["aguardando_de"], "Compras")
         self.assertEqual(restaurada["historico"], [{"em": "2026-09-20", "de": "pendente"}])
         self.assertEqual(ed.restauradas, ["0f176a57"])
+        self.assertNotIn("restaurar", restaurada)
         self.assertEqual(st.atualizar_lixeira(lixeira, ed, "x"), [])
+
+    def test_id_da_lixeira_sem_restaurar_nem_texto_e_erro(self):
+        plano, lixeira = self._remover()
+        with self.assertRaisesRegex(st.PlanoInvalido, "0f176a57 está na lixeira"):
+            st.editar_plano(plano, [{"id": "0f176a57", "estado": "feito"}], etapas_removidas=lixeira)
+
+    def test_id_da_lixeira_com_texto_restaura(self):
+        plano, lixeira = self._remover()
+        ed = st.editar_plano(plano, [{"id": "0f176a57", "text": "Consultar fornecedores"}],
+                             etapas_removidas=lixeira)
+        self.assertEqual(ed.restauradas, ["0f176a57"])
+
+    def test_restaurar_id_fora_da_lixeira_e_erro(self):
+        with self.assertRaises(st.PlanoInvalido):
+            st.editar_plano(_plano_real(), [{"id": "naoexiste", "restaurar": True}])
 
     def test_restaurar_aplica_os_campos_enviados(self):
         plano, lixeira = self._remover()
-        ed = st.editar_plano(plano, [{"id": "0f176a57", "estado": "feito"}], etapas_removidas=lixeira)
+        ed = st.editar_plano(plano, [{"id": "0f176a57", "restaurar": True, "estado": "feito"}],
+                             etapas_removidas=lixeira)
         self.assertEqual(ed.plano[1]["estado"], "feito")
         self.assertEqual(ed.plano[1]["degradation_count"], 4)
 
@@ -290,6 +324,8 @@ class TestHandlerEditarPlanoAcao(_BaseHandler):
             self.assertIn(texto, r)
         self.assertEqual(self._plano(), _plano_real())
         self.assertNotIn("acompanhamento", self._doc())
+        self.assertNotIn("confirmar_remocao=true", r)
+        self.assertIn('"remover": true', r)
 
     def test_substituir_com_confirmacao_remove(self):
         r = self._editar(modo="substituir", confirmar_remocao=True,
@@ -362,7 +398,9 @@ class TestHandlerEditarEtapa(_BaseHandler):
     def test_etapa_removida_orienta_a_restaurar(self):
         self._editar(novo_plano=[{"id": "0f176a57", "remover": True}])
         r = self._etapa(etapa_id="0f176a57", estado="feito")
-        self.assertTrue(r.startswith("ERRO|A etapa '0f176a57' foi removida"), r)
+        self.assertTrue(r.startswith('ERRO|Etapa 0f176a57 está na lixeira; para restaurar envie '
+                                     '{"id": "0f176a57", "restaurar": true}'), r)
+        self.assertNotIn("0f176a57", [p["id"] for p in self._plano()])
 
     def test_estado_invalido_e_recusado(self):
         r = self._etapa(etapa_id="cc8cbccc", estado="concluida")
@@ -413,37 +451,86 @@ class TestPlanoAtualLegado(unittest.TestCase):
 
 
 class TestCopilotoPlanoCompleto(_BaseHandler):
-    """`inferir_plano_completo` (copiloto web): o prompt dele manda o plano inteiro."""
+    """`copiloto=True` (copiloto web): o prompt dele manda o plano inteiro."""
 
     def _copiloto(self, lista, **extra):
         return telegram_extended.editar_plano_da_tarefa(
             self.db, {"task_id": self.TASK, "novo_plano": lista, "justificativa_diario": "t", **extra},
-            origem="Copiloto Gaspar", inferir_plano_completo=True)
+            origem="Copiloto Gaspar", copiloto=True)
 
-    def test_lista_que_cobre_tudo_reordena(self):
+    def test_reenvio_que_cobre_todas_as_etapas_reordena(self):
         ordem = ["f9c2d7f4", "33a5d2d2", "cc8cbccc", "0f176a57", "fa860a98"]
         r = self._copiloto([{"id": e} for e in ordem])
         self.assertEqual(r, 'OK|{"ordem_alterada": true}')
         self.assertEqual([p["id"] for p in self._plano()], ordem)
 
-    def test_plano_completo_sem_uma_etapa_e_recusado_sem_gravar(self):
-        lista = [{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"},
-                 {"text": "Etapa nova no lugar da última"}]
-        r = self._copiloto(lista)
-        self.assertTrue(r.startswith("ERRO|Nada foi gravado: a lista parece o plano completo"), r)
-        self.assertIn("f9c2d7f4", r)
-        self.assertEqual(self._plano(), _plano_real())
-
-    def test_plano_completo_com_confirmacao_explicita_remove(self):
+    def test_lista_longa_com_etapa_nova_segue_parcial_e_nao_e_recusada(self):
         lista = [{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"},
                  {"text": "Etapa nova"}]
-        r = self._copiloto(lista, modo="substituir", confirmar_remocao=True)
+        r = self._copiloto(lista)
+        self.assertEqual(json.loads(r[3:])["adicionadas"], [self._plano()[-1]["id"]])
+        self.assertEqual([p["id"] for p in self._plano()][:5],
+                         ["fa860a98", "0f176a57", "cc8cbccc", "33a5d2d2", "f9c2d7f4"])
+
+    def test_omitir_etapa_sem_mais_nada_devolve_aviso_e_nao_grava(self):
+        r = self._copiloto([{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"}])
+        self.assertTrue(r.startswith("AVISO|Nada mudou"), r)
+        self.assertIn('"remover": true', r)
+        self.assertNotIn("confirmar_remocao", r)
+        self.assertEqual(self._plano(), _plano_real())
+        self.assertNotIn("acompanhamento", self._doc())
+
+    def test_remover_explicito_funciona_no_copiloto(self):
+        r = self._copiloto([{"id": "f9c2d7f4", "remover": True}])
+        self.assertEqual(json.loads(r[3:])["removidas"], ["f9c2d7f4"])
+
+    def test_substituir_com_confirmacao_explicita_remove(self):
+        r = self._copiloto([{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"}],
+                           modo="substituir", confirmar_remocao=True)
         self.assertEqual(json.loads(r[3:])["removidas"], ["f9c2d7f4"])
 
     def test_lista_curta_continua_parcial(self):
         r = self._copiloto([{"id": "fa860a98", "estado": "feito"}])
         self.assertTrue(r.startswith('OK|{"alteradas"'), r)
         self.assertEqual(len(self._plano()), 5)
+
+
+class TestIdempotencia(_BaseHandler):
+
+    def test_chamada_sem_mudanca_nao_grava_nem_diario(self):
+        r = self._editar(novo_plano=[{"id": "fa860a98", "estado": "pendente"}])
+        self.assertEqual(r, "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais.")
+        self.assertNotIn("acompanhamento", self._doc())
+        self.assertNotIn("data_atualizacao", self._doc())
+
+    def test_remover_duas_vezes_a_segunda_e_ja_removidas_sem_escrita(self):
+        self._editar(novo_plano=[{"id": "f9c2d7f4", "remover": True}])
+        diario = self._doc()["acompanhamento"]
+        r = self._editar(novo_plano=[{"id": "f9c2d7f4", "remover": True}])
+        self.assertEqual(r, 'OK|{"ja_removidas": ["f9c2d7f4"]}')
+        self.assertIs(self._doc()["acompanhamento"], diario)
+        self.assertEqual(len(self._doc()["etapas_removidas"]), 1)
+
+
+class TestIdsDuplicadosLegados(unittest.TestCase):
+
+    def test_duplicata_ganha_id_novo_e_primeira_mantem(self):
+        atual = [{"id": "d", "text": "Primeira"}, {"id": "d", "text": "Segunda"}]
+        ed = st.editar_plano(atual, [{"id": "d", "estado": "feito"}])
+        self.assertEqual(ed.plano[0]["id"], "d")
+        self.assertEqual(ed.plano[0]["estado"], "feito")
+        self.assertNotEqual(ed.plano[1]["id"], "d")
+        self.assertEqual(ed.plano[1]["text"], "Segunda")
+
+    def test_remover_as_duas_duplicatas_nao_perde_nenhuma_da_lixeira(self):
+        atual = [{"id": "d", "text": "Primeira"}, {"id": "d", "text": "Segunda"}]
+        ed = st.editar_plano(atual, [{"id": "d"}], modo="substituir")
+        lixeira = st.atualizar_lixeira([], ed, "agora")
+        self.assertEqual([e["etapa"]["text"] for e in lixeira], ["Segunda"])
+        ed2 = st.editar_plano(ed.plano, [{"id": "d", "remover": True}], etapas_removidas=lixeira)
+        lixeira2 = st.atualizar_lixeira(lixeira, ed2, "depois")
+        self.assertEqual(sorted(e["etapa"]["text"] for e in lixeira2), ["Primeira", "Segunda"])
+        self.assertEqual(len({e["id"] for e in lixeira2}), 2)
 
 
 class _TxDb(_MockDb):

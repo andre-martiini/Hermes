@@ -331,14 +331,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     ),
     "editar_plano_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
-        "salvaguardas pré-escrita (plano degenerado, plano esvaziado) bloqueiam gravações claramente erradas",
-        idempotencia=_I.NAO_IDEMPOTENTE,
-        nota="handler real é `tools/telegram_extended.py::execute`, ramo 'editar_plano_acao'. "
-        "`subtarefas.mesclar_plano` em si converge (mesclar o mesmo `novo_plano` produz o mesmo "
-        "`plano_final`), mas o handler faz `task_ref.update` com `firestore.ArrayUnion([{data, nota}])` em "
-        "`acompanhamento`, INCONDICIONALMENTE, em toda chamada bem-sucedida -- mesmo padrão de append "
-        "incondicional já aceito em `editar_acao` (sub-entrega 16/N) e `pausar_conversa`/`registrar_execucao_"
-        "investimento` (sub-entrega 17/N). Não idempotente (P03 sub-entrega 19/N). "
+        "salvaguardas pré-escrita (plano degenerado, plano esvaziado, remoção sem pedido) bloqueiam "
+        "gravações claramente erradas",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::editar_plano_da_tarefa`. Era NAO_IDEMPOTENTE "
+        "(P03 sub-entrega 19/N) porque o handler fazia `ArrayUnion` no diário em TODA chamada. Desde a "
+        "revisão do PR #370 (27/09/2026) chamada cuja edição não muda nada não grava nada -- nem diário --, "
+        "e a repetição converge: etapa nova sem id casa, na 2a vez, com a que a 1a criou (texto igual); id "
+        "desconhecido vira etapa com esse id e na 2a vez casa por id; `remover` repetido volta em "
+        "`ja_removidas` sem escrita; `restaurar` repetido encontra a etapa já no plano. IDEMPOTENTE. "
         "Desde 27/09/2026 o padrão é `modo='parcial'` (etapa não citada fica); remover exige "
         "`remover: true` ou `modo='substituir'` + `confirmar_remocao`, e a etapa removida vai para "
         "`etapas_removidas` na própria tarefa, de onde volta com o id original -- por isso REVERSIVEL.",
@@ -346,11 +347,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "editar_etapa": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "etapa_id precisa existir no plano; estado fora do enum é recusado antes de gravar",
-        idempotencia=_I.NAO_IDEMPOTENTE,
+        idempotencia=_I.IDEMPOTENTE,
         nota="handler real é `tools/telegram_extended.py::editar_etapa_da_tarefa`, que delega a "
         "`editar_plano_da_tarefa` (o mesmo fluxo de `editar_plano_acao`) no modo parcial com um item só -- "
-        "não tem como remover etapa. Não idempotente pelo mesmo motivo de `editar_plano_acao`: cada "
-        "chamada bem-sucedida faz `ArrayUnion` de uma entrada nova em `acompanhamento`.",
+        "não tem como remover nem restaurar etapa. Idempotente: repetir a mesma chamada encontra os valores "
+        "já gravados, a edição não muda nada e nada é escrito (nem diário).",
     ),
     "preparar_edicao_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA,

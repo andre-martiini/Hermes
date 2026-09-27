@@ -10158,17 +10158,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "data_prevista": "YYYY-MM-DD" — dia previsto para esta etapa; sem ela, herda a data da ação
                 "estado": "pendente" | "em_andamento" | "aguardando_terceiro" | "feito"
                 "aguardando_de": de quem se espera, quando o estado for "aguardando_terceiro"
-                "remover": true — tira a etapa do plano (exige o "id")
+                "remover": true — tira a etapa do plano (exige o "id"; não combine com outra edição da mesma etapa)
+                "restaurar": true — traz de volta, com o histórico original, uma etapa removida (pelo "id")
               Omitir um campo preserva o valor que a etapa já tinha; não o apaga.
               Para apagar data_prevista ou aguardando_de, envie null (ou "").
-              Reenviar o "id" de uma etapa removida a restaura com o histórico original.
             - justificativa_diario: Texto gerado pela IA explicando o motivo da alteração (será gravado no diário da tarefa).
-            - modo: "parcial" (padrão) ou "substituir". Use "substituir" só para reordenar ou
-              reestruturar o plano inteiro: a lista enviada vira o plano completo, na ordem enviada.
+            - modo: "parcial" (padrão) ou "substituir". Reenviar TODAS as etapas atuais (com os ids,
+              sem etapa nova) já é tratado como reordenação; "substituir" explícito só é preciso
+              para reestruturar o plano inteiro.
             - confirmar_remocao: no modo "substituir", etapas existentes que não vierem na lista só
-              são removidas com confirmar_remocao=true — passe true apenas quando o usuário tiver
-              confirmado o draft que mostra essas remoções.
-            Retorna 'OK|{o que mudou por etapa}' ou 'ERRO|{detalhe}'.
+              são removidas com confirmar_remocao=true. Prefira remover com "remover": true.
+            Retorna 'OK|{o que mudou por etapa}', 'AVISO|{nada mudou}' ou 'ERRO|{detalhe}'.
             """
             try:
                 from tools.telegram_extended import editar_plano_da_tarefa
@@ -10176,10 +10176,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # Mesmo fluxo do canal MCP/Telegram. Antes havia uma cópia aqui,
                 # e cada guarda nova (plano degenerado, esvaziamento, remoção sem
                 # pedido) precisava ser lembrada nos dois lugares.
-                # `inferir_plano_completo`: este prompt sempre mandou o plano
-                # aprovado INTEIRO. Lista que cobre todas as etapas vira
-                # `substituir` (reordenar funciona); lista do tamanho do plano
-                # que deixa etapas de fora é recusada, para o copiloto nunca
+                # `copiloto=True`: este prompt sempre mandou o plano aprovado
+                # INTEIRO. Reenvio que cobre todas as etapas (só ids conhecidos)
+                # vira `substituir`, e reordenar funciona; o resto segue parcial.
+                # Se nada mudar a resposta é `AVISO|`, para o copiloto nunca
                 # dizer "plano atualizado" sobre uma remoção que não houve.
                 resultado = editar_plano_da_tarefa(db, {
                     "task_id": task_id,
@@ -10187,7 +10187,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "justificativa_diario": justificativa_diario,
                     "modo": modo,
                     "confirmar_remocao": confirmar_remocao,
-                }, origem="Copiloto Gaspar", inferir_plano_completo=True)
+                }, origem="Copiloto Gaspar", copiloto=True)
                 print(f"[Copiloto] editar_plano_acao {task_id} (modo={modo}): {str(resultado)[:200]}")
                 return resultado
 
@@ -10914,13 +10914,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "ETAPA 2 — CONFIRMAÇÃO:\n"
             "Só chame editar_plano_acao após confirmação explícita do usuário ('sim', 'confirma', 'pode atualizar', etc.).\n"
             "Ao montar novo_plano, inclua o campo 'id' para passos existentes (preserva status de conclusão e histórico; sem id, só texto idêntico reaproveita a etapa).\n"
-            "Por padrão (modo parcial) envie SÓ os passos que mudam: os não enviados ficam intactos. Para remover um passo,\n"
-            "envie {\"id\": \"...\", \"remover\": true}. Para reordenar ou reestruturar o plano inteiro, envie a lista completa\n"
-            "com modo=\"substituir\" e, se o draft confirmado remove passos, confirmar_remocao=true.\n"
+            "Por padrão (modo parcial) envie SÓ os passos que mudam: os não enviados ficam intactos.\n"
+            "Para REMOVER um passo, envie {\"id\": \"...\", \"remover\": true} — omitir o passo NÃO o remove.\n"
+            "Para REORDENAR, envie todos os passos atuais, com os ids, na nova ordem.\n"
             "Omita o 'id' apenas para passos genuinamente novos.\n\n"
             "ETAPA 3 — COMMIT E CONFIRMAÇÃO:\n"
-            "Se editar_plano_acao retornar algo começando com 'OK', responda:\n"
+            "Só diga que o plano foi atualizado se editar_plano_acao retornar 'OK|' E o JSON listar a mudança\n"
+            "que você pretendia (em alteradas, adicionadas, removidas, restauradas ou ordem_alterada). Então responda:\n"
             "  ✅ Plano de ação atualizado com sucesso.\n"
+            "Se retornar 'AVISO|{detalhe}', ou um 'OK|' que não lista a mudança pretendida, NÃO diga que atualizou:\n"
+            "  ⚠️ O plano não mudou: {detalhe} — e corrija a chamada (ex.: remover com \"remover\": true).\n"
             "Se retornar 'ERRO|{detalhe}', responda:\n"
             "  ⚠️ Erro ao atualizar plano: {detalhe}\n\n"
             "PARÂMETRO justificativa_diario:\n"
