@@ -10151,8 +10151,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - novo_plano: lista de etapas a alterar, ex.: [{"id": "xyz", "estado": "feito"}, {"text": "Passo novo"}].
               Por padrão (modo="parcial") SÓ as etapas enviadas mudam: as que você não mandar
               ficam intactas, na posição em que estavam. Etapa com "id" existente é atualizada;
-              sem "id", o texto é comparado com as existentes (≥85% reaproveita a etapa) e, se
-              não casar, a etapa entra no fim do plano.
+              sem "id", só reaproveita uma existente com texto idêntico (ignorando acento e
+              maiúsculas) que não esteja feita; senão a etapa entra no fim do plano como nova.
               Cada etapa aceita, todos opcionais:
                 "text": novo texto
                 "data_prevista": "YYYY-MM-DD" — dia previsto para esta etapa; sem ela, herda a data da ação
@@ -10176,13 +10176,18 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # Mesmo fluxo do canal MCP/Telegram. Antes havia uma cópia aqui,
                 # e cada guarda nova (plano degenerado, esvaziamento, remoção sem
                 # pedido) precisava ser lembrada nos dois lugares.
+                # `inferir_plano_completo`: este prompt sempre mandou o plano
+                # aprovado INTEIRO. Lista que cobre todas as etapas vira
+                # `substituir` (reordenar funciona); lista do tamanho do plano
+                # que deixa etapas de fora é recusada, para o copiloto nunca
+                # dizer "plano atualizado" sobre uma remoção que não houve.
                 resultado = editar_plano_da_tarefa(db, {
                     "task_id": task_id,
                     "novo_plano": novo_plano,
                     "justificativa_diario": justificativa_diario,
                     "modo": modo,
                     "confirmar_remocao": confirmar_remocao,
-                }, origem="Copiloto Gaspar")
+                }, origem="Copiloto Gaspar", inferir_plano_completo=True)
                 print(f"[Copiloto] editar_plano_acao {task_id} (modo={modo}): {str(resultado)[:200]}")
                 return resultado
 
@@ -10908,7 +10913,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  Confirma a atualização do plano?\n\n"
             "ETAPA 2 — CONFIRMAÇÃO:\n"
             "Só chame editar_plano_acao após confirmação explícita do usuário ('sim', 'confirma', 'pode atualizar', etc.).\n"
-            "Ao montar novo_plano, inclua o campo 'id' para passos existentes (preserva status de conclusão via fuzzy match no backend).\n"
+            "Ao montar novo_plano, inclua o campo 'id' para passos existentes (preserva status de conclusão e histórico; sem id, só texto idêntico reaproveita a etapa).\n"
             "Por padrão (modo parcial) envie SÓ os passos que mudam: os não enviados ficam intactos. Para remover um passo,\n"
             "envie {\"id\": \"...\", \"remover\": true}. Para reordenar ou reestruturar o plano inteiro, envie a lista completa\n"
             "com modo=\"substituir\" e, se o draft confirmado remove passos, confirmar_remocao=true.\n"

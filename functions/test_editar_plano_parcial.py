@@ -62,12 +62,68 @@ class TestEditarPlanoParcial(unittest.TestCase):
         self.assertEqual(len(ed.plano), 6)
         self.assertEqual(ed.plano[-1]["text"], "Publicar o aviso de dispensa")
 
-    def test_texto_parecido_sem_id_atualiza_em_vez_de_duplicar(self):
-        ed = st.editar_plano(_plano_real(), [{"text": "Consultar fornecedore", "estado": "em_andamento"}])
+    def test_texto_igual_normalizado_sem_id_atualiza_em_vez_de_duplicar(self):
+        ed = st.editar_plano(_plano_real(), [{"text": "  consultar   FORNECEDORES ",
+                                              "estado": "em_andamento"}])
         self.assertEqual(len(ed.plano), 5)
         self.assertEqual(ed.plano[1]["id"], "0f176a57")
         self.assertEqual(ed.plano[1]["estado"], "em_andamento")
         self.assertEqual(ed.plano[1]["degradation_count"], 4)
+
+    def test_acento_nao_impede_o_casamento(self):
+        ed = st.editar_plano(_plano_real(), [{"text": "Montar mapa de precos", "estado": "feito"}])
+        self.assertEqual(len(ed.plano), 5)
+        self.assertEqual(ed.plano[2]["id"], "cc8cbccc")
+
+    def test_texto_so_parecido_vira_etapa_nova_e_nao_sobrescreve(self):
+        """Revisão do PR #370: com >=85%, "Revisar parte 2" sobrescrevia "Revisar
+        parte 1" (feita) em silêncio, sem ir para a lixeira."""
+        atual = [{"id": "a", "text": "Revisar parte 1", "completed": True, "estado": "feito"},
+                 {"id": "b", "text": "Outra", "completed": False, "estado": "pendente"}]
+        ed = st.editar_plano(atual, [{"text": "Revisar parte 2"}])
+        self.assertEqual(ed.plano[:2], atual)
+        self.assertEqual(ed.plano[2]["text"], "Revisar parte 2")
+        self.assertEqual(ed.plano[2]["estado"], "pendente")
+        self.assertNotIn(ed.plano[2]["id"], ("a", "b"))
+        self.assertEqual(ed.removidas, [])
+
+    def test_etapa_feita_nao_e_alvo_de_casamento_por_texto_no_parcial(self):
+        atual = [{"id": "a", "text": "Revisar parte 1", "completed": True, "estado": "feito"}]
+        ed = st.editar_plano(atual, [{"text": "Revisar parte 1", "estado": "pendente"}])
+        self.assertEqual(len(ed.plano), 2)
+        self.assertEqual(ed.plano[0], atual[0])
+
+    def test_id_desconhecido_com_texto_e_etapa_nova_com_esse_id(self):
+        ed = st.editar_plano(_plano_real(), [{"id": "novo123", "text": "Consultar fornecedores"}])
+        self.assertEqual(len(ed.plano), 6)
+        self.assertEqual(ed.plano[-1]["id"], "novo123")
+        self.assertEqual(ed.plano[1], _plano_real()[1])
+
+    def test_id_desconhecido_repetido_nao_gera_ids_duplicados(self):
+        ed = st.editar_plano(_plano_real(), [{"id": "x1", "text": "Uma"}, {"id": "x1", "text": "Duas"}])
+        ids = [p["id"] for p in ed.plano]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(ed.plano[-2]["id"], "x1")
+
+    def test_remover_depois_de_texto_parecido_nao_perde_nada(self):
+        """Revisão do PR #370: [{text: "Revisar parte 2"}, {id: a, remover}] mesclava o
+        texto novo em `a` e depois removia `a` — o texto novo sumia."""
+        atual = [{"id": "a", "text": "Revisar parte 1", "completed": False, "estado": "pendente"},
+                 {"id": "b", "text": "Outra", "completed": False, "estado": "pendente"}]
+        for lista in ([{"text": "Revisar parte 1"}, {"id": "a", "remover": True}],
+                      [{"text": "Revisar parte 2"}, {"id": "a", "remover": True}]):
+            with self.subTest(lista=lista):
+                ed = st.editar_plano(atual, lista)
+                self.assertEqual([p["text"] for p in ed.plano], ["Outra", lista[0]["text"]])
+                self.assertNotEqual(ed.plano[1]["id"], "a")
+                self.assertEqual([r["id"] for r in ed.removidas], ["a"])
+                self.assertEqual(ed.removidas[0]["etapa"], atual[0])
+
+    def test_editar_por_id_etapa_marcada_para_remover_nao_a_mantem(self):
+        ed = st.editar_plano(_plano_real(), [{"id": "cc8cbccc", "estado": "feito"},
+                                             {"id": "cc8cbccc", "remover": True}])
+        self.assertNotIn("cc8cbccc", [p["id"] for p in ed.plano])
+        self.assertEqual(ed.removidas[0]["etapa"], _plano_real()[2])
 
     def test_remover_explicito_tira_a_etapa_e_guarda_ela_inteira(self):
         atual = _plano_real()
@@ -320,6 +376,111 @@ class TestHandlerEditarEtapa(_BaseHandler):
         r = telegram_extended.execute("editar_etapa", {"task_id": "nao", "etapa_id": "x", "estado": "feito"},
                                       self.db)
         self.assertTrue(r.startswith("ERRO|Tarefa"), r)
+
+
+class TestPlanoAtualLegado(unittest.TestCase):
+    """O plano gravado passa por normalização antes da edição."""
+
+    def test_etapa_em_texto_puro_vira_dict_com_id_e_nao_some(self):
+        ed = st.editar_plano(["Passo antigo", {"id": "b", "text": "Outro"}],
+                             [{"id": "b", "estado": "feito"}])
+        self.assertEqual([p["text"] for p in ed.plano], ["Passo antigo", "Outro"])
+        self.assertTrue(ed.plano[0]["id"])
+        self.assertEqual(ed.base[0]["id"], ed.plano[0]["id"])
+        self.assertEqual(st.diferencas(ed.base, ed.plano),
+                         {"alteradas": {"b": {"estado": ["pendente", "feito"]}}})
+
+    def test_plano_gravado_como_uma_string_nao_vira_caracteres(self):
+        ed = st.editar_plano("Fazer a coisa inteira", [{"text": "Segundo passo"}])
+        self.assertEqual([p["text"] for p in ed.plano], ["Fazer a coisa inteira", "Segundo passo"])
+
+    def test_plano_gravado_como_json_de_lista(self):
+        ed = st.editar_plano('["Um", "Dois"]', [{"text": "Tres"}])
+        self.assertEqual([p["text"] for p in ed.plano], ["Um", "Dois", "Tres"])
+
+    def test_substituir_etapa_sem_texto_passa_pela_confirmacao_e_lixeira(self):
+        atual = [{"id": "a", "text": "A"}, {"id": "z", "nota": "sem texto"}]
+        ed = st.editar_plano(atual, [{"id": "a"}], modo="substituir")
+        self.assertEqual([r["id"] for r in ed.removidas_sem_pedido], ["z"])
+        lixeira = st.atualizar_lixeira([], ed, "agora")
+        self.assertEqual(lixeira[0]["etapa"], {"id": "z", "nota": "sem texto"})
+
+    def test_parcial_mantem_etapa_sem_texto(self):
+        atual = [{"id": "a", "text": "A"}, {"id": "z", "nota": "sem texto"}]
+        ed = st.editar_plano(atual, [{"id": "a", "estado": "feito"}])
+        self.assertEqual(ed.plano[1], {"id": "z", "nota": "sem texto"})
+        self.assertEqual(ed.removidas, [])
+
+
+class TestCopilotoPlanoCompleto(_BaseHandler):
+    """`inferir_plano_completo` (copiloto web): o prompt dele manda o plano inteiro."""
+
+    def _copiloto(self, lista, **extra):
+        return telegram_extended.editar_plano_da_tarefa(
+            self.db, {"task_id": self.TASK, "novo_plano": lista, "justificativa_diario": "t", **extra},
+            origem="Copiloto Gaspar", inferir_plano_completo=True)
+
+    def test_lista_que_cobre_tudo_reordena(self):
+        ordem = ["f9c2d7f4", "33a5d2d2", "cc8cbccc", "0f176a57", "fa860a98"]
+        r = self._copiloto([{"id": e} for e in ordem])
+        self.assertEqual(r, 'OK|{"ordem_alterada": true}')
+        self.assertEqual([p["id"] for p in self._plano()], ordem)
+
+    def test_plano_completo_sem_uma_etapa_e_recusado_sem_gravar(self):
+        lista = [{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"},
+                 {"text": "Etapa nova no lugar da última"}]
+        r = self._copiloto(lista)
+        self.assertTrue(r.startswith("ERRO|Nada foi gravado: a lista parece o plano completo"), r)
+        self.assertIn("f9c2d7f4", r)
+        self.assertEqual(self._plano(), _plano_real())
+
+    def test_plano_completo_com_confirmacao_explicita_remove(self):
+        lista = [{"id": "fa860a98"}, {"id": "0f176a57"}, {"id": "cc8cbccc"}, {"id": "33a5d2d2"},
+                 {"text": "Etapa nova"}]
+        r = self._copiloto(lista, modo="substituir", confirmar_remocao=True)
+        self.assertEqual(json.loads(r[3:])["removidas"], ["f9c2d7f4"])
+
+    def test_lista_curta_continua_parcial(self):
+        r = self._copiloto([{"id": "fa860a98", "estado": "feito"}])
+        self.assertTrue(r.startswith('OK|{"alteradas"'), r)
+        self.assertEqual(len(self._plano()), 5)
+
+
+class _TxDb(_MockDb):
+    def __init__(self):
+        super().__init__()
+        self.escritas_em_transacao = 0
+
+    def transaction(self):
+        tx = super().transaction()
+        db = self
+        original = tx.update
+
+        def update(ref, data):
+            db.escritas_em_transacao += 1
+            original(ref, data)
+        tx.update = update
+        return tx
+
+
+class TestTransacao(unittest.TestCase):
+
+    def test_escrita_passa_pela_transacao(self):
+        db = _TxDb()
+        db.collection("tarefas").document("t").set({"plano_acao": _plano_real()})
+        r = telegram_extended.execute("editar_plano_acao", {
+            "task_id": "t", "novo_plano": [{"id": "fa860a98", "estado": "feito"}]}, db)
+        self.assertTrue(r.startswith("OK|"), r)
+        self.assertEqual(db.escritas_em_transacao, 1)
+        self.assertEqual(db.collection("tarefas")._docs["t"]["plano_acao"][0]["estado"], "feito")
+
+    def test_recusa_nao_escreve_na_transacao(self):
+        db = _TxDb()
+        db.collection("tarefas").document("t").set({"plano_acao": _plano_real()})
+        r = telegram_extended.execute("editar_plano_acao", {
+            "task_id": "t", "modo": "substituir", "novo_plano": [{"id": "fa860a98"}]}, db)
+        self.assertTrue(r.startswith("ERRO|"), r)
+        self.assertEqual(db.escritas_em_transacao, 0)
 
 
 class TestEditarEtapaRegistrada(unittest.TestCase):
