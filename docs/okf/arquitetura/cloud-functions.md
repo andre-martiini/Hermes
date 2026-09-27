@@ -32,6 +32,18 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 | `vectorize_process_docs_callable` | Callable | Vetoriza documentos de uma tarefa |
 | `upload_to_drive` | Callable | Upload de arquivo para o Google Drive |
 
+### Sincronização por webhook (push do Google, ação `e7fe01f4`)
+| Função | Trigger | O que faz |
+|---|---|---|
+| `on_gmail_watch_notification` | PubSub (`gmail-push-hermes`) | Fatia 1: roda `sync_gmail_work` (Pix, boletos, vínculo e-mail-ação) quando entra e-mail novo no INBOX. Flag `system/settings.gmail_watch.enabled` |
+| `gmail_sync_safety_net` / `renovar_gmail_watch_diario` | Scheduler (4 h / 24 h) | Rede de segurança do Gmail (sempre ativa) e renovação do `users.watch()` |
+| `on_calendar_push` (`google_push_watch.py`) | HTTP request (push do Calendar) | Fatia 2: valida canal + token (`system/calendar_watch`), ignora `sync`, ignora enquanto `system/sync` está `processing`/`requested`, filtra eco do próprio push via `events.list(updatedMin)` e pede sync só de agenda (`requested_scope: 'calendar'`), com debounce de 60 s e teto de 20/h. Flag `system/settings.calendar_watch.enabled` (+ `.url`) |
+| `renovar_calendar_watch_diario` (`google_push_watch.py`) | Scheduler (24 h) | Registra/renova um `events.watch()` por agenda de `get_sync_calendar_ids` quando faltam < 2 dias; para o canal antigo |
+| `on_drive_push` (`google_push_watch.py`) | HTTP request (push do Drive) | Fatia 3: canal `files.watch()` na Pasta de Deságue; com `X-Goog-Changed: children` roda `executar_monitoramento_acervo_global` sob o lock `drive_acervo_lock` (debounce 60 s). Flag `system/settings.drive_watch.enabled` (+ `.url`) |
+| `renovar_drive_watch_periodico` (`google_push_watch.py`) | Scheduler (12 h) | Renova o canal do Drive (máx. 1 dia) quando faltam < 14 h |
+
+Ativação (Calendar/Drive): depois do deploy, gravar a URL pública de cada endpoint em `system/settings.calendar_watch.url` / `drive_watch.url`, ligar `enabled`, forçar o renovador uma vez no Cloud Scheduler e conferir `system/calendar_watch` / `system/drive_watch` (detalhes no `log.md` de 27/09/2026). Os crons `scheduled_sync` (60 min) e `monitorar_acervo_global` (30 min) seguem como rede de segurança.
+
 ### Notificações e reminders
 | Função | Trigger | O que faz |
 |---|---|---|
@@ -124,7 +136,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 | `buscar_procedimento` | Callable | Busca nós do grafo por query livre (tool do Copiloto) |
 | `crystallize_task_manual` | Callable | Cristaliza manualmente uma tarefa (uso administrativo/migração) |
 | `processar_artefato_kg` | PubSub (`hermes-artefato-kg`) | Vetoriza e indexa artefato de tarefa |
-| `monitorar_acervo_global` | Scheduler | Varre a Pasta de Deságue e indexa novos arquivos |
+| `monitorar_acervo_global` | Scheduler (30 min) | Varre a Pasta de Deságue e indexa novos arquivos (sob o lock `drive_acervo_lock`, compartilhado com `on_drive_push`) |
 | `extract_kg_rag_context` | Callable | Extrai subgrafo RAG com decaimento temporal |
 | `smart_search_kg` | Callable | Busca híbrida (lexical + semântica) no grafo |
 | `get_artefato_raw_text` | Callable | Retorna texto bruto de um artefato indexado |
@@ -189,6 +201,6 @@ Dois detectores acionados por trigger Firestore (nao por cron - a latencia impor
 - **Firestore trigger (assíncrono):** uma escrita dispara processamento em cascata — principal mecanismo de propagação para o grafo de conhecimento (`on_tarefa_concluida_kg`).
 - **PubSub (enfileirado):** usado para processamento pesado desacoplado da resposta ao usuário (vetorização, artefatos do grafo).
 - **Scheduler (cron):** sincronizações periódicas, reminders, relatórios de custo, limpeza/reset diário.
-- **HTTP request puro:** apenas o webhook do Telegram.
+- **HTTP request puro:** webhooks do Telegram e do GitHub, e os receptores de push do Google Calendar/Drive (`on_calendar_push`, `on_drive_push`).
 
 Integrações externas usadas por essas funções: Google Tasks, Google Calendar, Google Drive, Google Contacts, Google Speech-to-Text, Google Forms, Gemini (embedding + modelos de geração + File Search) e Telegram Bot API.
