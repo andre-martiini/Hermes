@@ -639,5 +639,111 @@ class TestClasseEfeitoPisoNaoCobreTresToolsAssincronas(unittest.TestCase):
             self.assertIsNone(CLASSE_EFEITO_PISO.get(nome))
 
 
+class TestAvaliarJobTravado(unittest.TestCase):
+    """P04 sub-entrega 10/N: `avaliar_job_travado` -- detecta (sem tocar
+    Firestore) um job `mcp_jobs` que ficou preso em `status="processing"`
+    porque o trigger caiu (timeout/OOM/queda de runtime) depois de
+    reivindicar e antes de concluir -- cenário já documentado no docstring
+    de `autonomy/mcp_jobs_adapter.py` (sub-entrega 9/N) como algo que este
+    adaptador NÃO corrige, só traduz."""
+
+    AGORA = dt.datetime(2026, 9, 27, 12, 0, 0, tzinfo=dt.timezone.utc)
+
+    def _reivindicado_ha(self, segundos):
+        return self.AGORA - dt.timedelta(seconds=segundos)
+
+    def test_processing_recem_reivindicado_nao_e_travado(self):
+        dados = {"status": "processing", "reivindicado_em": self._reivindicado_ha(10)}
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_processing_ainda_nao_reivindicado_nao_e_travado(self):
+        dados = {"status": "processing", "reivindicado_em": None}
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_status_done_nao_e_travado_mesmo_com_reivindicado_em_antigo(self):
+        dados = {"status": "done", "reivindicado_em": self._reivindicado_ha(10_000)}
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_status_error_nao_e_travado_mesmo_com_reivindicado_em_antigo(self):
+        dados = {"status": "error", "reivindicado_em": self._reivindicado_ha(10_000)}
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_status_ausente_nao_e_travado(self):
+        self.assertIsNone(mcp_jobs.avaliar_job_travado({}, agora=self.AGORA))
+
+    def test_dados_none_nao_e_travado(self):
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(None, agora=self.AGORA))
+
+    def test_ja_tem_expira_em_nunca_e_travado_mesmo_com_status_processing(self):
+        # Combinação que não deveria existir em produção (status="processing"
+        # com expira_em preenchido), mas o guard nunca sobrescreve um
+        # documento que já tem um desfecho gravado.
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(10_000),
+            "expira_em": self.AGORA,
+        }
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_reivindicado_em_datetime_naive_nao_e_travado(self):
+        # Fail-closed: sem tzinfo não há como comparar com segurança contra
+        # `agora` (que é tz-aware) -- nunca adivinha, nunca levanta excecao.
+        dados = {
+            "status": "processing",
+            "reivindicado_em": dt.datetime(2026, 9, 27, 0, 0, 0),
+        }
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_reivindicado_em_tipo_inesperado_nao_e_travado(self):
+        for valor in (12345, "2026-09-27T00:00:00Z", [], {}):
+            with self.subTest(valor=valor):
+                dados = {"status": "processing", "reivindicado_em": valor}
+                self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_um_segundo_antes_do_limiar_ainda_nao_e_travado(self):
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC - 1),
+        }
+        self.assertIsNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_exatamente_no_limiar_ja_e_travado(self):
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC),
+        }
+        atualizacao = mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA)
+        self.assertIsNotNone(atualizacao)
+        self.assertEqual(atualizacao["status"], "error")
+        self.assertEqual(atualizacao["erro_tipo"], mcp_jobs.ERRO_TIPO_TRAVADO)
+        self.assertEqual(atualizacao["concluido_em"], int(self.AGORA.timestamp()))
+
+    def test_expira_em_da_atualizacao_e_datetime_tz_aware_no_futuro(self):
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 100),
+        }
+        atualizacao = mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA)
+        expira_em = atualizacao["expira_em"]
+        self.assertIsInstance(expira_em, dt.datetime)
+        self.assertIsNotNone(expira_em.tzinfo)
+        self.assertGreater(expira_em, self.AGORA)
+
+    def test_muito_travado_tambem_e_travado(self):
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(60 * 60 * 24 * 7),  # 1 semana
+        }
+        self.assertIsNotNone(mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA))
+
+    def test_erro_da_atualizacao_menciona_travado_sem_falar_de_excecao(self):
+        dados = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+        }
+        atualizacao = mcp_jobs.avaliar_job_travado(dados, agora=self.AGORA)
+        self.assertIn("travado", atualizacao["erro"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()
