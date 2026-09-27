@@ -12,7 +12,25 @@ gravando "done"/"error" no mesmo documento. Não há reserva por
 lease/geração (é sempre uma execução, reivindicada só por um booleano
 `reivindicado_em` dentro de uma transação -- ver
 `mcp_jobs._reivindicar_job`), não há retentativa automática, não há
-checkpoint intermediário: um job nasce, é reivindicado uma vez, e termina.
+checkpoint intermediário: no caminho feliz, um job nasce, é reivindicado
+uma vez, e termina.
+
+ATENÇÃO para quem for consumir este adaptador (achado de revisão
+adversarial desta sub-entrega): "termina" não é garantido pelo código
+atual de `mcp_jobs.py`. `on_mcp_job_created` só grava `expira_em` nos
+caminhos de conclusão (done/error/bloqueio de política/erro de
+configuração) -- se o trigger for encerrado (timeout de 540s, OOM, queda
+do runtime) DEPOIS de `_reivindicar_job` gravar `reivindicado_em` mas
+ANTES de qualquer `ref.update(...)` de conclusão, o documento fica para
+sempre em `status="processing"` com `reivindicado_em` já preenchido --
+sem `expira_em`, nem elegível a TTL. Este adaptador traduziria esse job
+para `EM_ANDAMENTO` indefinidamente, sem nenhum sinal de que a tradução é
+sobre um job "zumbi", não um job realmente em andamento. Corrigir esse
+comportamento é trabalho de `mcp_jobs.py` (ex.: um sweep de jobs
+reivindicados há muito tempo sem conclusão, mesmo espírito de
+`autonomy.sweep` para o protocolo novo) -- fora do escopo desta
+sub-entrega, que só traduz o que o documento diz agora, sem inferir
+frescor nem detectar jobs travados.
 
 Esta sub-entrega NÃO toca `mcp_jobs.py` nem sua coleção `mcp_jobs` --
 "preservando job_id e sem fundir coleções": os dois ciclos continuam
