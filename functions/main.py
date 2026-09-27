@@ -1813,6 +1813,47 @@ def _mesclar_ids_processados(antigos, novos):
     return list(dict.fromkeys(list(antigos) + list(novos)))[-PROCESSED_EMAILS_MAX_IDS:]
 
 
+# Janela de recuperação das buscas financeiras (Pix e boletos), somada ao `in:inbox`: pega o
+# e-mail que o André arquivou à mão antes de o sync passar. Larga de propósito: com a saída
+# cedo o custo continua baixo, e um sync parado por mais de alguns dias (ex.: reauth do
+# Google pendente) somado a um arquivamento manual perderia o lançamento para sempre.
+GMAIL_JANELA_RECUPERACAO = 'newer_than:14d'
+GMAIL_CANDIDATOS_MAX = 500
+
+
+def _listar_candidatos_financeiros(service, base_query):
+    """Lista candidatos de `in:inbox <base>` + `<janela> <base>`, sem repetir ids.
+
+    Devolve (mensagens, inbox_ids): só quem está em inbox_ids ainda precisa ser arquivado.
+    Cada busca é paginada (100 por página) até GMAIL_CANDIDATOS_MAX.
+    """
+    def _listar(q):
+        encontrados = []
+        page_token = None
+        while True:
+            results = service.users().messages().list(
+                userId='me', q=q, maxResults=100, pageToken=page_token
+            ).execute(num_retries=3)
+            encontrados.extend(results.get('messages', []) or [])
+            page_token = results.get('nextPageToken')
+            if not page_token or len(encontrados) >= GMAIL_CANDIDATOS_MAX:
+                break
+        return encontrados
+
+    messages = []
+    vistos = set()
+    inbox_ids = set()
+    for origem, q in (('inbox', f'in:inbox {base_query}'),
+                      ('recentes', f'{GMAIL_JANELA_RECUPERACAO} {base_query}')):
+        for m in _listar(q):
+            if origem == 'inbox':
+                inbox_ids.add(m['id'])
+            if m['id'] not in vistos:
+                vistos.add(m['id'])
+                messages.append(m)
+    return messages, inbox_ids
+
+
 def sync_pix_emails(service, sync_ref, logs):
     """
     Busca emails de Pix e registra no Financeiro (Versão Cloud Function)
@@ -1831,33 +1872,9 @@ def sync_pix_emails(service, sync_ref, logs):
 
         # Candidatos (custo): antes a busca não tinha `in:inbox` e cada rodada listava até 500
         # e-mails desde fev/2026, rearquivando um por um os já processados. Agora são duas buscas:
-        # o que ainda está no INBOX (o que o Hermes ainda não absorveu) + os últimos 3 dias
-        # (pega Pix que o André arquivou à mão antes de o sync passar).
-        def _listar(q):
-            encontrados = []
-            page_token = None
-            while True:
-                results = service.users().messages().list(
-                    userId='me', q=q, maxResults=100, pageToken=page_token
-                ).execute()
-                batch = results.get('messages', [])
-                if batch:
-                    encontrados.extend(batch)
-                page_token = results.get('nextPageToken')
-                if not page_token or len(encontrados) >= 500:
-                    break
-            return encontrados
-
-        messages = []
-        vistos = set()
-        inbox_ids = set()
-        for origem, q in (('inbox', f'in:inbox {base_query}'), ('recentes', f'newer_than:3d {base_query}')):
-            for m in _listar(q):
-                if origem == 'inbox':
-                    inbox_ids.add(m['id'])
-                if m['id'] not in vistos:
-                    vistos.add(m['id'])
-                    messages.append(m)
+        # o que ainda está no INBOX (o que o Hermes ainda não absorveu) + a janela de
+        # recuperação (pega Pix que o André arquivou à mão antes de o sync passar).
+        messages, inbox_ids = _listar_candidatos_financeiros(service, base_query)
 
         if not messages:
             log_to_firestore(sync_ref, logs, "Nenhum Pix/Pagamento encontrado para os critérios de busca.")
@@ -2337,18 +2354,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
         # Candidatos (custo): sem `in:inbox`, a busca devolvia sempre os mesmos 15 e-mails
         # antigos (já lançados e arquivados) e cada rodada varria fixed_bills e rearquivava
         # todos. Agora são duas buscas, como em sync_pix_emails: o que ainda está no INBOX +
-        # os últimos 3 dias (boleto que o André arquivou à mão antes de o sync passar).
-        messages = []
-        vistos = set()
-        inbox_ids = set()
-        for origem, q in (('inbox', f'in:inbox {query}'), ('recentes', f'newer_than:3d {query}')):
-            results = service.users().messages().list(userId='me', q=q, maxResults=15).execute(num_retries=3)
-            for m_info in results.get('messages', []) or []:
-                if origem == 'inbox':
-                    inbox_ids.add(m_info['id'])
-                if m_info['id'] not in vistos:
-                    vistos.add(m_info['id'])
-                    messages.append(m_info)
+        # a janela de recuperação (boleto que o André arquivou à mão antes de o sync passar).
+        messages, inbox_ids = _listar_candidatos_financeiros(service, query)
 
         if not messages:
             log_to_firestore(sync_ref, logs, "Nenhum boleto recente encontrado no Gmail.")

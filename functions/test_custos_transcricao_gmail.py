@@ -388,7 +388,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
     def test_todos_os_candidatos_ja_processados_nao_le_colecao_financeira(self):
         db = _Db()
         db.collection("system").document("processed_emails").set({"ids": ["a", "b", "c"]})
-        gs = _gmail_listas({"in:inbox": ["a"], "newer_than:3d": ["a", "b", "c"]})
+        gs = _gmail_listas({"in:inbox": ["a"], main.GMAIL_JANELA_RECUPERACAO: ["a", "b", "c"]})
         m_cleanup = self._rodar(db, gs)
         self.assertFalse(FINANCEIRAS.intersection(db.streamed), db.streamed)
         m_cleanup.assert_not_called()
@@ -403,7 +403,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
         self._rodar(db, gs)
         queries = [kw["q"] for _, kw in gs.users.return_value.messages.return_value.list.call_args_list]
         self.assertTrue(any(q.startswith("in:inbox ") for q in queries), queries)
-        self.assertTrue(any(q.startswith("newer_than:3d ") for q in queries), queries)
+        self.assertTrue(any(q.startswith(main.GMAIL_JANELA_RECUPERACAO + " ") for q in queries), queries)
         self.assertTrue(all("after:2026/02/01" in q for q in queries))
 
     def test_ignorados_sem_valor_tambem_nao_forcam_o_caminho_caro(self):
@@ -411,7 +411,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
         db.collection("system").document("processed_emails").set(
             {"ids": ["a"], main.PIX_IGNORADOS_FIELD: ["x"]}
         )
-        gs = _gmail_listas({"in:inbox": ["a", "x"], "newer_than:3d": []})
+        gs = _gmail_listas({"in:inbox": ["a", "x"], main.GMAIL_JANELA_RECUPERACAO: []})
         self._rodar(db, gs)
         self.assertFalse(FINANCEIRAS.intersection(db.streamed))
         # O e-mail sem valor não é arquivado (mesmo comportamento de antes).
@@ -424,7 +424,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
             {"description": "Pix: x", "amount": 10.0, "date": "2026-09-20T10:00:00+00:00",
              "google_message_id": "b"}
         )
-        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["a", "b"]})
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["a", "b"]})
         m_cleanup = self._rodar(db, gs)
         self.assertIn("finance_transactions", db.streamed)
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["a", "b"])
@@ -435,7 +435,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
     def test_sem_valor_vai_para_ignorados_e_nao_e_arquivado(self):
         db = _Db()
         db.collection("system").document("processed_emails").set({"ids": []})
-        gs = _gmail_listas({"in:inbox": ["n1"], "newer_than:3d": []})
+        gs = _gmail_listas({"in:inbox": ["n1"], main.GMAIL_JANELA_RECUPERACAO: []})
         gs.users.return_value.messages.return_value.get.return_value.execute.return_value = {
             "internalDate": "1790000000000", "snippet": "Seu pagamento foi agendado",
             "payload": {"headers": [{"name": "Subject", "value": "Pagamento"}, {"name": "From", "value": "banco@x"}]},
@@ -449,7 +449,7 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
     def test_pix_novo_lancado_roda_a_limpeza_retroativa(self):
         db = _Db()
         db.collection("system").document("processed_emails").set({"ids": ["velho"]})
-        gs = _gmail_listas({"in:inbox": ["p1"], "newer_than:3d": ["p1"]})
+        gs = _gmail_listas({"in:inbox": ["p1"], main.GMAIL_JANELA_RECUPERACAO: ["p1"]})
         gs.users.return_value.messages.return_value.get.return_value.execute.return_value = {
             "internalDate": "1790000000000", "snippet": "Você fez um Pix de R$ 51,86",
             "payload": {"headers": [{"name": "Subject", "value": "Pix enviado"}, {"name": "From", "value": "banco@x"}]},
@@ -546,7 +546,7 @@ class TestSyncBoletosSemRearquivar(unittest.TestCase):
         queries = [kw["q"] for _, kw in gs.users.return_value.messages.return_value.list.call_args_list]
         self.assertEqual(len(queries), 2, queries)
         self.assertTrue(queries[0].startswith("in:inbox "), queries)
-        self.assertTrue(queries[1].startswith("newer_than:3d "), queries)
+        self.assertTrue(queries[1].startswith(main.GMAIL_JANELA_RECUPERACAO + " "), queries)
         self.assertTrue(all("boleto@allcaregestoradesaude.com.br" in q for q in queries))
 
     def test_ja_lancado_e_registrado_e_nao_rearquivado_na_rodada_seguinte(self):
@@ -556,8 +556,8 @@ class TestSyncBoletosSemRearquivar(unittest.TestCase):
             {"description": "Luz", "amount": 100.0, "dueDay": 10, "month": 8, "year": 2026,
              "google_message_id": "b1"}
         )
-        # 1ª rodada: b1 já lançado, recebido nos últimos 3 dias e fora do INBOX.
-        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        # 1ª rodada: b1 já lançado, recebido dentro da janela de recuperação e fora do INBOX.
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["b1"]})
         self._rodar(db, gs)
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["velho", "b1"])
         self.assertEqual(_arquivados(gs), [])  # fora do INBOX: arquivar seria no-op
@@ -565,7 +565,7 @@ class TestSyncBoletosSemRearquivar(unittest.TestCase):
 
         # 2ª rodada: mesmo candidato -> saída cedo, sem Gemini, sem fixed_bills, sem arquivar.
         db.streamed.clear()
-        gs2 = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        gs2 = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["b1"]})
         m_keys = self._rodar(db, gs2)
         m_keys.assert_not_called()
         self.assertFalse(FINANCEIRAS.intersection(db.streamed), db.streamed)
@@ -577,16 +577,89 @@ class TestSyncBoletosSemRearquivar(unittest.TestCase):
         db.collection("fixed_bills").document("f1").set(
             {"description": "Luz", "amount": 100.0, "google_message_id": "b1"}
         )
-        gs = _gmail_listas({"in:inbox": ["b1"], "newer_than:3d": ["b1"]})
+        gs = _gmail_listas({"in:inbox": ["b1"], main.GMAIL_JANELA_RECUPERACAO: ["b1"]})
         self._rodar(db, gs)
         self.assertEqual(_arquivados(gs), ["b1"])
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["b1"])
 
+    def test_janela_de_recuperacao_e_de_14_dias(self):
+        self.assertEqual(main.GMAIL_JANELA_RECUPERACAO, "newer_than:14d")
+
+    def test_busca_paginada_100_por_pagina(self):
+        db = _Db()
+        gs = mock.Mock()
+        msgs = gs.users.return_value.messages.return_value
+        paginas = {
+            None: {"messages": [{"id": f"i{n}"} for n in range(100)], "nextPageToken": "p2"},
+            "p2": {"messages": [{"id": "i100"}]},
+        }
+
+        def _list(userId=None, q="", maxResults=None, pageToken=None):
+            req = mock.Mock()
+            req.execute.return_value = paginas[pageToken] if q.startswith("in:inbox") else {}
+            return req
+
+        msgs.list.side_effect = _list
+        db.collection("system").document("processed_emails").set(
+            {"ids": [f"i{n}" for n in range(101)]}
+        )
+        self._rodar(db, gs)
+        chamadas = [kw for _, kw in msgs.list.call_args_list]
+        self.assertTrue(all(kw["maxResults"] == 100 for kw in chamadas), chamadas)
+        self.assertEqual([kw["pageToken"] for kw in chamadas], [None, "p2", None])
+        self.assertFalse(FINANCEIRAS.intersection(db.streamed))  # os 101 já processados
+
+    def test_boleto_novo_arquivado_a_mao_e_processado(self):
+        """Boleto novo que só aparece na janela de recuperação (arquivado à mão) é lido e lançado."""
+        db = _Db()
+        db.collection("system").document("processed_emails").set({"ids": ["velho"]})
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["novo"]})
+        msgs = gs.users.return_value.messages.return_value
+        msgs.get.return_value.execute.return_value = {
+            "snippet": "Sua fatura de R$ 80,00 vence em 10/10/2026",
+            "payload": {"headers": [{"name": "Subject", "value": "Sua fatura"},
+                                    {"name": "From", "value": "cobranca@agua.example"}]},
+        }
+        genai = mock.Mock()
+        genai.Client.return_value.models.generate_content.return_value.text = (
+            '{"description": "Água", "amount": 80.0, "due_date": "2026-10-10", '
+            '"barcode": "", "pix_code": "", "rubric_id": null}'
+        )
+        gravado_antes_do_lancamento = []
+
+        def _arquivar(service, msg_id, sync_ref, logs, motivo):
+            gravado_antes_do_lancamento.append(
+                ((db.doc_data("system", "processed_emails") or {}).get("ids") or [])[:]
+            )
+            return True
+
+        keys = mock.Mock(exists=True)
+        keys.to_dict.return_value = {"gemini_api_key": "chave-de-teste"}
+        with mock.patch("main.get_db", return_value=db), \
+             mock.patch("main.log_to_firestore"), \
+             mock.patch("main.emit_notification_backend"), \
+             mock.patch("main.find_password_config", return_value=None), \
+             mock.patch("main.get_genai_module", return_value=genai), \
+             mock.patch("main.archive_gmail_message", side_effect=_arquivar) as m_arq, \
+             mock.patch("main._cached_doc_get", return_value=keys):
+            resultado = main.sync_boletos_gmail(gs, mock.Mock(), [])
+        self.assertIsNot(resultado, False)
+        msgs.get.assert_called_once()
+        self.assertEqual(msgs.get.call_args.kwargs["id"], "novo")
+        cards = list(db.stores["fixed_bills"].values())
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["google_message_id"], "novo")
+        self.assertAlmostEqual(cards[0]["amount"], 80.0)
+        # Não estava marcado como processado antes do lançamento; só é gravado no fim.
+        self.assertEqual(gravado_antes_do_lancamento, [["velho"]])
+        self.assertEqual(m_arq.call_args.args[4], "boleto-lancado")
+        self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["velho", "novo"])
+
     def test_emails_antigos_ja_arquivados_nao_voltam_como_candidatos(self):
-        """Cenário do log de 27/09: os e-mails antigos saíram do INBOX e têm mais de 3 dias."""
+        """Cenário do log de 27/09: os e-mails antigos saíram do INBOX e estão fora da janela de recuperação."""
         db = _Db()
         db.collection("fixed_bills").document("f1").set({"description": "x", "google_message_id": "antigo"})
-        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": []})
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: []})
         m_keys = self._rodar(db, gs)
         m_keys.assert_not_called()
         self.assertFalse(FINANCEIRAS.intersection(db.streamed))
@@ -607,7 +680,7 @@ class TestTruncagemProcessedEmailsCompartilhada(unittest.TestCase):
         ids_pix = [f"pix{i}" for i in range(700)]
         db.collection("system").document("processed_emails").set({"ids": list(ids_pix)})
         db.collection("fixed_bills").document("f1").set({"description": "x", "google_message_id": "b1"})
-        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["b1"]})
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["b1"]})
         TestSyncBoletosSemRearquivar._rodar(self, db, gs)
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ids_pix + ["b1"])
 
@@ -619,7 +692,7 @@ class TestTruncagemProcessedEmailsCompartilhada(unittest.TestCase):
             {"description": "Pix: x", "amount": 10.0, "date": "2026-09-20T10:00:00+00:00",
              "google_message_id": "p1"}
         )
-        gs = _gmail_listas({"in:inbox": [], "newer_than:3d": ["p1"]})
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["p1"]})
         TestSyncPixSaidaCedo._rodar(self, db, gs)
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ids + ["p1"])
 
