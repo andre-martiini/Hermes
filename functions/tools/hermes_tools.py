@@ -60,6 +60,7 @@ _TELEGRAM_TOOLS = {
     "atualizar_personalidade",
     "resolver_conflito_procedimento",
     "editar_plano_acao",
+    "editar_etapa",
     "preparar_edicao_acao",
     "gerar_relatorio",
     "gerar_rascunho_formulario",

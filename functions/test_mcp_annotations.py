@@ -186,6 +186,9 @@ class TestMcpAnnotations(unittest.TestCase):
             "acompanhar_processo_sipac",
             "consultar_contatos_prioritarios_secretario",
             "registrar_inscricao_bolsa_publica",
+            # Reclassificadas na revisão do PR #370: edição sem efeito não grava.
+            "editar_plano_acao",
+            "editar_etapa",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), True)
@@ -217,7 +220,6 @@ class TestMcpAnnotations(unittest.TestCase):
             "anexar_arquivo",
             "registrar_correcao_procedimento",
             "resolver_conflito_procedimento",
-            "editar_plano_acao",
             "gerar_relatorio",
             "gerar_imagem",
             "editar_imagem",

@@ -1,0 +1,49 @@
+{
+  "name": "editar_etapa",
+  "description": "Altera UMA etapa do plano de ação sem tocar nas outras — o jeito certo de marcar uma etapa como feita, em andamento ou aguardando terceiro, dar data própria a ela ou reescrever seu texto. Envie só os campos que mudam; campo omitido preserva o valor atual; null (ou \"\") em data_prevista ou aguardando_de apaga o campo. etapa_id é o id da etapa (visível em obter_acao); id desconhecido é recusado listando as etapas existentes. Devolve 'OK|' seguido do que mudou ({\"alteradas\": {id: {campo: [antes, depois]}}}) ou 'OK|Nenhuma etapa mudou'. Para adicionar, remover ou reordenar etapas use editar_plano_acao.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação (tarefa)"
+      },
+      "etapa_id": {
+        "type": "string",
+        "description": "ID da etapa a alterar"
+      },
+      "estado": {
+        "type": "string",
+        "enum": [
+          "pendente",
+          "em_andamento",
+          "aguardando_terceiro",
+          "feito"
+        ],
+        "description": "Novo estado da etapa"
+      },
+      "text": {
+        "type": "string",
+        "description": "Novo texto da etapa"
+      },
+      "data_prevista": {
+        "type": "string",
+        "nullable": true,
+        "description": "YYYY-MM-DD — dia previsto para esta etapa. null (ou \"\") apaga a data; omitir preserva"
+      },
+      "aguardando_de": {
+        "type": "string",
+        "nullable": true,
+        "description": "De quem se espera, quando estado='aguardando_terceiro'. null (ou \"\") apaga; omitir preserva"
+      },
+      "justificativa_diario": {
+        "type": "string",
+        "description": "Motivo, gravado no diário da ação. Opcional: sem ele o diário registra o que mudou"
+      }
+    },
+    "required": [
+      "task_id",
+      "etapa_id"
+    ]
+  }
+}
