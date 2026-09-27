@@ -198,6 +198,19 @@ def avaliar_job_travado(dados: dict, *, agora: datetime) -> dict | None:
     }
 
 
+#: Tamanho de cada página da varredura -- ver docstring de
+#: `sweep_mcp_jobs_travados_core` para por que a consulta pagina em vez de
+#: usar um único `limit()` fixo.
+_SWEEP_TAMANHO_PAGINA = 500
+
+#: Teto de documentos varridos numa única execução, MUITO acima do volume
+#: de produção hoje (15 páginas de 500). Só existe para bound o tempo/custo
+#: no cenário patológico de a coleção crescer sem controle por algum outro
+#: bug -- nesse caso um job além do teto fica para a próxima varredura (15
+#: min depois), sem perda (ver docstring da função para a reentrância).
+_SWEEP_MAX_DOCUMENTOS = 15 * _SWEEP_TAMANHO_PAGINA
+
+
 def sweep_mcp_jobs_travados_core(db, *, agora: datetime) -> tuple[int, int]:
     """Núcleo da varredura, separado do decorator `on_schedule` para ser
     testável sem simular o `ScheduledEvent` real. Consulta `mcp_jobs` em
@@ -205,27 +218,41 @@ def sweep_mcp_jobs_travados_core(db, *, agora: datetime) -> tuple[int, int]:
     `avaliar_job_travado` decidir (`None` -> nada a fazer) e devolve
     `(varridos, travados)`.
 
-    `limit(500)`: teto defensivo sobre o volume de uma única execução -- sem
-    volume de produção hoje perto disso (só as três tools assíncronas do
-    trigger passam por `mcp_jobs`), mas evita tempo/custo ilimitado se a
-    coleção inflar por algum motivo. Reentrante e idempotente: um job além
-    do teto, ou que a corrida perdeu por qualquer motivo, fica elegível de
-    novo na próxima varredura (`avaliar_job_travado` só depende do estado
-    gravado no documento, nunca de progresso entre chamadas), e reavaliar um
-    job já marcado devolve `None` (já tem `expira_em` preenchido).
+    PAGINADA por `order_by("__name__")` + `start_after(ultimo_doc)` (achado
+    real de revisão automática do Codex nesta sub-entrega, PR#366): a
+    versão anterior usava só `.limit(500)` sem `order_by()` -- um documento
+    que NUNCA passa a ser elegível a `avaliar_job_travado` (ex.:
+    `reivindicado_em` nunca preenchido porque a transação de
+    `_reivindicar_job` falhou, deixando o job para sempre em
+    `status="processing"` sem nunca ser reivindicado) fica parado nesse
+    mesmo estado para sempre -- se documentos assim se acumularem e
+    ocupassem as primeiras 500 posições da consulta, um job REALMENTE
+    travado ordenado depois deles nunca seria avaliado, em NENHUMA
+    varredura futura (o teto fixo sempre devolveria a mesma primeira
+    página). Paginar por `__name__` -- ordenação suportada pelo índice
+    automático de campo único, sem precisar de índice composto -- garante
+    que toda a coleção em `status="processing"` seja alcançada dentro do
+    teto de `_SWEEP_MAX_DOCUMENTOS` numa única execução, não só os
+    primeiros `_SWEEP_TAMANHO_PAGINA`.
+
+    `_SWEEP_MAX_DOCUMENTOS`: teto defensivo sobre o volume de uma única
+    execução -- sem volume de produção hoje perto disso (só as três tools
+    assíncronas do trigger passam por `mcp_jobs`), mas evita tempo/custo
+    ilimitado se a coleção inflar por algum motivo. Reentrante e
+    idempotente: um job além do teto, ou que a corrida perdeu por qualquer
+    motivo, fica elegível de novo na próxima varredura (`avaliar_job_travado`
+    só depende do estado gravado no documento, nunca de progresso entre
+    chamadas), e reavaliar um job já marcado devolve `None` (já tem
+    `expira_em` preenchido).
 
     A ESCRITA de cada documento é isolada em seu próprio `try/except`
     (achado de revisão adversarial desta sub-entrega, mesmo padrão já usado
     no laço de `atencao.py` que também escreve um `.update()` por item):
     sem isto, um `.update()` que falhar para UM documento (erro transitório
     de rede, `NotFound` se o doc for apagado entre o `.stream()` e a
-    escrita) escapa sem tratamento e aborta o resto do laço -- sem
-    `.order_by()` explícito, a consulta ainda assim ordena de forma
-    ESTÁVEL a cada execução (o Firestore sempre acrescenta um critério de
-    desempate implícito por `__name__`), então um documento que falhasse de
-    forma determinística (não só uma falha transitória isolada) abortaria a
-    varredura sempre no mesmo ponto, morrendo de fome todo documento
-    ordenado depois dele, ciclo após ciclo, até alguém notar.
+    escrita) escapa sem tratamento e aborta o resto da página (as páginas
+    seguintes ainda rodariam, mas o restante da página corrente seria
+    perdido até a próxima varredura).
 
     DELIBERADAMENTE o `try` cobre só `snap.reference.update(...)`, NUNCA
     `avaliar_job_travado(...)` (achado da 2a rodada de revisão adversarial
@@ -244,26 +271,36 @@ def sweep_mcp_jobs_travados_core(db, *, agora: datetime) -> tuple[int, int]:
     existe para nunca esconder. Uma falha de escrita aqui não conta como
     `travado` (a escrita não foi confirmada) nem propaga -- só loga e segue
     para o próximo documento."""
-    consulta = (
+    consulta_base = (
         db.collection(COLECAO)
         .where(filter=firestore.FieldFilter("status", "==", "processing"))
-        .limit(500)
+        .order_by("__name__")
     )
     varridos = 0
     travados = 0
-    for snap in consulta.stream():
-        varridos += 1
-        dados = snap.to_dict() or {}
-        atualizacao = avaliar_job_travado(dados, agora=agora)
-        if atualizacao is None:
-            continue
-        try:
-            snap.reference.update(atualizacao)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[mcp_jobs] falha ao gravar job travado {snap.id}: {exc}")
-            continue
-        travados += 1
-        print(f"[mcp_jobs] job travado marcado como falha definitiva: {snap.id}")
+    cursor = None
+    while varridos < _SWEEP_MAX_DOCUMENTOS:
+        pagina = consulta_base.limit(_SWEEP_TAMANHO_PAGINA)
+        if cursor is not None:
+            pagina = pagina.start_after(cursor)
+        docs_da_pagina = list(pagina.stream())
+        if not docs_da_pagina:
+            break
+        for snap in docs_da_pagina:
+            varridos += 1
+            dados = snap.to_dict() or {}
+            atualizacao = avaliar_job_travado(dados, agora=agora)
+            if atualizacao is not None:
+                try:
+                    snap.reference.update(atualizacao)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[mcp_jobs] falha ao gravar job travado {snap.id}: {exc}")
+                else:
+                    travados += 1
+                    print(f"[mcp_jobs] job travado marcado como falha definitiva: {snap.id}")
+        if len(docs_da_pagina) < _SWEEP_TAMANHO_PAGINA:
+            break
+        cursor = docs_da_pagina[-1]
     return varridos, travados
 
 

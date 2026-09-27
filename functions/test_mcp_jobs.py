@@ -805,33 +805,88 @@ class _FakeSweepRef:
 
 
 class _FakeSweepQuery:
-    def __init__(self, store, field=None, op=None, value=None, lim=None):
+    """Suporta o subconjunto real do encadeamento que
+    `sweep_mcp_jobs_travados_core` usa: `.where(filter=...)`,
+    `.order_by("__name__")`, `.limit(n)`, `.start_after(ultimo_doc)`,
+    `.stream()` -- inclusive paginação real (o cursor de `start_after` é o
+    doc_id do último documento da página anterior, mesma semântica de
+    passar um `DocumentSnapshot` para `Query.start_after` no cliente real)."""
+
+    def __init__(self, store, field=None, op=None, value=None, lim=None, ordenar=False, cursor_id=None):
         self._store = store
         self._field = field
         self._op = op
         self._value = value
         self._limit = lim
+        self._ordenar = ordenar
+        self._cursor_id = cursor_id
+
+    def _clonar(self, **overrides):
+        campos = dict(
+            field=self._field, op=self._op, value=self._value, lim=self._limit,
+            ordenar=self._ordenar, cursor_id=self._cursor_id,
+        )
+        campos.update(overrides)
+        return _FakeSweepQuery(self._store, **campos)
 
     def where(self, field=None, op=None, value=None, filter=None):
         if filter is not None:
             field, op, value = filter.field_path, filter.op_string, filter.value
-        return _FakeSweepQuery(self._store, field, op, value, self._limit)
+        return self._clonar(field=field, op=op, value=value)
+
+    def order_by(self, field_path):
+        assert field_path == "__name__", f"ordenação não suportada no fake: {field_path}"
+        return self._clonar(ordenar=True)
 
     def limit(self, n):
-        return _FakeSweepQuery(self._store, self._field, self._op, self._value, n)
+        return self._clonar(lim=n)
+
+    def start_after(self, documento):
+        # Mesma semântica do cliente real: aceita o DocumentSnapshot inteiro
+        # (o fake só precisa do id, já que a única ordenação suportada é
+        # por __name__/doc_id).
+        cursor_id = getattr(documento, "id", documento)
+        return self._clonar(cursor_id=cursor_id)
 
     def stream(self):
-        casa = []
+        ids_que_casam = []
         for doc_id, data in self._store.items():
             if self._field is not None:
                 if self._op != "==":
                     raise AssertionError(f"operador não suportado no fake: {self._op}")
                 if data.get(self._field) != self._value:
                     continue
-            casa.append(_FakeSweepSnap(doc_id, data, _FakeSweepRef(doc_id, self._store)))
+            ids_que_casam.append(doc_id)
+        if self._ordenar:
+            ids_que_casam.sort()
+        if self._cursor_id is not None:
+            assert self._ordenar, "start_after no fake exige order_by (mesmo requisito do Firestore real)."
+            # Comparação lexicográfica direta (doc_id > cursor_id), NÃO
+            # "localizar o cursor no conjunto atual e pegar o que vem
+            # depois" -- achado real de revisão adversarial (2a rodada sobre
+            # a correção da paginação): o cursor real do Firestore ancora
+            # nos valores de campo CAPTURADOS no DocumentSnapshot passado a
+            # start_after (aqui, o próprio doc_id/__name__, que nunca muda),
+            # não em relocalizar o documento no resultado filtrado NA HORA
+            # da consulta seguinte. Se o próprio documento-cursor for
+            # atualizado entre uma página e a próxima (ex.: era o último
+            # documento de uma página inteira de jobs travados, e todos
+            # foram marcados como "error", incluindo ele) ele sai do filtro
+            # `status="processing"` e não aparece mais em `ids_que_casam` --
+            # buscar seu ÍNDICE nessa lista já filtrada levantava
+            # ValueError e a versão anterior deste fake devolvia uma página
+            # vazia em silêncio, escondendo qualquer documento genuinamente
+            # travado ordenado depois dele (o Firestore real não teria esse
+            # problema, então o fake estava mais restritivo que a API real
+            # que emula -- um falso negativo que faria alguém "consertar"
+            # produção para bater com um modelo errado do fake).
+            ids_que_casam = [doc_id for doc_id in ids_que_casam if doc_id > self._cursor_id]
         if self._limit is not None:
-            casa = casa[: self._limit]
-        return casa
+            ids_que_casam = ids_que_casam[: self._limit]
+        return [
+            _FakeSweepSnap(doc_id, self._store[doc_id], _FakeSweepRef(doc_id, self._store))
+            for doc_id in ids_que_casam
+        ]
 
 
 class _FakeSweepDb:
@@ -983,6 +1038,93 @@ class TestSweepMcpJobsTravadosCore(unittest.TestCase):
         varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=depois)
         self.assertEqual((varridos, travados), (0, 0))
         self.assertEqual(db._store["job-travado"], primeira_passada)
+
+    def test_job_travado_alem_da_primeira_pagina_ainda_e_alcancado(self):
+        # Achado real de revisão automática do Codex (PR #366,
+        # comment_id=4116312285): a versão anterior usava só `.limit(500)`
+        # sem `order_by()` -- um documento que NUNCA fica elegível a
+        # `avaliar_job_travado` (aqui: `reivindicado_em=None`, nunca
+        # reivindicado -- o mesmo estado que um job deixaria para trás se a
+        # transação de `_reivindicar_job` falhasse repetidamente) podia
+        # ocupar as primeiras 500 posições da consulta PARA SEMPRE (nunca
+        # muda, nunca sai do filtro `status="processing"`), impedindo
+        # QUALQUER varredura futura de alcançar um job genuinamente travado
+        # ordenado depois deles. Este teste reproduz exatamente esse
+        # cenário: exatamente `_SWEEP_TAMANHO_PAGINA` documentos nunca
+        # reivindicados (ids que ordenam ANTES do job travado) mais um job
+        # genuinamente travado (id que ordena DEPOIS de todos eles) -- sem
+        # paginação, `varridos` pararia em `_SWEEP_TAMANHO_PAGINA` e o job
+        # travado nunca seria sequer lido.
+        docs = {
+            f"unclaimed-{i:04d}": {"status": "processing", "reivindicado_em": None}
+            for i in range(mcp_jobs._SWEEP_TAMANHO_PAGINA)
+        }
+        docs["zzz-job-travado"] = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+        }
+        db = _FakeSweepDb(docs)
+
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+
+        self.assertEqual(varridos, mcp_jobs._SWEEP_TAMANHO_PAGINA + 1)
+        self.assertEqual(travados, 1)
+        self.assertEqual(db._store["zzz-job-travado"]["status"], "error")
+        # Os documentos nunca reivindicados continuam intocados -- não são
+        # "travados" no sentido de avaliar_job_travado, só ainda não
+        # reivindicados (ou, no cenário real que motiva este teste, vítimas
+        # de uma transação de reivindicação que sempre falha -- um problema
+        # diferente, fora do escopo desta função).
+        for i in range(mcp_jobs._SWEEP_TAMANHO_PAGINA):
+            self.assertEqual(db._store[f"unclaimed-{i:04d}"]["status"], "processing")
+
+    def test_paginacao_para_exatamente_no_tamanho_da_pagina_sem_pagina_extra_vazia(self):
+        # Quando a coleção tem EXATAMENTE `_SWEEP_TAMANHO_PAGINA` documentos,
+        # a página cheia (len == limite) dispara uma segunda chamada a
+        # `.stream()` para verificar se há mais -- essa segunda página vem
+        # vazia e o laço para. Prova que isso não conta documentos a mais
+        # nem trava em loop.
+        docs = {
+            f"job-{i:04d}": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            }
+            for i in range(mcp_jobs._SWEEP_TAMANHO_PAGINA)
+        }
+        db = _FakeSweepDb(docs)
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+        self.assertEqual(varridos, mcp_jobs._SWEEP_TAMANHO_PAGINA)
+        self.assertEqual(travados, mcp_jobs._SWEEP_TAMANHO_PAGINA)
+
+    def test_pagina_seguinte_e_alcancada_mesmo_quando_o_proprio_cursor_e_marcado(self):
+        # Achado real de revisão adversarial (2a rodada sobre a correção da
+        # paginação): quando uma página CHEIA inteira é composta de jobs
+        # genuinamente travados, o ÚLTIMO documento da página (que vira o
+        # cursor da próxima) também é marcado como "error" antes da consulta
+        # seguinte rodar -- ele sai do filtro status="processing". O
+        # Firestore real ainda assim pagina corretamente a partir dele (o
+        # cursor ancora nos valores CAPTURADOS no snapshot, não em
+        # relocalizar o documento no resultado filtrado da consulta
+        # seguinte); um job genuinamente travado ordenado depois dele
+        # precisa continuar sendo alcançado na mesma execução.
+        docs = {
+            f"job-{i:04d}": {
+                "status": "processing",
+                "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+            }
+            for i in range(mcp_jobs._SWEEP_TAMANHO_PAGINA)
+        }
+        docs["zzz-deve-ser-achado-na-pagina-2"] = {
+            "status": "processing",
+            "reivindicado_em": self._reivindicado_ha(mcp_jobs.LIMIAR_TRAVADO_SEC + 1),
+        }
+        db = _FakeSweepDb(docs)
+
+        varridos, travados = mcp_jobs.sweep_mcp_jobs_travados_core(db, agora=self.AGORA)
+
+        self.assertEqual(varridos, mcp_jobs._SWEEP_TAMANHO_PAGINA + 1)
+        self.assertEqual(travados, mcp_jobs._SWEEP_TAMANHO_PAGINA + 1)
+        self.assertEqual(db._store["zzz-deve-ser-achado-na-pagina-2"]["status"], "error")
 
 
 if __name__ == "__main__":
