@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -120,8 +120,21 @@ def calcular_event_id(
     própria chave JSON) a `hash_canonico` evita esse tipo de colisão de
     delimitador -- é a mesma razão pela qual `hash_canonico` já serializa
     para JSON em vez de concatenar valores. `occurred_at` entra como
-    `.isoformat()` (string), já que `hash_canonico` exige valores
-    serializáveis em JSON e `datetime` não é um deles diretamente.
+    `.astimezone(timezone.utc).isoformat()` (string, sempre normalizado
+    para UTC antes de serializar) -- achado real de uma rodada de revisão
+    adversarial sobre a correção do achado do Codex (P05 sub-entrega 1/N):
+    `datetime.isoformat()` cru preserva o OFFSET original (`+02:00`,
+    `+00:00`, etc.), então dois instantes IGUAIS no mundo real
+    (`datetime(...,tzinfo=timezone(timedelta(hours=2))) ==
+    datetime(...,tzinfo=timezone.utc)` quando representam o mesmo instante
+    -- `==` em `datetime` compara o instante absoluto, não o offset)
+    produziam strings DIFERENTES (`"...+02:00"` vs `"...+00:00"`) e,
+    portanto, hashes diferentes -- uma fonte que às vezes serializa
+    `occurred_at` num offset e às vezes noutro (ex.: horário local vs. UTC)
+    quebraria silenciosamente a garantia de dedup por reentrega descrita
+    acima, mesmo sendo a MESMA ocorrência. Normalizar para UTC antes de
+    serializar fecha essa brecha: mesmo instante, qualquer offset de
+    entrada, sempre a mesma string.
 
     `payload_identificador` precisa ser serializável em JSON (mesma
     exigência documentada em `hash_canonico`); um valor que não for levanta
@@ -138,7 +151,7 @@ def calcular_event_id(
             "fonte_colecao": fonte_colecao,
             "fonte_doc_id": fonte_doc_id,
             "payload_identificador": dict(payload_identificador),
-            "occurred_at": occurred_at.isoformat(),
+            "occurred_at": occurred_at.astimezone(timezone.utc).isoformat(),
         }
     )
 

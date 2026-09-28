@@ -10,7 +10,7 @@ exigência de datetime timezone-aware, e o catálogo de `CategoriaEvento` (as
 """
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from autonomy.events import (
     CategoriaEvento,
@@ -113,6 +113,27 @@ class TestCalcularEventId(unittest.TestCase):
         )
         id2 = calcular_event_id(
             CategoriaEvento.TAREFA, "tarefas", "t-1", {"status": "em_andamento"}, _ANTES
+        )
+        self.assertEqual(id1, id2)
+
+    def test_mesmo_instante_com_offsets_diferentes_produz_mesmo_id(self):
+        # Achado real de revisão adversarial sobre a correção do achado do
+        # Codex: datetime.isoformat() cru preserva o offset original, então
+        # o MESMO instante real representado com offsets diferentes
+        # (ex.: horário local +02:00 vs. UTC) produzia hashes diferentes --
+        # quebraria dedup de reentrega para uma fonte que não normaliza
+        # sempre para o mesmo offset. occurred_at precisa ser normalizado
+        # para UTC antes de entrar no hash.
+        em_utc = datetime(2026, 9, 28, 12, 0, 0, tzinfo=timezone.utc)
+        mesmo_instante_offset_2 = datetime(
+            2026, 9, 28, 14, 0, 0, tzinfo=timezone(timedelta(hours=2))
+        )
+        self.assertEqual(em_utc, mesmo_instante_offset_2)  # mesmo instante real
+        self.assertNotEqual(em_utc.isoformat(), mesmo_instante_offset_2.isoformat())
+
+        id1 = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "t-1", {"x": 1}, em_utc)
+        id2 = calcular_event_id(
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"x": 1}, mesmo_instante_offset_2
         )
         self.assertEqual(id1, id2)
 
