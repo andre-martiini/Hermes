@@ -744,15 +744,29 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["status"], {"const": "not_found"})
         self.assertFalse(erro["additionalProperties"])
 
-        self.assertEqual(done["required"], ["job_id", "tool", "status", "resultado"])
+        self.assertEqual(
+            done["required"],
+            ["job_id", "tool", "status", "resultado", "request_status", "origem"],
+        )
         self.assertEqual(done["properties"]["status"], {"const": "done"})
         # resultado é contrato de SNAPSHOT (as 3 tools de _TOOLS_LONGAS
         # hoje sempre devolvem string) -- ver comentário de
         # _OUTPUT_SCHEMAS para o caveat completo.
         self.assertEqual(done["properties"]["resultado"], {"type": "string"})
+        # request_status/origem (P04 sub-entrega 12/N, passo 6 -- adaptador
+        # autonomy/mcp_jobs_adapter.py religado a este consumidor): SEMPRE
+        # presentes para um status "done", por isso em `required`, não
+        # opcionais como erro_tipo/bloqueio_politica no branch de erro
+        # abaixo. Achado real do Codex na PR #371: sem isso,
+        # additionalProperties=false rejeitaria toda resposta normal.
+        self.assertEqual(done["properties"]["request_status"], {"const": "concluido"})
+        self.assertEqual(done["properties"]["origem"], {"const": "mcp_jobs"})
         self.assertFalse(done["additionalProperties"])
 
-        self.assertEqual(error["required"], ["job_id", "tool", "status", "erro"])
+        self.assertEqual(
+            error["required"],
+            ["job_id", "tool", "status", "erro", "request_status", "origem"],
+        )
         self.assertEqual(error["properties"]["status"], {"const": "error"})
         # erro_tipo/bloqueio_politica ficam FORA de required -- ler_job só
         # copia quando presentes no documento (achado: hoje as 4 escritas
@@ -772,10 +786,23 @@ class TestOutputSchema(unittest.TestCase):
             error["properties"]["bloqueio_politica"]["properties"]["reason_code"],
             {"type": "string"},
         )
+        self.assertEqual(error["properties"]["request_status"], {"const": "falha_final"})
+        self.assertEqual(error["properties"]["origem"], {"const": "mcp_jobs"})
         self.assertFalse(error["additionalProperties"])
 
-        self.assertEqual(processing["required"], ["job_id", "tool", "status", "mensagem"])
+        self.assertEqual(
+            processing["required"],
+            ["job_id", "tool", "status", "mensagem", "request_status", "origem"],
+        )
         self.assertEqual(processing["properties"]["status"], {"const": "processing"})
+        # Único branch com request_status de 2 valores possíveis (status
+        # bruto "processing" colapsa reivindicado_em ausente/presente no
+        # MESMO `status` const deste schema).
+        self.assertEqual(
+            processing["properties"]["request_status"],
+            {"type": "string", "enum": ["pendente", "em_andamento"]},
+        )
+        self.assertEqual(processing["properties"]["origem"], {"const": "mcp_jobs"})
         self.assertFalse(processing["additionalProperties"])
 
     def test_buscar_arquivos_acervo_tem_schema_oneof_sucesso_e_erro(self):
@@ -2184,6 +2211,8 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             "tool": "gerar_relatorio",
             "status": "done",
             "resultado": '{"report_id": "r1", "titulo": "X", "secoes": ["A"], "status": "gerado"}',
+            "request_status": "concluido",
+            "origem": "mcp_jobs",
         }
         with patch.object(mcp_server, "execute_tool", return_value=esperado):
             resultado = mcp_server._handle_tools_call(
@@ -2206,6 +2235,8 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             "erro": "Ação bloqueada pela política de autonomia vigente.",
             "erro_tipo": "politica",
             "bloqueio_politica": {"decision": "deny", "reason_code": "fora_do_escopo"},
+            "request_status": "falha_final",
+            "origem": "mcp_jobs",
         }
         with patch.object(mcp_server, "execute_tool", return_value=esperado):
             resultado = mcp_server._handle_tools_call(
@@ -2223,6 +2254,8 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             "tool": "ler_documento_na_integra",
             "status": "processing",
             "mensagem": "Ainda processando. Consulte de novo em alguns segundos com o mesmo job_id.",
+            "request_status": "pendente",
+            "origem": "mcp_jobs",
         }
         with patch.object(mcp_server, "execute_tool", return_value=esperado):
             resultado = mcp_server._handle_tools_call(
@@ -2258,12 +2291,19 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         casos = [
             {"erro": "job_id obrigatorio."},
             {"erro": "Job 'x' nao encontrado.", "status": "not_found"},
-            {"job_id": "j1", "tool": "gerar_relatorio", "status": "done", "resultado": "texto"},
+            {
+                "job_id": "j1", "tool": "gerar_relatorio", "status": "done", "resultado": "texto",
+                "request_status": "concluido", "origem": "mcp_jobs",
+            },
             {
                 "job_id": "j2", "tool": "gerar_relatorio", "status": "error",
                 "erro": "falhou", "erro_tipo": "excecao",
+                "request_status": "falha_final", "origem": "mcp_jobs",
             },
-            {"job_id": "j3", "tool": "gerar_relatorio", "status": "processing", "mensagem": "..."},
+            {
+                "job_id": "j3", "tool": "gerar_relatorio", "status": "processing", "mensagem": "...",
+                "request_status": "pendente", "origem": "mcp_jobs",
+            },
         ]
         for mock_retorno in casos:
             with self.subTest(status=mock_retorno.get("status")):
