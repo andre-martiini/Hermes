@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -97,12 +97,19 @@ def calcular_lag_segundos(
     Devolve `None` quando nenhum dos dois está disponível -- não há idade
     para calcular, e `0.0` mentiria dizendo "acabou de ler com sucesso".
 
-    Levanta `ValueError` se o instante de referência (`coverage_until` ou
-    `last_success_at`, o que for usado) for POSTERIOR a `heartbeat_at` --
-    heartbeat descreve "agora, quando este registro foi calculado", então
-    uma leitura confirmada no futuro em relação a ele é entrada inconsistente
-    (relógio incorreto ou registro construído fora de ordem), não um caso a
-    normalizar silenciosamente.
+    Levanta `ValueError` se `last_success_at` OU `coverage_until` (qualquer
+    um dos dois fornecidos, não só o que acaba sendo usado como referência)
+    for POSTERIOR a `heartbeat_at` -- heartbeat descreve "agora, quando este
+    registro foi calculado", então uma leitura confirmada no futuro em
+    relação a ele é entrada inconsistente (relógio incorreto ou registro
+    construído fora de ordem), não um caso a normalizar silenciosamente.
+    Achado real de revisão automática do Codex (P2) na PR desta sub-entrega:
+    quando `coverage_until` é fornecido, ele vira a única referência usada no
+    cálculo, mas `last_success_at` (se também fornecido) nunca era comparado
+    a `heartbeat_at` -- um registro com heartbeat ao meio-dia, coverage_until
+    às 11h (válido) e last_success_at às 13h (POSTERIOR ao próprio heartbeat
+    que resume o estado) era aceito porque só o campo efetivamente usado no
+    cálculo passava por essa checagem.
 
     Valida tz-awareness de `last_success_at` E `coverage_until` quando
     fornecidos, mesmo que só um dos dois acabe sendo usado como referência --
@@ -113,25 +120,45 @@ def calcular_lag_segundos(
     `last_success_at` NAIVE não levantava erro nenhum -- o campo naive
     simplesmente nunca era examinado, quebrando a garantia de "todo datetime
     que devia ser um instante absoluto é validado" que o resto do módulo
-    segue."""
+    segue.
+
+    Normaliza todo datetime para UTC (`.astimezone(timezone.utc)`) ANTES de
+    subtrair -- outro achado real de revisão automática do Codex (P2) na PR
+    desta sub-entrega, mesma classe de bug já corrigida antes em
+    `autonomy/requests.py` (`nova_lease`, achado do Codex na PR #326):
+    `datetime - datetime` faz aritmética de "relógio de parede" quando os
+    dois operandos carregam um `tzinfo` ciente de DST (`ZoneInfo`), não
+    aritmética de tempo decorrido -- perto de uma transição de horário de
+    verão, dois instantes com o MESMO offset nominal mas em lados diferentes
+    da transição produzem um `total_seconds()` que não corresponde ao tempo
+    real decorrido (ex.: America/New_York, 01:15 antes do fallback até 01:45
+    depois do fallback é 1h30 de relógio de parede, mas 2h30 de tempo real
+    decorrido -- a diferença de uma hora inteira do fallback). Converter para
+    UTC (que não observa DST) antes de subtrair torna a aritmética sempre de
+    tempo decorrido de verdade, qualquer que seja o fuso de entrada."""
     _exigir_tz_aware(heartbeat_at, "heartbeat_at")
     if last_success_at is not None:
         _exigir_tz_aware(last_success_at, "last_success_at")
     if coverage_until is not None:
         _exigir_tz_aware(coverage_until, "coverage_until")
+
+    heartbeat_utc = heartbeat_at.astimezone(timezone.utc)
+    for nome, valor in (
+        ("last_success_at", last_success_at),
+        ("coverage_until", coverage_until),
+    ):
+        if valor is not None and valor.astimezone(timezone.utc) > heartbeat_utc:
+            raise ValueError(
+                f"{nome} é posterior a heartbeat_at ({nome}={valor.isoformat()}, "
+                f"heartbeat_at={heartbeat_at.isoformat()}) -- heartbeat_at deve "
+                "descrever um instante igual ou posterior a toda leitura que ele "
+                "resume."
+            )
+
     referencia = coverage_until if coverage_until is not None else last_success_at
     if referencia is None:
         return None
-    lag = (heartbeat_at - referencia).total_seconds()
-    if lag < 0:
-        raise ValueError(
-            "heartbeat_at é anterior ao instante de referência "
-            f"({'coverage_until' if coverage_until is not None else 'last_success_at'}"
-            f"={referencia.isoformat()}, heartbeat_at={heartbeat_at.isoformat()}) -- "
-            "heartbeat_at deve descrever um instante igual ou posterior à leitura "
-            "que ele resume."
-        )
-    return lag
+    return (heartbeat_utc - referencia.astimezone(timezone.utc)).total_seconds()
 
 
 def calcular_status_integracao(

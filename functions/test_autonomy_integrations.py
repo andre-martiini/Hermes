@@ -78,6 +78,44 @@ class TestCalcularLagSegundos(unittest.TestCase):
         with self.assertRaises(ValueError):
             calcular_lag_segundos(_AGORA, _NAIVE, _AGORA - timedelta(seconds=10))
 
+    def test_last_success_no_futuro_rejeitado_mesmo_quando_coverage_e_a_referencia(self):
+        # Achado real de revisão automática do Codex (P2) na PR desta
+        # sub-entrega: quando coverage_until domina o cálculo (é a
+        # referência usada), last_success_at nunca era comparado a
+        # heartbeat_at -- um last_success_at POSTERIOR ao próprio heartbeat
+        # que resume o estado passava despercebido.
+        heartbeat = _AGORA
+        coverage_valido = _AGORA - timedelta(hours=1)
+        last_success_no_futuro = _AGORA + timedelta(hours=1)
+        with self.assertRaises(ValueError):
+            calcular_lag_segundos(heartbeat, last_success_no_futuro, coverage_valido)
+
+    def test_coverage_no_futuro_rejeitado_mesmo_quando_last_success_e_a_referencia(self):
+        # Caso simétrico: coverage_until no futuro quando last_success_at
+        # (sem coverage_until) é que domina o cálculo -- coberto pelo mesmo
+        # loop de validação incondicional.
+        heartbeat = _AGORA
+        with self.assertRaises(ValueError):
+            calcular_lag_segundos(heartbeat, None, _AGORA + timedelta(hours=1))
+
+    def test_lag_correto_atraves_de_fallback_de_dst(self):
+        # Achado real de revisão automática do Codex (P2) na PR desta
+        # sub-entrega, mesma classe de bug já corrigida em
+        # autonomy/requests.py (nova_lease, achado do Codex na PR #326):
+        # datetime - datetime com os dois operandos num fuso ciente de DST
+        # (ZoneInfo) faz aritmética de relógio de parede, não de tempo
+        # decorrido. 01:15 (fold=0, ainda EDT/UTC-4) até 01:45 (fold=1, já
+        # EST/UTC-5) em America/New_York é 1h30 (5400s) de tempo real
+        # decorrido -- o fallback de DST de 2026-11-01 acontece no meio --
+        # mas só 30min (1800s) de diferença de relógio de parede.
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/New_York")
+        referencia = datetime(2026, 11, 1, 1, 15, tzinfo=tz, fold=0)
+        heartbeat = datetime(2026, 11, 1, 1, 45, tzinfo=tz, fold=1)
+        lag = calcular_lag_segundos(heartbeat, referencia, None)
+        self.assertEqual(lag, 5400.0)
+
 
 class TestCalcularStatusIntegracao(unittest.TestCase):
     def test_error_code_sempre_unavailable_mesmo_com_leitura_recente(self):
@@ -187,6 +225,15 @@ class TestCalcularStatusIntegracao(unittest.TestCase):
                 heartbeat_at=_AGORA,
                 last_success_at=_NAIVE,
                 coverage_until=_AGORA - timedelta(seconds=10),
+                error_code=None,
+            )
+
+    def test_last_success_no_futuro_rejeitado_mesmo_com_coverage_valido(self):
+        with self.assertRaises(ValueError):
+            calcular_status_integracao(
+                heartbeat_at=_AGORA,
+                last_success_at=_AGORA + timedelta(hours=1),
+                coverage_until=_AGORA - timedelta(hours=1),
                 error_code=None,
             )
 
