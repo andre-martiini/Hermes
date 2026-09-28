@@ -1127,5 +1127,84 @@ class TestSweepMcpJobsTravadosCore(unittest.TestCase):
         self.assertEqual(db._store["zzz-deve-ser-achado-na-pagina-2"]["status"], "error")
 
 
+class TestLerJobRequestStatus(unittest.TestCase):
+    """P04 passo 6 (2a metade): `ler_job` (consumida por `consultar_job`)
+    religa o adaptador puro `autonomy/mcp_jobs_adapter.py` -- projeta o job
+    no vocabulário unificado (`request_status`/`origem`) ADITIVO, sem alterar
+    `status` bruto nem nenhum outro campo já existente."""
+
+    UID = "dono-uid"
+
+    def _db_com_job(self, job_id, dados):
+        db = _MockDB()
+        db.collection(mcp_jobs.COLECAO)._docs[job_id] = dict(dados)
+        return db
+
+    def test_processing_sem_reivindicacao_e_pendente(self):
+        db = self._db_com_job("job-1", {"uid": self.UID, "status": "processing", "tool": "gerar_relatorio"})
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-1")
+        self.assertEqual(saida["status"], "processing")
+        self.assertEqual(saida["request_status"], "pendente")
+        self.assertEqual(saida["origem"], "mcp_jobs")
+        self.assertEqual(saida["mensagem"], "Ainda processando. Consulte de novo em alguns segundos com o mesmo job_id.")
+
+    def test_processing_reivindicado_e_em_andamento(self):
+        db = self._db_com_job(
+            "job-2",
+            {"uid": self.UID, "status": "processing", "reivindicado_em": "algo-truthy"},
+        )
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-2")
+        self.assertEqual(saida["request_status"], "em_andamento")
+
+    def test_done_e_concluido_e_preserva_resultado(self):
+        db = self._db_com_job(
+            "job-3",
+            {"uid": self.UID, "status": "done", "resultado": "relatório pronto"},
+        )
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-3")
+        self.assertEqual(saida["request_status"], "concluido")
+        self.assertEqual(saida["origem"], "mcp_jobs")
+        self.assertEqual(saida["resultado"], "relatório pronto")
+
+    def test_error_e_falha_final_e_preserva_erro(self):
+        db = self._db_com_job(
+            "job-4",
+            {"uid": self.UID, "status": "error", "erro": "falhou", "erro_tipo": mcp_jobs.ERRO_TIPO_EXCECAO},
+        )
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-4")
+        self.assertEqual(saida["request_status"], "falha_final")
+        self.assertEqual(saida["erro"], "falhou")
+        self.assertEqual(saida["erro_tipo"], mcp_jobs.ERRO_TIPO_EXCECAO)
+
+    def test_status_desconhecido_omite_campos_novos_sem_quebrar_a_leitura(self):
+        # Dado corrompido ou de uma versão futura ainda não traduzida pelo
+        # adaptador -- fail-closed do adaptador não deve virar falha da
+        # consulta em si (achado documentado no comentário de `ler_job`).
+        db = self._db_com_job("job-5", {"uid": self.UID, "status": "algo-nunca-visto"})
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-5")
+        self.assertEqual(saida["status"], "algo-nunca-visto")
+        self.assertNotIn("request_status", saida)
+        self.assertNotIn("origem", saida)
+
+    def test_job_nao_encontrado_nao_ganha_campos_novos(self):
+        db = _MockDB()
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-inexistente")
+        self.assertEqual(saida["status"], "not_found")
+        self.assertNotIn("request_status", saida)
+
+    def test_uid_diferente_nao_ganha_campos_novos(self):
+        db = self._db_com_job("job-6", {"uid": "outro-uid", "status": "done", "resultado": "x"})
+        with mock.patch("mcp_jobs._db", return_value=db):
+            saida = mcp_jobs.ler_job(self.UID, "job-6")
+        self.assertEqual(saida["status"], "not_found")
+        self.assertNotIn("request_status", saida)
+
+
 if __name__ == "__main__":
     unittest.main()
