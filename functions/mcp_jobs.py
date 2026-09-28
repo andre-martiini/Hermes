@@ -58,6 +58,8 @@ from datetime import datetime, timedelta, timezone
 from firebase_functions import firestore_fn, options, scheduler_fn
 from firebase_admin import firestore
 
+from autonomy.mcp_jobs_adapter import StatusMcpJobDesconhecido, resumo_protocolo_de_job
+
 COLECAO = "mcp_jobs"
 
 # Retorno maior que isto e truncado: `Claude.ai`/Desktop cortam o resultado de
@@ -368,6 +370,23 @@ def ler_job(uid: str, job_id: str) -> dict:
         "tool": dados.get("tool"),
         "status": dados.get("status"),
     }
+    # P04 passo 6 (2a metade, "religar o adaptador puro a um consumidor
+    # real" -- docs/autonomia/execucao.md, pendência da sub-entrega 11/N):
+    # projeta o mesmo job no vocabulário unificado de
+    # `autonomy.requests.RequestStatus` (autonomy/mcp_jobs_adapter.py),
+    # ADITIVO -- não substitui nem reinterpreta `status` acima, que continua
+    # sendo o valor bruto de `mcp_jobs.py`. Um `status` fora do conjunto
+    # conhecido (dado corrompido ou de uma versão futura ainda não
+    # traduzida) só omite os dois campos novos, sem quebrar a consulta: o
+    # adaptador é fail-closed por design (nunca adivinha uma tradução), mas
+    # `ler_job` continua sendo, antes de mais nada, uma leitura do estado
+    # bruto do job -- não deve falhar por causa de uma tradução opcional.
+    try:
+        resumo = resumo_protocolo_de_job(job_id, dados)
+        saida["request_status"] = resumo["request_status"]
+        saida["origem"] = resumo["origem"]
+    except StatusMcpJobDesconhecido:
+        pass
     if dados.get("status") == "done":
         saida["resultado"] = dados.get("resultado")
     elif dados.get("status") == "error":

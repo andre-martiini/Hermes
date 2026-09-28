@@ -2024,8 +2024,20 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                     "tool": {"type": "string"},
                     "status": {"const": "done"},
                     "resultado": {"type": "string"},
+                    # P04 sub-entrega 12/N (passo 6, adaptador ->
+                    # RequestStatus, autonomy/mcp_jobs_adapter.py): ler_job
+                    # SEMPRE consegue traduzir um status "done" (esta no
+                    # conjunto conhecido do adaptador), entao os dois campos
+                    # sao tao garantidos quanto os demais deste branch --
+                    # ver `required` abaixo. Achado real de revisao
+                    # automatica do Codex na PR #371: sem isso aqui,
+                    # `additionalProperties: false` rejeitava toda resposta
+                    # normal de consultar_job em um cliente MCP que valida
+                    # structuredContent contra o outputSchema publicado.
+                    "request_status": {"const": "concluido"},
+                    "origem": {"const": "mcp_jobs"},
                 },
-                "required": ["job_id", "tool", "status", "resultado"],
+                "required": ["job_id", "tool", "status", "resultado", "request_status", "origem"],
                 "additionalProperties": False,
             },
             {
@@ -2048,8 +2060,13 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                         "required": ["decision", "reason_code"],
                         "additionalProperties": False,
                     },
+                    # Ver comentario no branch "done" acima -- mesmo motivo,
+                    # mesma garantia (status "error" tambem esta sempre no
+                    # conjunto conhecido do adaptador).
+                    "request_status": {"const": "falha_final"},
+                    "origem": {"const": "mcp_jobs"},
                 },
-                "required": ["job_id", "tool", "status", "erro"],
+                "required": ["job_id", "tool", "status", "erro", "request_status", "origem"],
                 "additionalProperties": False,
             },
             {
@@ -2059,8 +2076,17 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                     "tool": {"type": "string"},
                     "status": {"const": "processing"},
                     "mensagem": {"type": "string"},
+                    # Ver comentario no branch "done" acima. Unico branch
+                    # onde request_status tem 2 valores possiveis -- "status"
+                    # bruto "processing" colapsa reivindicado_em ausente
+                    # ("pendente") e presente ("em_andamento") no MESMO
+                    # `status` const deste schema (ambos sao "processing"
+                    # no documento cru); ver mcp_jobs.py::ler_job e
+                    # autonomy/mcp_jobs_adapter.py::request_status_de_job.
+                    "request_status": {"type": "string", "enum": ["pendente", "em_andamento"]},
+                    "origem": {"const": "mcp_jobs"},
                 },
-                "required": ["job_id", "tool", "status", "mensagem"],
+                "required": ["job_id", "tool", "status", "mensagem", "request_status", "origem"],
                 "additionalProperties": False,
             },
         ],
