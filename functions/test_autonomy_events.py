@@ -3,10 +3,10 @@
 original e produzir evento com ID determinístico").
 
 Cobre: determinismo de `calcular_event_id` (mesma entrada -> mesmo ID,
-qualquer campo diferente -> ID diferente), consistência forçada entre
-`EventEnvelope.event_id` e seus próprios campos, exigência de datetime
-timezone-aware, e o catálogo de `CategoriaEvento` (as 8 categorias do passo
-1, verbatim).
+qualquer campo diferente -> ID diferente, incluindo occurred_at),
+consistência forçada entre `EventEnvelope.event_id` e seus próprios campos,
+exigência de datetime timezone-aware, e o catálogo de `CategoriaEvento` (as
+8 categorias do passo 1, verbatim).
 """
 
 import unittest
@@ -21,6 +21,7 @@ from autonomy.events import (
 
 _AGORA = datetime(2026, 9, 28, 12, 0, 0, tzinfo=timezone.utc)
 _ANTES = datetime(2026, 9, 28, 11, 55, 0, tzinfo=timezone.utc)
+_DEPOIS = datetime(2026, 9, 28, 13, 30, 0, tzinfo=timezone.utc)
 
 
 class TestCategoriaEvento(unittest.TestCase):
@@ -47,10 +48,10 @@ class TestCategoriaEvento(unittest.TestCase):
 class TestCalcularEventId(unittest.TestCase):
     def test_e_deterministico(self):
         id1 = calcular_event_id(
-            CategoriaEvento.MENSAGEM, "whatsapp_messages", "msg-1", {"texto": "oi"}
+            CategoriaEvento.MENSAGEM, "whatsapp_messages", "msg-1", {"texto": "oi"}, _ANTES
         )
         id2 = calcular_event_id(
-            CategoriaEvento.MENSAGEM, "whatsapp_messages", "msg-1", {"texto": "oi"}
+            CategoriaEvento.MENSAGEM, "whatsapp_messages", "msg-1", {"texto": "oi"}, _ANTES
         )
         self.assertEqual(id1, id2)
 
@@ -58,37 +59,67 @@ class TestCalcularEventId(unittest.TestCase):
         # hash_canonico já ordena chaves -- este teste garante que
         # calcular_event_id não reintroduz sensibilidade à ordem por cima.
         id1 = calcular_event_id(
-            CategoriaEvento.TAREFA, "tarefas", "t-1", {"a": 1, "b": 2}
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"a": 1, "b": 2}, _ANTES
         )
         id2 = calcular_event_id(
-            CategoriaEvento.TAREFA, "tarefas", "t-1", {"b": 2, "a": 1}
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"b": 2, "a": 1}, _ANTES
         )
         self.assertEqual(id1, id2)
 
     def test_categoria_diferente_muda_o_id(self):
-        base = calcular_event_id(CategoriaEvento.TAREFA, "col", "doc-1", {"x": 1})
-        outro = calcular_event_id(CategoriaEvento.AGENDA, "col", "doc-1", {"x": 1})
+        base = calcular_event_id(CategoriaEvento.TAREFA, "col", "doc-1", {"x": 1}, _ANTES)
+        outro = calcular_event_id(CategoriaEvento.AGENDA, "col", "doc-1", {"x": 1}, _ANTES)
         self.assertNotEqual(base, outro)
 
     def test_fonte_colecao_diferente_muda_o_id(self):
-        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1})
-        outro = calcular_event_id(CategoriaEvento.TAREFA, "outras_tarefas", "doc-1", {"x": 1})
+        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1}, _ANTES)
+        outro = calcular_event_id(
+            CategoriaEvento.TAREFA, "outras_tarefas", "doc-1", {"x": 1}, _ANTES
+        )
         self.assertNotEqual(base, outro)
 
     def test_fonte_doc_id_diferente_muda_o_id(self):
-        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1})
-        outro = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-2", {"x": 1})
+        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1}, _ANTES)
+        outro = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-2", {"x": 1}, _ANTES)
         self.assertNotEqual(base, outro)
 
     def test_payload_diferente_muda_o_id(self):
-        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1})
-        outro = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 2})
+        base = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 1}, _ANTES)
+        outro = calcular_event_id(CategoriaEvento.TAREFA, "tarefas", "doc-1", {"x": 2}, _ANTES)
         self.assertNotEqual(base, outro)
+
+    def test_occurred_at_diferente_muda_o_id(self):
+        # Achado real de revisão automática do Codex (P2) na PR #373: uma
+        # fonte mutável que revisita o MESMO payload_identificador (ex.:
+        # tarefa que volta a um status anterior) precisa produzir um
+        # event_id DIFERENTE quando a ocorrência é genuinamente outra --
+        # occurred_at é o que distingue as duas nesse cenário.
+        base = calcular_event_id(
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"status": "em_andamento"}, _ANTES
+        )
+        outro = calcular_event_id(
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"status": "em_andamento"}, _DEPOIS
+        )
+        self.assertNotEqual(base, outro)
+
+    def test_mesmo_occurred_at_preserva_dedup_de_reentrega(self):
+        # O reverso do teste acima: uma REENTREGA de verdade do MESMO
+        # evento de origem (mesmo occurred_at, porque é a mesma ocorrência
+        # no mundo real) continua produzindo o MESMO event_id -- a garantia
+        # de dedup por reentrega (passo 4) não foi enfraquecida pela
+        # correção do achado do Codex.
+        id1 = calcular_event_id(
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"status": "em_andamento"}, _ANTES
+        )
+        id2 = calcular_event_id(
+            CategoriaEvento.TAREFA, "tarefas", "t-1", {"status": "em_andamento"}, _ANTES
+        )
+        self.assertEqual(id1, id2)
 
     def test_payload_vazio_nao_quebra(self):
         # Payload vazio é uma decisão legítima de quem chama (ver docstring
         # de calcular_event_id) -- não deste módulo impor não-vacuidade.
-        event_id = calcular_event_id(CategoriaEvento.REPOSITORIO, "col", "doc-1", {})
+        event_id = calcular_event_id(CategoriaEvento.REPOSITORIO, "col", "doc-1", {}, _ANTES)
         self.assertIsInstance(event_id, str)
         self.assertTrue(event_id)
 
@@ -98,7 +129,17 @@ class TestCalcularEventId(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             calcular_event_id(
-                CategoriaEvento.DOCUMENTO, "col", "doc-1", {"x": NaoSerializavel()}
+                CategoriaEvento.DOCUMENTO, "col", "doc-1", {"x": NaoSerializavel()}, _ANTES
+            )
+
+    def test_occurred_at_naive_levanta_valueerror(self):
+        with self.assertRaises(ValueError):
+            calcular_event_id(
+                CategoriaEvento.DOCUMENTO,
+                "col",
+                "doc-1",
+                {"x": 1},
+                datetime(2026, 9, 28, 11, 0, 0),  # sem tzinfo
             )
 
     def test_dois_pontos_em_fonte_colecao_nao_colide_com_fonte_doc_id_vizinho(self):
@@ -108,10 +149,10 @@ class TestCalcularEventId(unittest.TestCase):
         # pares abaixo são fontes logicamente DISTINTAS e devem produzir
         # event_id DIFERENTE.
         id1 = calcular_event_id(
-            CategoriaEvento.MENSAGEM, "whatsapp", "messages:msg-1", {"x": 1}
+            CategoriaEvento.MENSAGEM, "whatsapp", "messages:msg-1", {"x": 1}, _ANTES
         )
         id2 = calcular_event_id(
-            CategoriaEvento.MENSAGEM, "whatsapp:messages", "msg-1", {"x": 1}
+            CategoriaEvento.MENSAGEM, "whatsapp:messages", "msg-1", {"x": 1}, _ANTES
         )
         self.assertNotEqual(id1, id2)
 
@@ -127,7 +168,11 @@ class TestMontarEvento(unittest.TestCase):
             ingested_at=_AGORA,
         )
         esperado = calcular_event_id(
-            CategoriaEvento.SIPAC, "sipac_processos", "proc-123", {"status": "tramitando"}
+            CategoriaEvento.SIPAC,
+            "sipac_processos",
+            "proc-123",
+            {"status": "tramitando"},
+            _ANTES,
         )
         self.assertEqual(evento.event_id, esperado)
 
@@ -178,12 +223,57 @@ class TestMontarEvento(unittest.TestCase):
         )
         self.assertEqual(evento1.event_id, evento2.event_id)
 
+    def test_ingested_at_diferente_nao_muda_event_id(self):
+        # ingested_at é "quando ESTE processo viu o evento" -- varia a cada
+        # reprocessamento/replay do MESMO evento de origem, então não pode
+        # participar da identidade (ao contrário de occurred_at).
+        evento1 = montar_evento(
+            categoria=CategoriaEvento.TAREFA,
+            fonte_colecao="tarefas",
+            fonte_doc_id="t-9",
+            payload_identificador={"status": "concluida"},
+            occurred_at=_ANTES,
+            ingested_at=_AGORA,
+        )
+        evento2 = montar_evento(
+            categoria=CategoriaEvento.TAREFA,
+            fonte_colecao="tarefas",
+            fonte_doc_id="t-9",
+            payload_identificador={"status": "concluida"},
+            occurred_at=_ANTES,
+            ingested_at=_DEPOIS,
+        )
+        self.assertEqual(evento1.event_id, evento2.event_id)
+
+    def test_tarefa_que_volta_a_status_anterior_produz_event_id_diferente(self):
+        # Cenário exato do achado do Codex: mesma tarefa, mesmo status,
+        # revisitado numa ocorrência posterior genuinamente diferente.
+        primeira_ocorrencia = montar_evento(
+            categoria=CategoriaEvento.TAREFA,
+            fonte_colecao="tarefas",
+            fonte_doc_id="t-42",
+            payload_identificador={"status": "em_andamento"},
+            occurred_at=_ANTES,
+            ingested_at=_ANTES,
+        )
+        segunda_ocorrencia = montar_evento(
+            categoria=CategoriaEvento.TAREFA,
+            fonte_colecao="tarefas",
+            fonte_doc_id="t-42",
+            payload_identificador={"status": "em_andamento"},
+            occurred_at=_DEPOIS,
+            ingested_at=_DEPOIS,
+        )
+        self.assertNotEqual(primeira_ocorrencia.event_id, segunda_ocorrencia.event_id)
+
 
 class TestEventEnvelopePostInit(unittest.TestCase):
     def _evento_valido_kwargs(self):
         payload = {"x": 1}
         return dict(
-            event_id=calcular_event_id(CategoriaEvento.MENSAGEM, "col", "doc-1", payload),
+            event_id=calcular_event_id(
+                CategoriaEvento.MENSAGEM, "col", "doc-1", payload, _ANTES
+            ),
             categoria=CategoriaEvento.MENSAGEM,
             fonte_colecao="col",
             fonte_doc_id="doc-1",
@@ -198,6 +288,17 @@ class TestEventEnvelopePostInit(unittest.TestCase):
     def test_event_id_incompativel_levanta_valueerror(self):
         kwargs = self._evento_valido_kwargs()
         kwargs["event_id"] = "hash-forjado-que-nao-bate"
+        with self.assertRaises(ValueError):
+            EventEnvelope(**kwargs)
+
+    def test_event_id_calculado_com_occurred_at_diferente_e_rejeitado(self):
+        # event_id calculado para _DEPOIS, mas o envelope construído com
+        # occurred_at=_ANTES -- __post_init__ precisa recalcular usando o
+        # occurred_at DO ENVELOPE, não aceitar qualquer hash bem-formado.
+        kwargs = self._evento_valido_kwargs()
+        kwargs["event_id"] = calcular_event_id(
+            CategoriaEvento.MENSAGEM, "col", "doc-1", {"x": 1}, _DEPOIS
+        )
         with self.assertRaises(ValueError):
             EventEnvelope(**kwargs)
 
@@ -258,7 +359,11 @@ class TestEventEnvelopePostInit(unittest.TestCase):
         self.assertEqual(
             evento.event_id,
             calcular_event_id(
-                CategoriaEvento.TAREFA, "tarefas", "t-1", evento.payload_identificador
+                CategoriaEvento.TAREFA,
+                "tarefas",
+                "t-1",
+                evento.payload_identificador,
+                evento.occurred_at,
             ),
         )
 

@@ -56,15 +56,17 @@ def calcular_event_id(
     fonte_colecao: str,
     fonte_doc_id: str,
     payload_identificador: Mapping[str, Any],
+    occurred_at: datetime,
 ) -> str:
     """ID determinístico do evento -- passo 2 do pacote.
 
-    Mesma (categoria, fonte_colecao, fonte_doc_id, conteúdo identificador)
-    sempre produz o MESMO event_id, permitindo dedup por reentrega (passo 4,
-    "validar origem, deduplicar...") sem exigir armazenamento externo do que
-    já foi visto -- reprocessar a mesma ocorrência produz o mesmo ID, então
-    um consumidor idempotente (outbox/dispatcher, sub-entrega futura) pode
-    usar o próprio event_id como chave de dedup.
+    Mesma (categoria, fonte_colecao, fonte_doc_id, conteúdo identificador,
+    occurred_at) sempre produz o MESMO event_id, permitindo dedup por
+    reentrega (passo 4, "validar origem, deduplicar...") sem exigir
+    armazenamento externo do que já foi visto -- reprocessar a mesma
+    ocorrência produz o mesmo ID, então um consumidor idempotente
+    (outbox/dispatcher, sub-entrega futura) pode usar o próprio event_id
+    como chave de dedup.
 
     `payload_identificador` é o SUBCONJUNTO dos campos da fonte que define
     "a mesma ocorrência" -- deliberadamente não o documento inteiro: campos
@@ -77,36 +79,66 @@ def calcular_event_id(
     payload muito diferentes -- uma mensagem de WhatsApp e uma linha de
     fatura não compartilham estrutura).
 
+    `occurred_at` PARTICIPA do hash -- achado REAL de revisão automática do
+    Codex (P2) na PR #373: uma fonte MUTÁVEL que volta a um valor já visto
+    antes (ex.: uma tarefa que retorna a um status anterior) produz o MESMO
+    `payload_identificador` das duas vezes; sem `occurred_at` no hash, as
+    duas ocorrências -- genuinamente distintas no mundo real -- colidiriam
+    no mesmo event_id, e um consumidor futuro de dedup por event_id (passo
+    4, ainda não implementado) descartaria silenciosamente a ocorrência mais
+    recente como se fosse reentrega da mais antiga. Incluir `occurred_at`
+    resolve isso SEM enfraquecer a garantia de dedup por reentrega: uma
+    reentrega de verdade (mesmo webhook reentregue, mesmo trigger reexecutado
+    sobre o mesmo evento de origem) preserva o mesmo `occurred_at` -- é
+    "quando a ocorrência aconteceu no mundo real, segundo a fonte"
+    (`EventEnvelope.occurred_at`), não quando ESTE processo a viu, então não
+    varia entre reentregas do MESMO evento, só entre ocorrências
+    genuinamente diferentes. Isto não elimina por completo o caso
+    degenerado de duas ocorrências coincidindo em categoria+fonte+payload+
+    occurred_at (ex.: fonte com granularidade de timestamp grosseira demais
+    para distinguir duas mudanças reais no mesmo instante) -- mas isso é
+    responsabilidade de qualidade de dado de quem chama (mesma classe de
+    responsabilidade já documentada para `payload_identificador`), não algo
+    que este módulo possa resolver sem um token de versão/sequência que a
+    fonte não necessariamente fornece.
+
     Reusa `autonomy.ledger.hash_canonico` (mesmo hash SHA-256 de
     serialização canônica já usado para idempotência de operação em P04) em
     vez de reimplementar canonicalização -- mesma regra de "mesmo valor
-    lógico produz o mesmo hash" nos dois módulos. Os quatro componentes
-    (categoria, fonte_colecao, fonte_doc_id, payload_identificador) são
-    passados como campos NOMEADOS de um único dict a `hash_canonico`, nunca
-    concatenados como string com separador -- achado real de revisão
-    adversarial independente (1a rodada, P05 sub-entrega 1/N): concatenar
-    com ":" (`f"{fonte_colecao}:{fonte_doc_id}"`) faz `fonte_colecao`
-    conter um ":" colidir com `fonte_doc_id` vizinho (ex.:
-    `("whatsapp", "messages:msg-1")` e `("whatsapp:messages", "msg-1")`
+    lógico produz o mesmo hash" nos dois módulos. Os cinco componentes
+    (categoria, fonte_colecao, fonte_doc_id, payload_identificador,
+    occurred_at) são passados como campos NOMEADOS de um único dict a
+    `hash_canonico`, nunca concatenados como string com separador --
+    achado real de revisão adversarial independente (1a rodada, P05
+    sub-entrega 1/N): concatenar com ":" (`f"{fonte_colecao}:{fonte_doc_id}"`)
+    faz `fonte_colecao` conter um ":" colidir com `fonte_doc_id` vizinho
+    (ex.: `("whatsapp", "messages:msg-1")` e `("whatsapp:messages", "msg-1")`
     produziam o MESMO event_id) -- plausível na prática, já que várias das
     categorias do passo 1 usam identificadores com ":" (JID do WhatsApp,
     referência de processo SIPAC, `owner/repo:branch`). Delegar a
     serialização inteira (incluindo o aninhamento de cada campo em sua
     própria chave JSON) a `hash_canonico` evita esse tipo de colisão de
     delimitador -- é a mesma razão pela qual `hash_canonico` já serializa
-    para JSON em vez de concatenar valores.
+    para JSON em vez de concatenar valores. `occurred_at` entra como
+    `.isoformat()` (string), já que `hash_canonico` exige valores
+    serializáveis em JSON e `datetime` não é um deles diretamente.
 
     `payload_identificador` precisa ser serializável em JSON (mesma
     exigência documentada em `hash_canonico`); um valor que não for levanta
     `TypeError` -- isso é responsabilidade de quem monta o payload, não
-    deste módulo.
+    deste módulo. `occurred_at` precisa ser timezone-aware (mesma exigência
+    de `EventEnvelope`, aqui verificada via `_exigir_tz_aware` antes do
+    hash, já que esta função pode ser chamada isoladamente sem nunca passar
+    por `EventEnvelope.__post_init__`).
     """
+    _exigir_tz_aware(occurred_at, "occurred_at")
     return hash_canonico(
         {
             "categoria": categoria.value,
             "fonte_colecao": fonte_colecao,
             "fonte_doc_id": fonte_doc_id,
             "payload_identificador": dict(payload_identificador),
+            "occurred_at": occurred_at.isoformat(),
         }
     )
 
@@ -126,8 +158,11 @@ class EventEnvelope:
     replay/reprocessamento tem `ingested_at` novo mas `occurred_at`
     preservado, para que um consumidor futuro (outbox/dispatcher, sub-entrega
     seguinte) possa decidir não tratar evento antigo replayado como urgente.
-    Este módulo só carrega os dois campos; a decisão de supressão por idade é
-    do consumidor, ainda não implementada aqui.
+    Além disso `occurred_at` (não `ingested_at`) participa do cálculo de
+    `event_id` -- ver `calcular_event_id` para o porquê (achado real de
+    revisão automática do Codex, P2, PR #373: sem isso, uma fonte mutável
+    que revisita um valor já visto -- ex.: tarefa que volta a um status
+    anterior -- colidiria com a ocorrência antiga no mesmo event_id).
 
     Não construa esta classe diretamente com um `event_id` calculado à mão
     -- use `montar_evento()`, que calcula o hash e monta o envelope numa
@@ -178,14 +213,18 @@ class EventEnvelope:
         )
         object.__setattr__(self, "metadata", _snapshot_json(dict(self.metadata)))
         event_id_esperado = calcular_event_id(
-            self.categoria, self.fonte_colecao, self.fonte_doc_id, self.payload_identificador
+            self.categoria,
+            self.fonte_colecao,
+            self.fonte_doc_id,
+            self.payload_identificador,
+            self.occurred_at,
         )
         if self.event_id != event_id_esperado:
             raise ValueError(
                 "event_id não bate com o hash determinístico de "
-                "(categoria, fonte_colecao, fonte_doc_id, payload_identificador) -- "
-                "use montar_evento() para construir um EventEnvelope consistente "
-                "em vez de calcular event_id manualmente."
+                "(categoria, fonte_colecao, fonte_doc_id, payload_identificador, "
+                "occurred_at) -- use montar_evento() para construir um EventEnvelope "
+                "consistente em vez de calcular event_id manualmente."
             )
 
 
@@ -203,7 +242,9 @@ def montar_evento(
     (e nunca consiga, sem duplicar `calcular_event_id`) produzir um
     event_id inconsistente com seus próprios campos. `EventEnvelope.__post_init__`
     já falha fechado nesse caso; esta função evita o erro na origem."""
-    event_id = calcular_event_id(categoria, fonte_colecao, fonte_doc_id, payload_identificador)
+    event_id = calcular_event_id(
+        categoria, fonte_colecao, fonte_doc_id, payload_identificador, occurred_at
+    )
     return EventEnvelope(
         event_id=event_id,
         categoria=categoria,
