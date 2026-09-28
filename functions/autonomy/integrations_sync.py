@@ -184,7 +184,22 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     em `status == "error"` (fim da rodada, com ou sem sucesso), então usá-lo
     misturaria "quando a última rodada terminou" com "quando a última
     LEITURA confiável aconteceu" -- exatamente a distinção que
-    `last_success_at` existe para preservar."""
+    `last_success_at` existe para preservar.
+
+    LIMITAÇÃO CONHECIDA (achado real de revisão automática do Codex,
+    comment_id=4125412121, P2, na PR desta sub-entrega): `last_success` é do
+    job GLOBAL de `run_full_sync`, não específico do Calendar --
+    `sync_google_calendar` (`main.py`, por `calendar_id`) captura falhas
+    comuns de listagem (qualquer erro exceto credencial revogada) e apenas
+    loga e CONTINUA para o próximo calendário (`continue`, sem propagar),
+    então uma falha persistente ao listar um ou mais calendários não impede
+    o job global de terminar com `status="completed"` e `last_success`
+    fresco. Um Calendar genuinamente quebrado (não por credencial revogada)
+    pode ser reportado como `HEALTHY` por este leitor. Correção de verdade
+    exige um sinal de sucesso/erro PRÓPRIO do Calendar, que não existe hoje
+    -- fora do escopo desta sub-entrega (leitor puro dos docs já existentes,
+    sem novo escritor); ver `pendencias` do bloco desta sub-entrega em
+    docs/autonomia/execucao.md."""
     doc = doc or {}
     status = doc.get("status")
     error_code = _error_code_de_mensagem(doc.get("error_message")) if status == "error" else None
@@ -252,7 +267,23 @@ def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     nenhum campo de status/erro (confirmado em `whatsapp_ingest.py`: as 4
     gravações deste doc são todas `cursor_ref.set({"last_processed_at":
     ...}, merge=True)`) -- `error_code` é sempre `None`; a única fonte de
-    sinal é a frescor do cursor."""
+    sinal é a frescor do cursor.
+
+    LIMITAÇÃO CONHECIDA (achado real de revisão automática do Codex,
+    comment_id=4125412129, P2, na PR desta sub-entrega): `last_processed_at`
+    é a idade da ÚLTIMA MENSAGEM processada, não da última tentativa de
+    sincronização bem-sucedida -- `triage_whatsapp_messages`
+    (`whatsapp_ingest.py`) retorna sem avançar o cursor sempre que a query
+    não encontra nenhum documento novo (`whatsapp_messages` vazio desde o
+    cursor atual). Uma conta legitimamente ociosa (ninguém manda mensagem
+    por horas) pode ser reportada como `DEGRADED`/`UNAVAILABLE` mesmo com o
+    polling horário rodando perfeitamente -- cursor de dados não distingue
+    "sync quebrado" de "nada de novo para sincronizar". Correção de verdade
+    exige um sinal de tentativa/sucesso SEPARADO do cursor de dados (ex.:
+    `last_attempt_at` gravado a cada rodada do polling, sucesso ou não), que
+    não existe hoje -- fora do escopo desta sub-entrega (leitor puro dos
+    docs já existentes, sem novo escritor); ver `pendencias` do bloco desta
+    sub-entrega em docs/autonomia/execucao.md."""
     doc = doc or {}
     limite_degradado, limite_indisponivel = LIMITES_POR_INTEGRACAO["whatsapp"]
     return montar_saude_integracao(
