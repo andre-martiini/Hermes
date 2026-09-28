@@ -26,13 +26,13 @@ docs/autonomia/execucao.md.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from .ledger import hash_canonico
+from .ledger import _snapshot_json, hash_canonico
 from .requests import _exigir_tz_aware
 
 
@@ -55,7 +55,7 @@ def calcular_event_id(
     categoria: CategoriaEvento,
     fonte_colecao: str,
     fonte_doc_id: str,
-    payload_identificador: Mapping,
+    payload_identificador: Mapping[str, Any],
 ) -> str:
     """ID determinístico do evento -- passo 2 do pacote.
 
@@ -80,16 +80,35 @@ def calcular_event_id(
     Reusa `autonomy.ledger.hash_canonico` (mesmo hash SHA-256 de
     serialização canônica já usado para idempotência de operação em P04) em
     vez de reimplementar canonicalização -- mesma regra de "mesmo valor
-    lógico produz o mesmo hash" nos dois módulos. `payload_identificador`
-    precisa ser serializável em JSON (mesma exigência documentada em
-    `hash_canonico`); um valor que não for levanta `TypeError` -- isso é
-    responsabilidade de quem monta o payload, não deste módulo.
+    lógico produz o mesmo hash" nos dois módulos. Os quatro componentes
+    (categoria, fonte_colecao, fonte_doc_id, payload_identificador) são
+    passados como campos NOMEADOS de um único dict a `hash_canonico`, nunca
+    concatenados como string com separador -- achado real de revisão
+    adversarial independente (1a rodada, P05 sub-entrega 1/N): concatenar
+    com ":" (`f"{fonte_colecao}:{fonte_doc_id}"`) faz `fonte_colecao`
+    conter um ":" colidir com `fonte_doc_id` vizinho (ex.:
+    `("whatsapp", "messages:msg-1")` e `("whatsapp:messages", "msg-1")`
+    produziam o MESMO event_id) -- plausível na prática, já que várias das
+    categorias do passo 1 usam identificadores com ":" (JID do WhatsApp,
+    referência de processo SIPAC, `owner/repo:branch`). Delegar a
+    serialização inteira (incluindo o aninhamento de cada campo em sua
+    própria chave JSON) a `hash_canonico` evita esse tipo de colisão de
+    delimitador -- é a mesma razão pela qual `hash_canonico` já serializa
+    para JSON em vez de concatenar valores.
+
+    `payload_identificador` precisa ser serializável em JSON (mesma
+    exigência documentada em `hash_canonico`); um valor que não for levanta
+    `TypeError` -- isso é responsabilidade de quem monta o payload, não
+    deste módulo.
     """
-    chave = (
-        f"{categoria.value}:{fonte_colecao}:{fonte_doc_id}:"
-        f"{hash_canonico(dict(payload_identificador))}"
+    return hash_canonico(
+        {
+            "categoria": categoria.value,
+            "fonte_colecao": fonte_colecao,
+            "fonte_doc_id": fonte_doc_id,
+            "payload_identificador": dict(payload_identificador),
+        }
     )
-    return hashlib.sha256(chave.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -116,6 +135,26 @@ class EventEnvelope:
     falha fechado se `event_id` não bater, para que um bug de wiring futuro
     (sub-entrega que ligar isto a um trigger real) quebre alto e cedo, não
     silenciosamente com um event_id que não é realmente determinístico.
+
+    `payload_identificador`/`metadata` são congelados RECURSIVAMENTE em
+    `__post_init__` (via `autonomy.ledger._snapshot_json`, mesmo mecanismo
+    de `Checkpoint.dados`/`LedgerEntry.resultado` em `ledger.py`) -- achado
+    real de revisão adversarial independente (1a rodada, P05 sub-entrega
+    1/N): `frozen=True` só impede reatribuir o ATRIBUTO
+    (`evento.payload_identificador = outra_coisa` levanta
+    `FrozenInstanceError`), nunca protegeu o CONTEÚDO de um `dict` mutável
+    apontado por ele -- sem o congelamento, `evento.payload_identificador["x"]
+    = 999` funcionava silenciosamente e invalidava a garantia de consistência
+    com `event_id` que este `__post_init__` afirma proteger; o mesmo valia
+    para o `dict` do CHAMADOR ser guardado por referência (mutá-lo depois de
+    construir o envelope também mudava o envelope). Depois do congelamento,
+    ambos os campos passam a ser `MappingProxyType`/`tuple` recursivos (não
+    hasheáveis por si só -- não coloque um `EventEnvelope` num `set`/chave de
+    `dict`; dedup é por `event_id`, uma `str`).
+
+    O hash de `event_id` é calculado sobre o `payload_identificador` já
+    congelado (não sobre o valor cru recebido do chamador), para que o que é
+    verificado seja exatamente o que fica armazenado no envelope.
     """
 
     event_id: str
@@ -124,8 +163,8 @@ class EventEnvelope:
     fonte_doc_id: str
     occurred_at: datetime
     ingested_at: datetime
-    payload_identificador: Mapping = field(default_factory=dict)
-    metadata: Mapping = field(default_factory=dict)
+    payload_identificador: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not str(self.fonte_colecao).strip():
@@ -134,6 +173,10 @@ class EventEnvelope:
             raise ValueError("fonte_doc_id não pode ser vazio.")
         _exigir_tz_aware(self.occurred_at, "occurred_at")
         _exigir_tz_aware(self.ingested_at, "ingested_at")
+        object.__setattr__(
+            self, "payload_identificador", _snapshot_json(dict(self.payload_identificador))
+        )
+        object.__setattr__(self, "metadata", _snapshot_json(dict(self.metadata)))
         event_id_esperado = calcular_event_id(
             self.categoria, self.fonte_colecao, self.fonte_doc_id, self.payload_identificador
         )
@@ -150,10 +193,10 @@ def montar_evento(
     categoria: CategoriaEvento,
     fonte_colecao: str,
     fonte_doc_id: str,
-    payload_identificador: Mapping,
+    payload_identificador: Mapping[str, Any],
     occurred_at: datetime,
     ingested_at: datetime,
-    metadata: Mapping | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> EventEnvelope:
     """Forma preferida de construir um `EventEnvelope`: calcula o event_id e
     monta o envelope numa única chamada, para que quem chama nunca precise

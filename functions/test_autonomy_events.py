@@ -101,6 +101,20 @@ class TestCalcularEventId(unittest.TestCase):
                 CategoriaEvento.DOCUMENTO, "col", "doc-1", {"x": NaoSerializavel()}
             )
 
+    def test_dois_pontos_em_fonte_colecao_nao_colide_com_fonte_doc_id_vizinho(self):
+        # Achado real da 1a rodada de revisão adversarial: concatenar
+        # fonte_colecao/fonte_doc_id com ":" faz um ":" DENTRO de um dos dois
+        # campos deslocar a fronteira e colidir com o campo vizinho. Ambos os
+        # pares abaixo são fontes logicamente DISTINTAS e devem produzir
+        # event_id DIFERENTE.
+        id1 = calcular_event_id(
+            CategoriaEvento.MENSAGEM, "whatsapp", "messages:msg-1", {"x": 1}
+        )
+        id2 = calcular_event_id(
+            CategoriaEvento.MENSAGEM, "whatsapp:messages", "msg-1", {"x": 1}
+        )
+        self.assertNotEqual(id1, id2)
+
 
 class TestMontarEvento(unittest.TestCase):
     def test_event_id_bate_com_calcular_event_id(self):
@@ -215,6 +229,55 @@ class TestEventEnvelopePostInit(unittest.TestCase):
         evento = EventEnvelope(**self._evento_valido_kwargs())
         with self.assertRaises(Exception):
             evento.fonte_doc_id = "outro"
+
+    def test_payload_identificador_congelado_nao_aceita_mutacao_direta(self):
+        # Achado real da 1a rodada de revisão adversarial: frozen=True só
+        # impede reatribuir o ATRIBUTO, não mutar o dict que ele aponta.
+        # payload_identificador precisa ser um tipo que RECUSA
+        # item-assignment (MappingProxyType), não só "seja um dict que a
+        # gente promete não mutar".
+        evento = EventEnvelope(**self._evento_valido_kwargs())
+        with self.assertRaises(TypeError):
+            evento.payload_identificador["x"] = 999
+
+    def test_mutar_dict_do_chamador_depois_de_montar_evento_nao_afeta_envelope(self):
+        payload_do_chamador = {"y": 1}
+        evento = montar_evento(
+            categoria=CategoriaEvento.TAREFA,
+            fonte_colecao="tarefas",
+            fonte_doc_id="t-1",
+            payload_identificador=payload_do_chamador,
+            occurred_at=_ANTES,
+            ingested_at=_AGORA,
+        )
+        payload_do_chamador["y"] = 999
+        payload_do_chamador["novo"] = "vazamento"
+        self.assertEqual(dict(evento.payload_identificador), {"y": 1})
+        # A garantia central do módulo continua válida mesmo após a
+        # tentativa de mutação externa.
+        self.assertEqual(
+            evento.event_id,
+            calcular_event_id(
+                CategoriaEvento.TAREFA, "tarefas", "t-1", evento.payload_identificador
+            ),
+        )
+
+    def test_mutar_dict_aninhado_do_chamador_nao_vaza_para_o_envelope(self):
+        # Cópia rasa (dict(payload_identificador)) não bastaria aqui -- um
+        # dict ANINHADO dentro do payload continuaria compartilhado com o
+        # chamador. _snapshot_json precisa congelar recursivamente.
+        aninhado = {"inner": 1}
+        payload_do_chamador = {"a": aninhado}
+        evento = montar_evento(
+            categoria=CategoriaEvento.DOCUMENTO,
+            fonte_colecao="conhecimento",
+            fonte_doc_id="doc-1",
+            payload_identificador=payload_do_chamador,
+            occurred_at=_ANTES,
+            ingested_at=_AGORA,
+        )
+        aninhado["inner"] = 999
+        self.assertEqual(dict(evento.payload_identificador["a"]), {"inner": 1})
 
 
 if __name__ == "__main__":
