@@ -70,6 +70,14 @@ class TestCalcularLagSegundos(unittest.TestCase):
         with self.assertRaises(ValueError):
             calcular_lag_segundos(_AGORA, None, _NAIVE)
 
+    def test_last_success_naive_e_rejeitado_mesmo_quando_coverage_valido_e_usado(self):
+        # Achado de revisão adversarial (P05 sub-entrega 2/N): last_success_at
+        # não é a referência usada quando coverage_until está presente, mas
+        # ainda assim deve ser validado -- não pode "passar despercebido" só
+        # porque não foi o campo escolhido para o cálculo do lag.
+        with self.assertRaises(ValueError):
+            calcular_lag_segundos(_AGORA, _NAIVE, _AGORA - timedelta(seconds=10))
+
 
 class TestCalcularStatusIntegracao(unittest.TestCase):
     def test_error_code_sempre_unavailable_mesmo_com_leitura_recente(self):
@@ -173,6 +181,15 @@ class TestCalcularStatusIntegracao(unittest.TestCase):
                 error_code="   ",
             )
 
+    def test_last_success_naive_e_rejeitado_mesmo_com_coverage_valido(self):
+        with self.assertRaises(ValueError):
+            calcular_status_integracao(
+                heartbeat_at=_AGORA,
+                last_success_at=_NAIVE,
+                coverage_until=_AGORA - timedelta(seconds=10),
+                error_code=None,
+            )
+
 
 class TestMontarSaudeIntegracao(unittest.TestCase):
     def test_registro_healthy_consistente(self):
@@ -230,6 +247,22 @@ class TestMontarSaudeIntegracao(unittest.TestCase):
         capabilities["leitura"] = False
         capabilities["nova"] = "x"
         self.assertEqual(dict(saude.capabilities), {"leitura": True})
+
+    def test_mutar_dict_aninhado_de_capabilities_depois_nao_vaza(self):
+        # Gap de cobertura apontado por revisão adversarial (P05 sub-entrega
+        # 2/N): os testes anteriores só cobriam mutação de chave de topo --
+        # uma regressão que trocasse o congelamento recursivo por uma cópia
+        # RASA (`dict(self.capabilities)`) passaria despercebida sem este
+        # teste, já que uma cópia rasa protege o dict de topo mas não o
+        # dict aninhado dentro dele.
+        capabilities = {"leitura": True, "detalhe": {"escopo": "completo"}}
+        saude = montar_saude_integracao(
+            integration="drive", heartbeat_at=_AGORA, capabilities=capabilities
+        )
+        capabilities["detalhe"]["escopo"] = "parcial"
+        self.assertEqual(dict(saude.capabilities["detalhe"]), {"escopo": "completo"})
+        with self.assertRaises(TypeError):
+            saude.capabilities["detalhe"]["escopo"] = "parcial"
 
 
 class TestIntegrationHealthPostInit(unittest.TestCase):
@@ -293,6 +326,33 @@ class TestIntegrationHealthPostInit(unittest.TestCase):
                 status=IntegrationStatus.UNKNOWN,
                 last_success_at=_AGORA,
                 lag_seconds=0.0,
+                error_code="timeout",
+            )
+
+    def test_status_healthy_com_erro_presente_levanta_value_error(self):
+        # Gap de cobertura apontado por revisão adversarial (P05 sub-entrega
+        # 2/N): só havia teste de error_code + status errado para o caso
+        # UNKNOWN; uma regressão que checasse só "error_code e status ==
+        # UNKNOWN" (em vez de "error_code e status != UNAVAILABLE") passaria
+        # despercebida sem este teste.
+        with self.assertRaises(ValueError):
+            IntegrationHealth(
+                integration="whatsapp",
+                heartbeat_at=_AGORA,
+                status=IntegrationStatus.HEALTHY,
+                last_success_at=_AGORA,
+                lag_seconds=0.0,
+                error_code="timeout",
+            )
+
+    def test_status_degraded_com_erro_presente_levanta_value_error(self):
+        with self.assertRaises(ValueError):
+            IntegrationHealth(
+                integration="whatsapp",
+                heartbeat_at=_AGORA,
+                status=IntegrationStatus.DEGRADED,
+                last_success_at=_AGORA - timedelta(seconds=100),
+                lag_seconds=100.0,
                 error_code="timeout",
             )
 

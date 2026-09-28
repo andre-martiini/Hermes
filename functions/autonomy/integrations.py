@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -102,12 +102,26 @@ def calcular_lag_segundos(
     heartbeat descreve "agora, quando este registro foi calculado", então
     uma leitura confirmada no futuro em relação a ele é entrada inconsistente
     (relógio incorreto ou registro construído fora de ordem), não um caso a
-    normalizar silenciosamente."""
+    normalizar silenciosamente.
+
+    Valida tz-awareness de `last_success_at` E `coverage_until` quando
+    fornecidos, mesmo que só um dos dois acabe sendo usado como referência --
+    achado real de revisão adversarial independente (P05 sub-entrega 2/N):
+    sem isto, chamar esta função isoladamente (fora de
+    `montar_saude_integracao`/`IntegrationHealth`, que validam os dois campos
+    incondicionalmente em `__post_init__`) com `coverage_until` válido e
+    `last_success_at` NAIVE não levantava erro nenhum -- o campo naive
+    simplesmente nunca era examinado, quebrando a garantia de "todo datetime
+    que devia ser um instante absoluto é validado" que o resto do módulo
+    segue."""
     _exigir_tz_aware(heartbeat_at, "heartbeat_at")
+    if last_success_at is not None:
+        _exigir_tz_aware(last_success_at, "last_success_at")
+    if coverage_until is not None:
+        _exigir_tz_aware(coverage_until, "coverage_until")
     referencia = coverage_until if coverage_until is not None else last_success_at
     if referencia is None:
         return None
-    _exigir_tz_aware(referencia, "coverage_until" if coverage_until is not None else "last_success_at")
     lag = (heartbeat_at - referencia).total_seconds()
     if lag < 0:
         raise ValueError(
