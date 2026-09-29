@@ -205,11 +205,26 @@ def registrar_falha(
     rng: object | None = None,
 ) -> OutboxEntry:
     """Tentativa de despacho falhou. Incrementa `tentativas`; se o total
-    alcançar `max_tentativas`, transiciona para `FALHA_FINAL` (terminal --
+    ULTRAPASSAR `max_tentativas`, transiciona para `FALHA_FINAL` (terminal --
     esgotou as retentativas automáticas, precisa de intervenção/reconciliação
     futura). Caso contrário permanece `PENDENTE` com `disponivel_em`
     avançado pelo backoff de `autonomy.requests.calcular_backoff_segundos`
     para a nova contagem de tentativas.
+
+    O corte é `novas_tentativas > max_tentativas` (estritamente maior), NÃO
+    `>=` -- achado real de revisão automática do Codex (P2) na PR desta
+    sub-entrega: com `max_tentativas` padrão de 3 (seção 4.5, mesmo
+    `DEFAULT_MAX_TENTATIVAS` de `autonomy.requests`), `>=` desistia na 3a
+    falha sem nunca conceder o patamar de 20 minutos de
+    `calcular_backoff_segundos` -- usando só 2 dos 3 patamares documentados
+    (1/5/20 min). Mesmo achado, mesma correção e mesmo raciocínio já
+    aplicados a `autonomy.sweep` (achado do Codex na PR #344) para o mesmo
+    tipo de corte -- ver a docstring de `autonomy.sweep.tratar_lease_vencida`
+    para a explicação completa. Com `>`, as `max_tentativas` retentativas
+    automáticas são todas concedidas antes de desistir na falha seguinte (a
+    `max_tentativas + 1`-ésima) -- então `max_tentativas=1` NÃO significa
+    "falha imediatamente na 1a tentativa": significa "conceda 1 retentativa
+    (com backoff), desista na 2a falha".
 
     `max_tentativas` e `rng` existem para o mesmo motivo de
     `calcular_backoff_segundos`: permitir teste determinístico (RNG com seed
@@ -224,7 +239,7 @@ def registrar_falha(
         raise ValueError("max_tentativas deve ser >= 1.")
 
     novas_tentativas = entrada.tentativas + 1
-    if novas_tentativas >= max_tentativas:
+    if novas_tentativas > max_tentativas:
         return replace(
             entrada,
             estado=EstadoOutbox.FALHA_FINAL,

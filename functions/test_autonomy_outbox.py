@@ -215,10 +215,15 @@ class TestRegistrarSucesso(unittest.TestCase):
 
     def test_ja_em_falha_final_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
+        # Corte e "> max_tentativas", nao ">=" -- com max_tentativas=1 a 1a
+        # falha ainda concede 1 retentativa (PENDENTE); so a 2a falha (a
+        # max_tentativas+1-esima) vira FALHA_FINAL.
         falha1 = registrar_falha(entrada, _AGORA, "e1", max_tentativas=1, rng=_RngFixo(0.0))
-        self.assertEqual(falha1.estado, EstadoOutbox.FALHA_FINAL)
+        self.assertEqual(falha1.estado, EstadoOutbox.PENDENTE)
+        falha2 = registrar_falha(falha1, _AGORA, "e2", max_tentativas=1, rng=_RngFixo(0.0))
+        self.assertEqual(falha2.estado, EstadoOutbox.FALHA_FINAL)
         with self.assertRaises(EstadoOutboxTerminal):
-            registrar_sucesso(falha1, _AGORA)
+            registrar_sucesso(falha2, _AGORA)
 
     def test_agora_naive_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
@@ -248,22 +253,43 @@ class TestRegistrarFalha(unittest.TestCase):
             falha2.disponivel_em, _AGORA + timedelta(seconds=BACKOFF_BASE_SEGUNDOS[1])
         )
 
-    def test_atinge_max_tentativas_padrao_vira_falha_final(self):
+    def test_terceira_falha_ainda_concede_o_terceiro_patamar(self):
+        # Achado real de revisao automatica do Codex (P2) nesta sub-entrega:
+        # o corte precisa ser "> max_tentativas", nao ">=" -- com
+        # max_tentativas=3 (padrao), a 3a falha AINDA agenda o patamar de 20
+        # minutos (BACKOFF_BASE_SEGUNDOS[2]) em vez de desistir direto,
+        # senao o patamar de 20 min documentado nunca seria usado. Mesmo
+        # achado/correcao ja aplicados a autonomy.sweep (PR #344).
         entrada = criar_entrada(_evento(), _AGORA)
         falha1 = registrar_falha(entrada, _AGORA, "e1", rng=_RngFixo(0.0))
         falha2 = registrar_falha(falha1, _AGORA, "e2", rng=_RngFixo(0.0))
         falha3 = registrar_falha(falha2, _AGORA, "e3", rng=_RngFixo(0.0))
-        self.assertEqual(falha3.estado, EstadoOutbox.FALHA_FINAL)
+        self.assertEqual(falha3.estado, EstadoOutbox.PENDENTE)
         self.assertEqual(falha3.tentativas, 3)
-        self.assertEqual(falha3.ultimo_erro, "e3")
-        # FALHA_FINAL não agenda mais retentativa -- disponivel_em congela.
-        self.assertEqual(falha3.disponivel_em, falha2.disponivel_em)
+        self.assertEqual(
+            falha3.disponivel_em, _AGORA + timedelta(seconds=BACKOFF_BASE_SEGUNDOS[2])
+        )
 
-    def test_max_tentativas_customizado_um_falha_direto_para_final(self):
+    def test_quarta_falha_com_max_tentativas_padrao_vira_falha_final(self):
         entrada = criar_entrada(_evento(), _AGORA)
-        falha = registrar_falha(entrada, _AGORA, "e1", max_tentativas=1, rng=_RngFixo(0.0))
-        self.assertEqual(falha.estado, EstadoOutbox.FALHA_FINAL)
-        self.assertEqual(falha.tentativas, 1)
+        falha1 = registrar_falha(entrada, _AGORA, "e1", rng=_RngFixo(0.0))
+        falha2 = registrar_falha(falha1, _AGORA, "e2", rng=_RngFixo(0.0))
+        falha3 = registrar_falha(falha2, _AGORA, "e3", rng=_RngFixo(0.0))
+        falha4 = registrar_falha(falha3, _AGORA, "e4", rng=_RngFixo(0.0))
+        self.assertEqual(falha4.estado, EstadoOutbox.FALHA_FINAL)
+        self.assertEqual(falha4.tentativas, 4)
+        self.assertEqual(falha4.ultimo_erro, "e4")
+        # FALHA_FINAL não agenda mais retentativa -- disponivel_em congela.
+        self.assertEqual(falha4.disponivel_em, falha3.disponivel_em)
+
+    def test_max_tentativas_customizado_um_concede_uma_retentativa_depois_falha_final(self):
+        entrada = criar_entrada(_evento(), _AGORA)
+        falha1 = registrar_falha(entrada, _AGORA, "e1", max_tentativas=1, rng=_RngFixo(0.0))
+        self.assertEqual(falha1.estado, EstadoOutbox.PENDENTE)
+        self.assertEqual(falha1.tentativas, 1)
+        falha2 = registrar_falha(falha1, _AGORA, "e2", max_tentativas=1, rng=_RngFixo(0.0))
+        self.assertEqual(falha2.estado, EstadoOutbox.FALHA_FINAL)
+        self.assertEqual(falha2.tentativas, 2)
 
     def test_max_tentativas_menor_que_um_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
@@ -279,8 +305,10 @@ class TestRegistrarFalha(unittest.TestCase):
     def test_ja_em_falha_final_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
         falha1 = registrar_falha(entrada, _AGORA, "e1", max_tentativas=1, rng=_RngFixo(0.0))
+        falha2 = registrar_falha(falha1, _AGORA, "e2", max_tentativas=1, rng=_RngFixo(0.0))
+        self.assertEqual(falha2.estado, EstadoOutbox.FALHA_FINAL)
         with self.assertRaises(EstadoOutboxTerminal):
-            registrar_falha(falha1, _AGORA, "e2", max_tentativas=1)
+            registrar_falha(falha2, _AGORA, "e3", max_tentativas=1)
 
     def test_agora_naive_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
