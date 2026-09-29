@@ -199,7 +199,21 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     exige um sinal de sucesso/erro PRÓPRIO do Calendar, que não existe hoje
     -- fora do escopo desta sub-entrega (leitor puro dos docs já existentes,
     sem novo escritor); ver `pendencias` do bloco desta sub-entrega em
-    docs/autonomia/execucao.md."""
+    docs/autonomia/execucao.md.
+
+    CONFIRMAÇÃO ADICIONAL (achado real de revisão automática do Codex,
+    comment_id=4131386963, P2, na PR que fechou a tool
+    `consultar_saude_integracoes`, seção 6 do plano): o mesmo doc
+    `system/sync` também é escrito por `sync_gmail_bills_callable`
+    (`main.py`, sincronização MANUAL de boletos do Gmail via app) --
+    `sync_ref.update({"status": "completed", "last_success": ...})` ao
+    final, SEM nenhuma sincronização de Calendar envolvida. Ou seja, o
+    escritor que "refresca" `last_success` nem sempre é `run_full_sync`
+    (job periódico que ao menos tenta o Calendar) -- pode ser uma ação de
+    usuário sobre boletos, completamente alheia ao Calendar. Mesma causa
+    raiz do achado anterior (o timestamp é do doc, não da integração),
+    mesma correção pendente (sinal próprio do Calendar), mesmo motivo de
+    não ser corrigido aqui."""
     doc = doc or {}
     status = doc.get("status")
     error_code = _error_code_de_mensagem(doc.get("error_message")) if status == "error" else None
