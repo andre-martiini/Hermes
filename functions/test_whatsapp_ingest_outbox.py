@@ -1,6 +1,8 @@
 """Testes do primeiro escritor real do outbox de eventos (P05, passo 3 do
-pacote): `whatsapp_ingest.py::_digest_occurred_at`/`_registrar_evento_outbox_digest`,
-chamadas por `_save_whatsapp_digest` logo após gravar o digest. Não cobre
+pacote): `whatsapp_ingest.py::_digest_occurred_at`/`_montar_evento_outbox_digest`,
+usadas por `_save_whatsapp_digest` para montar o `EventEnvelope` persistido
+junto com o digest via `event_outbox.registrar_evento_outbox_transacional`
+(ver test_event_outbox.py para a escrita transacional em si). Não cobre
 `_save_whatsapp_digest`/`triage_whatsapp_messages` inteiras (dependem de
 cliente Gemini/embeddings/Firestore reais e não têm suíte própria ainda) --
 só o pedaço novo desta sub-entrega.
@@ -9,45 +11,10 @@ só o pedaço novo desta sub-entrega.
 import unittest
 from datetime import datetime, timezone
 
-import event_outbox
 import whatsapp_ingest
-from autonomy.outbox import EstadoOutbox
+from autonomy.events import CategoriaEvento
 
 _AGORA = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
-
-
-class _FakeDocRef:
-    def __init__(self, store, doc_id):
-        self._store = store
-        self.id = doc_id
-
-    def get(self):
-        return _FakeDocSnap(self._store.get(self.id))
-
-    def set(self, data):
-        self._store[self.id] = dict(data)
-
-
-class _FakeDocSnap:
-    def __init__(self, data):
-        self.exists = data is not None
-
-
-class _FakeCollection:
-    def __init__(self, store):
-        self._store = store
-
-    def document(self, doc_id):
-        return _FakeDocRef(self._store, doc_id)
-
-
-class _FakeDb:
-    def __init__(self):
-        self._store = {}
-
-    def collection(self, nome):
-        assert nome == event_outbox.COLECAO
-        return _FakeCollection(self._store)
 
 
 class TestDigestOccurredAt(unittest.TestCase):
@@ -76,28 +43,41 @@ class TestDigestOccurredAt(unittest.TestCase):
         self.assertTrue(antes <= resultado <= depois)
 
 
-class TestRegistrarEventoOutboxDigest(unittest.TestCase):
-    def test_grava_uma_entrada_de_outbox_pendente(self):
-        db = _FakeDb()
+class TestMontarEventoOutboxDigest(unittest.TestCase):
+    def test_categoria_e_fonte(self):
         messages = [{"timestamp": _AGORA}]
-        whatsapp_ingest._registrar_evento_outbox_digest(
-            db, "digest-1", "chat-1", messages, {"relevancia": "acao"}
-        )
-        self.assertEqual(len(db._store), 1)
-        (doc,) = db._store.values()
-        self.assertEqual(doc["estado"], EstadoOutbox.PENDENTE.value)
-        self.assertEqual(doc["fonte_colecao"], whatsapp_ingest.DIGEST_COLLECTION)
-        self.assertEqual(doc["fonte_doc_id"], "digest-1")
-        self.assertEqual(doc["payload_identificador"]["wa_chat_id"], "chat-1")
-        self.assertEqual(doc["payload_identificador"]["relevancia"], "acao")
-        self.assertEqual(doc["payload_identificador"]["n_mensagens"], 1)
+        evento = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {"relevancia": "acao"})
+        self.assertEqual(evento.categoria, CategoriaEvento.MENSAGEM)
+        self.assertEqual(evento.fonte_colecao, whatsapp_ingest.DIGEST_COLLECTION)
+        self.assertEqual(evento.fonte_doc_id, "digest-1")
 
-    def test_chamar_duas_vezes_para_o_mesmo_digest_nao_duplica(self):
-        db = _FakeDb()
+    def test_relevancia_vai_para_metadata_nao_para_payload_identificador(self):
+        # Achado real de revisão automática do Codex (PR #382): "relevancia"
+        # é saída do modelo (não determinística entre retries da mesma
+        # janela) -- se entrasse em payload_identificador, participaria do
+        # hash de event_id e quebraria a dedup por reentrega.
         messages = [{"timestamp": _AGORA}]
-        whatsapp_ingest._registrar_evento_outbox_digest(db, "digest-1", "chat-1", messages, {"relevancia": "acao"})
-        whatsapp_ingest._registrar_evento_outbox_digest(db, "digest-1", "chat-1", messages, {"relevancia": "acao"})
-        self.assertEqual(len(db._store), 1)
+        evento = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {"relevancia": "acao"})
+        self.assertNotIn("relevancia", evento.payload_identificador)
+        self.assertEqual(evento.metadata["relevancia"], "acao")
+
+    def test_payload_identificador_tem_wa_chat_id_e_n_mensagens(self):
+        messages = [{"timestamp": _AGORA}, {"timestamp": _AGORA}]
+        evento = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {"relevancia": "acao"})
+        self.assertEqual(evento.payload_identificador["wa_chat_id"], "chat-1")
+        self.assertEqual(evento.payload_identificador["n_mensagens"], 2)
+
+    def test_relevancia_diferente_entre_retries_nao_muda_o_event_id(self):
+        messages = [{"timestamp": _AGORA}]
+        evento_a = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {"relevancia": "acao"})
+        evento_b = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {"relevancia": "ruido"})
+        self.assertEqual(evento_a.event_id, evento_b.event_id)
+
+    def test_occurred_at_usa_digest_occurred_at(self):
+        ts = datetime(2026, 9, 29, 11, 30, 0, tzinfo=timezone.utc)
+        messages = [{"timestamp": ts}]
+        evento = whatsapp_ingest._montar_evento_outbox_digest("digest-1", "chat-1", messages, {})
+        self.assertEqual(evento.occurred_at, ts)
 
 
 if __name__ == "__main__":

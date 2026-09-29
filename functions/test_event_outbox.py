@@ -3,11 +3,18 @@
 módulo é a primeira sub-entrega que persiste/despacha uma entrada de
 verdade, passo 3 do pacote).
 
-Fake de Firestore mínimo em memória, mesmo estilo de `_FakeSweepDb`/
-`_FakeSweepQuery`/`_FakeSweepSnap` de `test_mcp_jobs.py`
-(`TestSweepMcpJobsTravadosCore`), estendido para também suportar
-`collection().document(id).get()/.set()` — `registrar_evento_outbox` usa
-esse caminho, o dispatcher usa o caminho de query/stream.
+Dois fakes de Firestore separados, cada um mínimo para o que sua classe de
+teste exercita:
+- `_FakeDb`/`_FakeQuery` (mesmo estilo de `_FakeSweepDb`/`_FakeSweepQuery`
+  de `test_mcp_jobs.py::TestSweepMcpJobsTravadosCore`) para o dispatcher
+  (`despachar_outbox_eventos_core`), que só usa `.where()/.order_by()/
+  .limit()/.start_after()/.stream()` e `doc_ref.update()` fora de transação.
+- `_MockDb`/`_MockTransaction` (mesmo double fiel do protocolo real de
+  `google.cloud.firestore_v1.transaction.Transaction` já usado em
+  `test_agent_requests.py` -- implementa `_begin/_clean_up/_commit/_rollback/
+  _max_attempts/_read_only` para que o decorator real `@firestore.transactional`
+  exercite o mesmo caminho de código de produção) para
+  `registrar_evento_outbox_transacional`.
 """
 
 import unittest
@@ -145,37 +152,150 @@ class _RngFixo:
         return self._valor
 
 
-class TestRegistrarEventoOutbox(unittest.TestCase):
-    def test_grava_entrada_nova_pendente(self):
-        db = _FakeDb()
+class _MockDocSnapTx:
+    def __init__(self, doc_id, data):
+        self.id = doc_id
+        self._data = dict(data) if data is not None else None
+        self.exists = data is not None
+
+    def to_dict(self):
+        return dict(self._data) if self._data is not None else {}
+
+
+class _MockDocRefTx:
+    def __init__(self, col, doc_id):
+        self.col = col
+        self.id = doc_id
+
+    def get(self, transaction=None):
+        return _MockDocSnapTx(self.id, self.col._docs.get(self.id))
+
+    def set(self, data, merge=False):
+        if merge and self.id in self.col._docs:
+            self.col._docs[self.id].update(data)
+        else:
+            self.col._docs[self.id] = dict(data)
+
+
+class _MockCollectionTx:
+    def __init__(self, name):
+        self.name = name
+        self._docs: dict = {}
+
+    def document(self, doc_id):
+        return _MockDocRefTx(self, doc_id)
+
+
+class _MockTransaction:
+    """Double fiel do protocolo real (google.cloud.firestore_v1.transaction.
+    Transaction), mesmo modelo de test_agent_requests.py::_MockTransaction:
+    implementa _begin/_clean_up/_commit/_rollback/_max_attempts/_read_only
+    para que o decorator real `@firestore.transactional` exercite o mesmo
+    caminho de código de produção."""
+
+    def __init__(self):
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, doc_ref):
+        return doc_ref.get()
+
+    def set(self, doc_ref, data, merge=False):
+        doc_ref.set(data, merge=merge)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        self._id = retry_id or b"mock-tx-id"
+
+
+class _MockDb:
+    def __init__(self):
+        self._collections: dict[str, _MockCollectionTx] = {}
+
+    def collection(self, name):
+        if name not in self._collections:
+            self._collections[name] = _MockCollectionTx(name)
+        return self._collections[name]
+
+    def transaction(self):
+        return _MockTransaction()
+
+
+class TestRegistrarEventoOutboxTransacional(unittest.TestCase):
+    def test_grava_entrada_nova_pendente_e_o_efeito_junto(self):
+        db = _MockDb()
         evento = _evento()
-        criou = event_outbox.registrar_evento_outbox(db, evento, agora=_AGORA)
+        efeito_col = db.collection("whatsapp_digests")
+
+        criou = event_outbox.registrar_evento_outbox_transacional(
+            db, evento, agora=_AGORA,
+            escrever_efeito=lambda tx: tx.set(efeito_col.document("digest-1"), {"resumo": "oi"}),
+        )
+
         self.assertTrue(criou)
-        doc = db._store[evento.event_id]
+        self.assertEqual(efeito_col._docs["digest-1"], {"resumo": "oi"})
+        doc = db.collection(event_outbox.COLECAO)._docs[evento.event_id]
         self.assertEqual(doc["estado"], EstadoOutbox.PENDENTE.value)
         self.assertEqual(doc["tentativas"], 0)
         self.assertEqual(doc["fonte_colecao"], "whatsapp_digests")
         self.assertEqual(doc["fonte_doc_id"], "digest-1")
 
     def test_e_idempotente_por_event_id(self):
-        db = _FakeDb()
+        db = _MockDb()
         evento = _evento()
-        event_outbox.registrar_evento_outbox(db, evento, agora=_AGORA)
+        outbox_col = db.collection(event_outbox.COLECAO)
+
+        event_outbox.registrar_evento_outbox_transacional(
+            db, evento, agora=_AGORA, escrever_efeito=lambda tx: None,
+        )
         # Simula uma entrada já em progresso (despachada) -- uma segunda
         # chamada com o MESMO evento (reentrega) não pode reiniciar isso.
-        db._store[evento.event_id]["estado"] = EstadoOutbox.ENVIADO.value
+        outbox_col._docs[evento.event_id]["estado"] = EstadoOutbox.ENVIADO.value
         depois = _AGORA + timedelta(minutes=5)
-        criou_de_novo = event_outbox.registrar_evento_outbox(db, evento, agora=depois)
+
+        criou_de_novo = event_outbox.registrar_evento_outbox_transacional(
+            db, evento, agora=depois, escrever_efeito=lambda tx: None,
+        )
+
         self.assertFalse(criou_de_novo)
-        self.assertEqual(db._store[evento.event_id]["estado"], EstadoOutbox.ENVIADO.value)
+        self.assertEqual(outbox_col._docs[evento.event_id]["estado"], EstadoOutbox.ENVIADO.value)
 
     def test_duas_ocorrencias_distintas_geram_entradas_distintas(self):
-        db = _FakeDb()
+        db = _MockDb()
         evento1 = _evento(occurred_at=_AGORA)
         evento2 = _evento(occurred_at=_AGORA + timedelta(minutes=10))
-        event_outbox.registrar_evento_outbox(db, evento1, agora=_AGORA)
-        event_outbox.registrar_evento_outbox(db, evento2, agora=_AGORA)
-        self.assertEqual(len(db._store), 2)
+
+        event_outbox.registrar_evento_outbox_transacional(db, evento1, agora=_AGORA, escrever_efeito=lambda tx: None)
+        event_outbox.registrar_evento_outbox_transacional(db, evento2, agora=_AGORA, escrever_efeito=lambda tx: None)
+
+        self.assertEqual(len(db.collection(event_outbox.COLECAO)._docs), 2)
+
+    def test_efeito_que_levanta_impede_a_entrada_de_outbox_de_ser_gravada(self):
+        # A escrita do efeito acontece DENTRO da transação, antes do
+        # transaction.set() do outbox -- se ela levantar, nada deveria ter
+        # sido persistido (mesma garantia atômica que motivou esta função:
+        # ver docstring do módulo, achado real do Codex na PR #382).
+        db = _MockDb()
+        evento = _evento()
+
+        def _efeito_com_erro(tx):
+            raise RuntimeError("falha simulada na escrita do efeito")
+
+        with self.assertRaises(RuntimeError):
+            event_outbox.registrar_evento_outbox_transacional(
+                db, evento, agora=_AGORA, escrever_efeito=_efeito_com_erro,
+            )
+
+        self.assertNotIn(evento.event_id, db.collection(event_outbox.COLECAO)._docs)
 
 
 class TestDespacharOutboxEventosCore(unittest.TestCase):

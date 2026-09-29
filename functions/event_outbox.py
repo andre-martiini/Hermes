@@ -13,7 +13,7 @@ PONTE: converte `OutboxEntry`/`EventEnvelope` de/para o `dict` que o
 Firestore lê e grava (mesmo papel que `agent_requests.py` cumpre para
 `autonomy/requests.py` e `mcp_jobs.py` cumpre para `autonomy/mcp_jobs_adapter.py`),
 e implementa o primeiro (e, por ora, único) escritor ponta a ponta:
-`whatsapp_ingest.py::_save_whatsapp_digest` -- ver `registrar_evento_outbox`
+`whatsapp_ingest.py::_save_whatsapp_digest` -- ver `registrar_evento_outbox_transacional`
 e seu único chamador.
 
 Coleção nova: `outbox_eventos` -- deliberadamente NÃO `outbox` nem
@@ -24,45 +24,65 @@ mais antigo e completamente diferente deste). ID do doc = `OutboxEntry.entry_id`
 (== `EventEnvelope.event_id`, hash determinístico) -- dedupe estrutural,
 mesmo padrão de `email_action_suggestions` (ID do doc = ID do sinal).
 
-Escrita (`registrar_evento_outbox`) segue o mesmo padrão de idempotência de
-`email_action_linker.py::queue_and_maybe_send_suggestion` (checar
-`doc_ref.get().exists` antes de escrever) em vez de `doc_ref.create()` --
-mesma escolha por consistência de estilo com o único outro escritor
-idempotente-por-ID-determinístico já existente no arquivo que esta sub-entrega
-modifica (`whatsapp_ingest.py` já chama `queue_and_maybe_send_suggestion`
-algumas linhas antes do novo ponto de chamada). NÃO é a mesma transação
-Firestore da escrita do digest -- o passo 3 do pacote lista isso como
-ALTERNATIVA ("... ou usar outbox de eventos ..."), não como exigência
-adicional; o comentário no ponto de chamada em `whatsapp_ingest.py` explica
-por que a falha desta escrita é não-fatal para o digest.
+Escrita: `registrar_evento_outbox_transacional` grava o efeito principal
+(fornecido pelo chamador via `escrever_efeito`) E a entrada de outbox NA
+MESMA transação Firestore -- achado real de revisão automática do Codex
+nesta sub-entrega (PR #382): uma versão anterior deste módulo tinha
+`registrar_evento_outbox` como uma escrita separada, não-transacional, log
+e siga-em-frente em caso de falha; se a escrita do efeito principal
+sucedesse mas a escrita do outbox falhasse de forma transitória logo em
+seguida, o evento era perdido para sempre -- nenhum consumidor futuro
+jamais o veria, e nada reconstrói uma entrada de outbox a partir do efeito
+já gravado (o outbox não é derivado do efeito, é uma segunda escrita
+independente). `registrar_evento_outbox_transacional` fecha essa lacuna
+lendo a existência da entrada e escrevendo os dois documentos dentro de
+`@firestore.transactional`, mesmo padrão de `agent_requests.py::enfileirar_ou_atualizar`
+(leitura + escrita atômica, sem fallback para escrita desprotegida se a
+transação falhar -- ver a docstring de lá para o raciocínio: uma falha de
+transação propaga para o chamador em vez de arriscar uma escrita parcial;
+`whatsapp_ingest.py::_save_whatsapp_digest` já não protegia sua própria
+escrita do digest com try/except antes desta sub-entrega, então deixar a
+escrita conjunta propagar em caso de falha não é uma regressão de postura
+-- é a MESMA postura que a escrita do digest sozinha já tinha).
+`_entrada_ja_existe`/idempotência por `event_id` acontece DENTRO da
+transação (a leitura do doc de outbox é o primeiro passo da função
+transacional) -- reentrega do mesmo evento não reinicia o estado de
+despacho de uma entrada já existente, e não há mais janela de corrida
+check-then-act entre a leitura e a escrita (a versão anterior, não
+transacional, tinha essa janela; benigna naquele desenho -- mesmo
+`event_id` determinístico, sem duplicata -- mas a transação a fecha de
+graça).
 
-Despacho (`despachar_outbox_eventos_core`/`despachar_outbox_eventos`,
-decorada com `@scheduler_fn.on_schedule`) segue o mesmo padrão de
-`mcp_jobs.py::sweep_mcp_jobs_travados_core`/`sweep_mcp_jobs_travados`:
-consulta paginada por `order_by("__name__")` (mesmo motivo -- nenhuma
-entrada travada em `PENDENTE` deve poder ocupar permanentemente a janela de
-uma página e impedir entradas mais recentes de serem varridas), teto de
-segurança sobre o volume de uma única execução, escrita de cada documento
-isolada em seu próprio `try/except`. AINDA NÃO HÁ NENHUM CONSUMIDOR REAL de
-evento (nenhum trigger/scheduler assina `outbox_eventos` para agir sobre a
-categoria/payload do evento -- isso é trabalho de uma sub-entrega futura,
-provavelmente P06/P07): o "despacho" de hoje só registra a ocorrência (log)
-e fecha a entrada como `ENVIADO` via `registrar_sucesso` -- é o ponto de
-extensão onde um consumidor real vai entrar depois, sem precisar mudar a
-forma da entrada nem sua máquina de estados. `registrar_falha` só é
-alcançado hoje se a própria ESCRITA de fechamento falhar (ver
-`_despachar_uma_entrada`), não por uma falha de entrega real -- ainda não
-existe entrega real para falhar.
+Despacho (`despachar_outbox_eventos_core`) segue o mesmo padrão de
+`mcp_jobs.py::sweep_mcp_jobs_travados_core`: consulta paginada por
+`order_by("__name__")` (mesmo motivo -- nenhuma entrada travada em
+`PENDENTE` deve poder ocupar permanentemente a janela de uma página e
+impedir entradas mais recentes de serem varridas), teto de segurança sobre
+o volume de uma única execução, escrita de cada documento isolada em seu
+próprio `try/except`. DELIBERADAMENTE AINDA NÃO REGISTRADA COMO SCHEDULED
+FUNCTION em `main.py` -- segundo achado real do Codex nesta sub-entrega:
+sem nenhum consumidor real de evento ainda (nenhum trigger/scheduler assina
+`outbox_eventos` para agir sobre a categoria/payload), marcar uma entrada
+como `ENVIADO` só porque foi logada não "envia" nada a ninguém -- só
+fecha, de forma TERMINAL e irreversível, uma entrada que nenhum consumidor
+futuro (P06/P07) jamais vai poder reprocessar/consumir num backfill, sem
+nenhum ganho em troca (nada foi de fato entregue). Rodar este dispatcher a
+cada 15 minutos hoje ativamente destruiria a garantia de reconciliação que
+o outbox existe para dar, sem nenhum benefício. A função continua aqui,
+testada e pronta (`despachar_outbox_eventos_core`/`_despachar_uma_entrada`)
+para a sub-entrega que definir um consumidor real e decidir a forma dele --
+essa sub-entrega troca o `print()` de `_despachar_uma_entrada` pela entrega
+de verdade e só ENTÃO registra a scheduled function em `main.py` (mesmo
+padrão de import de `sweep_mcp_jobs_travados`).
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Callable
 
 from firebase_admin import firestore
-from firebase_functions import options, scheduler_fn
 
 from autonomy.events import CategoriaEvento, EventEnvelope
 from autonomy.outbox import (
@@ -153,20 +173,43 @@ def _entrada_de_doc(entry_id: str, dados: dict) -> OutboxEntry:
     )
 
 
-def registrar_evento_outbox(db, evento: EventEnvelope, *, agora: datetime) -> bool:
-    """Grava uma entrada nova de outbox para `evento`, em `PENDENTE`.
-    Idempotente por `evento.event_id` (mesmo padrão de
-    `email_action_linker.queue_and_maybe_send_suggestion`): se já existir
-    uma entrada com este ID -- reentrega do mesmo evento, escritor chamado
-    de novo sobre a mesma ocorrência -- não reinicia o estado de despacho
-    dela. Devolve `True` se gravou uma entrada nova, `False` se já existia
-    (no-op)."""
-    doc_ref = db.collection(COLECAO).document(evento.event_id)
-    if doc_ref.get().exists:
-        return False
-    entrada = criar_entrada(evento, agora)
-    doc_ref.set(_entrada_para_doc(entrada))
-    return True
+def registrar_evento_outbox_transacional(
+    db,
+    evento: EventEnvelope,
+    *,
+    agora: datetime,
+    escrever_efeito: Callable[[Any], None],
+) -> bool:
+    """Grava o efeito principal (via `escrever_efeito`) e a entrada nova de
+    outbox para `evento` NA MESMA transação Firestore -- ver docstring do
+    módulo para o achado real do Codex que motivou substituir a versão
+    anterior (não-transacional) por esta.
+
+    `escrever_efeito(transaction)` é chamado DENTRO da transação e deve só
+    enfileirar escrita(s) nela (`transaction.set(...)`/`transaction.update(...)`)
+    -- nunca fazer I/O fora da transação nem qualquer efeito colateral
+    não-idempotente, mesma exigência de qualquer função decorada com
+    `@firestore.transactional` (a transação pode reexecutar em caso de
+    conflito). Devolve `True` se uma entrada de outbox NOVA foi gravada
+    (mesma semântica que a versão anterior tinha), `False` se já existia --
+    idempotente por `evento.event_id`, mesmo padrão de
+    `email_action_linker.queue_and_maybe_send_suggestion`, agora sem a
+    janela de corrida check-then-act que uma leitura e escrita separadas
+    teriam."""
+    outbox_ref = db.collection(COLECAO).document(evento.event_id)
+
+    @firestore.transactional
+    def _executar(transaction):
+        outbox_snap = outbox_ref.get(transaction=transaction)
+        escrever_efeito(transaction)
+        entrada_e_nova = not outbox_snap.exists
+        if entrada_e_nova:
+            entrada = criar_entrada(evento, agora)
+            transaction.set(outbox_ref, _entrada_para_doc(entrada))
+        return entrada_e_nova
+
+    transaction = db.transaction()
+    return _executar(transaction)
 
 
 def _despachar_uma_entrada(doc_ref, entrada: OutboxEntry, *, agora: datetime) -> bool:
@@ -245,23 +288,3 @@ def despachar_outbox_eventos_core(db, *, agora: datetime) -> tuple[int, int]:
             break
         cursor = docs_da_pagina[-1]
     return varridas, despachadas
-
-
-def _db():
-    return firestore.client()
-
-
-@scheduler_fn.on_schedule(
-    schedule="every 15 minutes",
-    memory=options.MemoryOption.MB_256,
-    timeout_sec=120,
-)
-def despachar_outbox_eventos(event: scheduler_fn.ScheduledEvent) -> None:
-    """Wiring do dispatcher (passo 3 do pacote P05) -- ver docstring do
-    módulo para o que "despachar" significa hoje (ainda sem consumidor
-    real)."""
-    db = _db()
-    agora = datetime.now(timezone.utc)
-    varridas, despachadas = despachar_outbox_eventos_core(db, agora=agora)
-    if varridas:
-        print(f"[outbox_eventos] dispatcher: {varridas} pendente(s) varrida(s), {despachadas} despachada(s).")
