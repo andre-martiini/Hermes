@@ -611,6 +611,17 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     analyzed = 0
 
     deferred_media = []  # janelas de chats vinculados aguardando o reparo de mídia do worker
+    # Janelas cuja gravação (digest + evento de outbox, agora uma única transação --
+    # ver _save_whatsapp_digest) falhou -- achado real de revisão adversarial desta
+    # sub-entrega: sem isolar essa falha por janela, uma exceção aqui propagava para
+    # fora do laço inteiro (mesmo _save_whatsapp_digest não tinha try/except antes
+    # desta sub-entrega), abortando as janelas restantes do lote e, pior, sem cursor
+    # avançado, fazendo a PRÓXIMA passada reprocessar do zero -- inclusive repetir a
+    # chamada de IA (paga) de janelas que já tinham sido analisadas com sucesso nesta
+    # mesma passada. Isolar por janela (mesmo padrão de deferred_media, que já
+    # segura o cursor pelo mesmo motivo) restringe o custo de uma falha transitória a
+    # só a janela afetada.
+    failed_digest_writes = []
     for wa_chat_id, messages in windows:
         messages.sort(key=lambda m: m.get("timestamp") or 0)
         chat_name = messages[-1].get("chat_name") or wa_chat_id
@@ -720,14 +731,19 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
             )
 
         if resumo:
-            _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
+            try:
+                _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
+            except Exception as exc:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha ao gravar digest da conversa '{chat_name}': {exc}", True)
+                failed_digest_writes.append((wa_chat_id, messages))
 
     # Avança o cursor só até onde é seguro: se alguma janela ficou de fora — pelo
-    # teto (`skipped_windows`) ou aguardando reparo de mídia (`deferred_media`) —
-    # o cursor não pode passar da mensagem mais antiga entre as adiadas, senão
-    # elas somem para sempre da próxima consulta por `ingested_at > cursor`.
-    # Sem adiadas, é seguro avançar até a mensagem mais recente deste lote inteiro.
-    held_windows = skipped_windows + deferred_media
+    # teto (`skipped_windows`), aguardando reparo de mídia (`deferred_media`) ou por
+    # falha na gravação (`failed_digest_writes`) — o cursor não pode passar da
+    # mensagem mais antiga entre as adiadas, senão elas somem para sempre da próxima
+    # consulta por `ingested_at > cursor`. Sem nenhuma adiada, é seguro avançar até a
+    # mensagem mais recente deste lote inteiro.
+    held_windows = skipped_windows + deferred_media + failed_digest_writes
     if held_windows:
         new_cursor = min(
             m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
@@ -741,10 +757,12 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
         )
     cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
-    if analyzed or skipped or ignored_unlinked or deferred_media:
+    if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
         if deferred_media:
             extra += f" {len(deferred_media)} janela(s) aguardando reparo de mídia."
+        if failed_digest_writes:
+            extra += f" {len(failed_digest_writes)} janela(s) com falha na gravação, retentando na próxima passada."
         if ignored_unlinked:
             extra += f" {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s)."
         log_to_firestore(sync_ref, logs, f"[WA-INGEST] {analyzed} janela(s) de conversa de WhatsApp analisada(s).{extra}", True)
