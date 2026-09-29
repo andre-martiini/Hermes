@@ -622,6 +622,15 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     # segura o cursor pelo mesmo motivo) restringe o custo de uma falha transitória a
     # só a janela afetada.
     failed_digest_writes = []
+    # Mesmo motivo e mesmo padrão de failed_digest_writes (ver acima) --
+    # achado real de revisão adversarial da sub-entrega P05 6/N (pré-existente
+    # a ela, adjacente ao que ela corrigiu): queue_and_maybe_send_suggestion
+    # roda poucas linhas antes de _save_whatsapp_digest, no mesmo laço, e
+    # também não tinha isolamento por janela -- uma falha transitória nela
+    # (ex.: Firestore) abortava o laço inteiro, sem cursor avançado, fazendo a
+    # próxima passada reprocessar do zero (repetindo a chamada de IA paga de
+    # janelas já analisadas com sucesso).
+    failed_suggestion_writes = []
     for wa_chat_id, messages in windows:
         messages.sort(key=lambda m: m.get("timestamp") or 0)
         chat_name = messages[-1].get("chat_name") or wa_chat_id
@@ -715,20 +724,24 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
             if mutacoes_propostas:
                 extra["mutacoes_propostas"] = mutacoes_propostas
 
-            queue_and_maybe_send_suggestion(
-                db,
-                f"whatsapp_{digest_id}",
-                canal="whatsapp",
-                task=task,
-                titulo_sinal=chat_name,
-                origem_sinal=f"{len(messages)} mensagem(ns)",
-                resumo=resumo,
-                nota_sugerida=nota_sugerida,
-                reativar_sugerido=bool(analysis.get("reativar_sugerido")),
-                confidence=confidence,
-                chat_id=telegram_chat_id,
-                extra=extra,
-            )
+            try:
+                queue_and_maybe_send_suggestion(
+                    db,
+                    f"whatsapp_{digest_id}",
+                    canal="whatsapp",
+                    task=task,
+                    titulo_sinal=chat_name,
+                    origem_sinal=f"{len(messages)} mensagem(ns)",
+                    resumo=resumo,
+                    nota_sugerida=nota_sugerida,
+                    reativar_sugerido=bool(analysis.get("reativar_sugerido")),
+                    confidence=confidence,
+                    chat_id=telegram_chat_id,
+                    extra=extra,
+                )
+            except Exception as exc:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha ao registrar sugestão da conversa '{chat_name}': {exc}", True)
+                failed_suggestion_writes.append((wa_chat_id, messages))
 
         if resumo:
             try:
@@ -739,15 +752,40 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
 
     # Avança o cursor só até onde é seguro: se alguma janela ficou de fora — pelo
     # teto (`skipped_windows`), aguardando reparo de mídia (`deferred_media`) ou por
-    # falha na gravação (`failed_digest_writes`) — o cursor não pode passar da
-    # mensagem mais antiga entre as adiadas, senão elas somem para sempre da próxima
-    # consulta por `ingested_at > cursor`. Sem nenhuma adiada, é seguro avançar até a
-    # mensagem mais recente deste lote inteiro.
-    held_windows = skipped_windows + deferred_media + failed_digest_writes
+    # falha na gravação (`failed_digest_writes`/`failed_suggestion_writes`) — o
+    # cursor não pode passar da mensagem mais antiga entre as adiadas, senão elas
+    # somem para sempre da próxima consulta por `ingested_at > cursor`. Sem nenhuma
+    # adiada, é seguro avançar até a mensagem mais recente deste lote inteiro.
+    held_windows = skipped_windows + deferred_media + failed_digest_writes + failed_suggestion_writes
     if held_windows:
-        new_cursor = min(
+        oldest_held_ingested_at = min(
             m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
         )
+        # A consulta da próxima passada usa `ingested_at > cursor` (estrita, linha
+        # ~515) -- se o cursor fosse exatamente igual ao timestamp da mensagem mais
+        # antiga retida, essa mensagem específica (a que a retenção existe para
+        # preservar) seria excluída para sempre da próxima consulta, e não só
+        # reprocessada -- PERDA SILENCIOSA E PERMANENTE. CORREÇÃO (achado real de
+        # revisão adversarial, Codex, PR #384): recua 1 microssegundo para manter
+        # essa mensagem elegível na próxima passada.
+        #
+        # RISCO RESIDUAL (achado real de uma 2a rodada de revisão adversarial
+        # interna sobre esta própria correção, PR #384): `ingested_at` é gravado
+        # pelo worker de captura com resolução de MILISSEGUNDO (Date.now()), não
+        # microssegundo -- em rajada, duas mensagens de conversas DIFERENTES podem
+        # colidir no mesmo milissegundo. Se isso acontecer bem na fronteira, o
+        # recuo de 1 microssegundo pode trazer de volta, na próxima passada, uma
+        # mensagem de uma janela que já tinha sido processada com sucesso nesta
+        # passada -- na pior hipótese, uma sugestão duplicada (um segundo cartão no
+        # Telegram) se essa janela se combinar com mensagens novas do mesmo chat e
+        # gerar um digest_id diferente do original. Nenhum tamanho de recuo resolve
+        # isso por completo (a ambiguidade é entre documentos com timestamp igual,
+        # não uma questão de margem) -- precisaria de um cursor composto
+        # (timestamp, doc id), fora do escopo desta sub-entrega. Estritamente
+        # melhor que o bug original (que perdia essa mesma mensagem PARA SEMPRE, de
+        # forma silenciosa, em vez de arriscar reprocessar/duplicar) -- ver
+        # pendência registrada no diário de execução.
+        new_cursor = oldest_held_ingested_at - timedelta(microseconds=1)
     else:
         # Máximo sobre TODO o lote lido (não só as janelas analisadas): no modo
         # só-vinculados, conversas sem vínculo foram descartadas por decisão e não
@@ -757,12 +795,14 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
         )
     cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
-    if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes:
+    if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes or failed_suggestion_writes:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
         if deferred_media:
             extra += f" {len(deferred_media)} janela(s) aguardando reparo de mídia."
         if failed_digest_writes:
             extra += f" {len(failed_digest_writes)} janela(s) com falha na gravação, retentando na próxima passada."
+        if failed_suggestion_writes:
+            extra += f" {len(failed_suggestion_writes)} janela(s) com falha ao registrar sugestão, retentando na próxima passada."
         if ignored_unlinked:
             extra += f" {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s)."
         log_to_firestore(sync_ref, logs, f"[WA-INGEST] {analyzed} janela(s) de conversa de WhatsApp analisada(s).{extra}", True)
