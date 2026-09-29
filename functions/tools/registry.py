@@ -84,6 +84,7 @@ _CATALOG: dict[str, str] = {
     # o que ha e caminhada em km, calorias, qualidade do sono e dor.
     "consultar_saude": "Consulta dados de saude: peso, cintura, caminhada, calorias, qualidade do sono e dor",
     "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono",
+    "consultar_saude_integracoes": "Reporta a saude (healthy/degraded/unavailable/unknown) de cada integracao: calendar, contacts, gmail, whatsapp, sipac, financas, repositorio",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
     "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
     "gerar_imagem": "Gera imagem (GPT Image da OpenAI) a partir de uma descricao; devolve a imagem visivel, o link de download e o do Drive, e anexa a acao com task_id",

@@ -1,0 +1,9 @@
+{
+  "name": "consultar_saude_integracoes",
+  "description": "Reporta a saúde de cada integração (calendar, contacts, gmail, whatsapp, sipac, financas, repositorio): status healthy/degraded/unavailable/unknown, último sucesso, atraso em segundos e código de erro quando houver",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}
