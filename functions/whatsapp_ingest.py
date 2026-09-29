@@ -277,6 +277,60 @@ def _save_whatsapp_digest(db, digest_id: str, wa_chat_id: str, chat_name: str, m
 
     db.collection(DIGEST_COLLECTION).document(digest_id).set(doc, merge=True)
 
+    try:
+        _registrar_evento_outbox_digest(db, digest_id, wa_chat_id, messages, analysis)
+    except Exception as exc:
+        print(f"[WA-INGEST] Falha ao registrar evento de outbox do digest {digest_id}: {exc}")
+
+
+def _digest_occurred_at(messages: list[dict]) -> datetime:
+    """`occurred_at` do evento de outbox deste digest — fim da janela
+    (timestamp da última mensagem), NUNCA `datetime.now()`: um
+    reprocessamento da MESMA janela (reentrega, dispatcher retomando após
+    queda) precisa preservar o mesmo `occurred_at` para que
+    `autonomy.events.calcular_event_id` produza o mesmo `event_id` — usar o
+    instante de processamento faria a mesma ocorrência gerar um evento novo
+    a cada retry. Cai para `datetime.now(timezone.utc)` só quando a última
+    mensagem não tem `timestamp` utilizável (não deveria acontecer — o
+    worker de captura sempre grava `timestamp` —, mas `_window_digest_id`
+    já trata esse mesmo campo como potencialmente ausente, mesma cautela
+    aqui)."""
+    last_ts = messages[-1].get("timestamp") if messages else None
+    if isinstance(last_ts, datetime):
+        return last_ts if last_ts.tzinfo is not None else last_ts.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _registrar_evento_outbox_digest(db, digest_id: str, wa_chat_id: str, messages: list[dict], analysis: dict) -> None:
+    """Emite o evento de outbox (P05 do plano de autonomia, passo 3 do
+    pacote — "outbox de eventos com dispatcher reconciliável") para este
+    digest — primeiro escritor real ligado a `event_outbox.py`/
+    `autonomy/events.py`/`autonomy/outbox.py` (P05 sub-entregas 1/N e 5/N
+    definiram a forma pura; nenhum escritor real existia até esta
+    sub-entrega). NÃO é a mesma transação Firestore do `.set()` do digest
+    logo acima — o passo 3 do pacote lista outbox como ALTERNATIVA à mesma
+    transação, não como exigência adicional — e o único chamador desta
+    função embrulha a chamada inteira num try/except não-fatal: uma falha
+    aqui não pode impedir o digest (o efeito principal, já visível ao
+    usuário/copiloto) de ter sido gravado."""
+    from autonomy.events import CategoriaEvento, montar_evento
+    from event_outbox import registrar_evento_outbox
+
+    agora = datetime.now(timezone.utc)
+    evento = montar_evento(
+        CategoriaEvento.MENSAGEM,
+        DIGEST_COLLECTION,
+        digest_id,
+        {
+            "wa_chat_id": wa_chat_id,
+            "relevancia": analysis.get("relevancia"),
+            "n_mensagens": len(messages),
+        },
+        occurred_at=_digest_occurred_at(messages),
+        ingested_at=agora,
+    )
+    registrar_evento_outbox(db, evento, agora=agora)
+
 
 def _msg_text(m: dict) -> str:
     """Texto útil de uma mensagem para o limiar/análise: o corpo, ou a transcrição

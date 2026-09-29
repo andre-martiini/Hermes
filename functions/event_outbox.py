@@ -1,0 +1,267 @@
+"""Wiring real (Firestore) do outbox de eventos puro em `autonomy/events.py` e
+`autonomy/outbox.py` (P05 do plano de autonomia,
+docs/plano-hermes-autonomo-2026-09-06.md, seção "P05 — Normalizar eventos e
+saúde das integrações", passo 3 do pacote: "Quando escrita e evento forem
+internos, persistir ambos na mesma transação ou usar outbox de eventos com
+dispatcher reconciliável.").
+
+`autonomy/outbox.py` (P05 sub-entrega 5/N) definiu a FORMA de uma entrada de
+outbox e as transições puras de estado, mas nenhum escritor real ainda
+persistia uma entrada, e nenhum dispatcher existia -- ver `proximo_pacote`
+do bloco daquela sub-entrega em docs/autonomia/execucao.md. Este módulo é a
+PONTE: converte `OutboxEntry`/`EventEnvelope` de/para o `dict` que o
+Firestore lê e grava (mesmo papel que `agent_requests.py` cumpre para
+`autonomy/requests.py` e `mcp_jobs.py` cumpre para `autonomy/mcp_jobs_adapter.py`),
+e implementa o primeiro (e, por ora, único) escritor ponta a ponta:
+`whatsapp_ingest.py::_save_whatsapp_digest` -- ver `registrar_evento_outbox`
+e seu único chamador.
+
+Coleção nova: `outbox_eventos` -- deliberadamente NÃO `outbox` nem
+`event_outbox` (colidiria em leitura apressada com a coleção pré-existente
+e não relacionada `whatsapp_outbox`, a fila de ENVIO de mensagens do
+worker WhatsApp, ver outbox_aprovacao.py -- um conceito de "outbox" bem
+mais antigo e completamente diferente deste). ID do doc = `OutboxEntry.entry_id`
+(== `EventEnvelope.event_id`, hash determinístico) -- dedupe estrutural,
+mesmo padrão de `email_action_suggestions` (ID do doc = ID do sinal).
+
+Escrita (`registrar_evento_outbox`) segue o mesmo padrão de idempotência de
+`email_action_linker.py::queue_and_maybe_send_suggestion` (checar
+`doc_ref.get().exists` antes de escrever) em vez de `doc_ref.create()` --
+mesma escolha por consistência de estilo com o único outro escritor
+idempotente-por-ID-determinístico já existente no arquivo que esta sub-entrega
+modifica (`whatsapp_ingest.py` já chama `queue_and_maybe_send_suggestion`
+algumas linhas antes do novo ponto de chamada). NÃO é a mesma transação
+Firestore da escrita do digest -- o passo 3 do pacote lista isso como
+ALTERNATIVA ("... ou usar outbox de eventos ..."), não como exigência
+adicional; o comentário no ponto de chamada em `whatsapp_ingest.py` explica
+por que a falha desta escrita é não-fatal para o digest.
+
+Despacho (`despachar_outbox_eventos_core`/`despachar_outbox_eventos`,
+decorada com `@scheduler_fn.on_schedule`) segue o mesmo padrão de
+`mcp_jobs.py::sweep_mcp_jobs_travados_core`/`sweep_mcp_jobs_travados`:
+consulta paginada por `order_by("__name__")` (mesmo motivo -- nenhuma
+entrada travada em `PENDENTE` deve poder ocupar permanentemente a janela de
+uma página e impedir entradas mais recentes de serem varridas), teto de
+segurança sobre o volume de uma única execução, escrita de cada documento
+isolada em seu próprio `try/except`. AINDA NÃO HÁ NENHUM CONSUMIDOR REAL de
+evento (nenhum trigger/scheduler assina `outbox_eventos` para agir sobre a
+categoria/payload do evento -- isso é trabalho de uma sub-entrega futura,
+provavelmente P06/P07): o "despacho" de hoje só registra a ocorrência (log)
+e fecha a entrada como `ENVIADO` via `registrar_sucesso` -- é o ponto de
+extensão onde um consumidor real vai entrar depois, sem precisar mudar a
+forma da entrada nem sua máquina de estados. `registrar_falha` só é
+alcançado hoje se a própria ESCRITA de fechamento falhar (ver
+`_despachar_uma_entrada`), não por uma falha de entrega real -- ainda não
+existe entrega real para falhar.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from types import MappingProxyType
+from typing import Any
+
+from firebase_admin import firestore
+from firebase_functions import options, scheduler_fn
+
+from autonomy.events import CategoriaEvento, EventEnvelope
+from autonomy.outbox import (
+    EstadoOutbox,
+    OutboxEntry,
+    criar_entrada,
+    pronta_para_despachar,
+    registrar_falha,
+    registrar_sucesso,
+)
+
+COLECAO = "outbox_eventos"
+
+#: Mesmo tamanho de página/teto de segurança de `mcp_jobs.sweep_mcp_jobs_travados_core`
+#: -- ver a docstring de lá para o raciocínio completo (paginação por
+#: `__name__` evita que entradas nunca-elegíveis ocupem a janela de uma
+#: página para sempre). Volume de produção hoje é uma fração do de
+#: `mcp_jobs` (só um escritor -- `whatsapp_ingest.py` -- emite eventos até
+#: agora), mas o mesmo teto genérico evita reintroduzir o mesmo bug de
+#: escala se mais escritores forem ligados a este outbox no futuro.
+_DESPACHO_TAMANHO_PAGINA = 500
+_DESPACHO_MAX_DOCUMENTOS = 15 * _DESPACHO_TAMANHO_PAGINA
+
+
+def _descongelar(valor: Any) -> Any:
+    """Inverso de `autonomy.ledger._congelar_profundamente`: converte
+    `MappingProxyType`/`tuple` (a forma congelada que `EventEnvelope`
+    guarda em `payload_identificador`/`metadata`, ver seu `__post_init__`)
+    de volta para `dict`/`list` -- o cliente do Firestore não aceita os
+    tipos congelados diretamente num `.set()`/`.create()`."""
+    if isinstance(valor, MappingProxyType):
+        return {chave: _descongelar(item) for chave, item in valor.items()}
+    if isinstance(valor, tuple):
+        return [_descongelar(item) for item in valor]
+    return valor
+
+
+def _entrada_para_doc(entrada: OutboxEntry) -> dict:
+    """`OutboxEntry` (mais o `EventEnvelope` embutido) -> dict pronto para
+    `doc_ref.set()`. Datas ficam como `datetime` nativo (não `.isoformat()`)
+    -- o cliente do Firestore grava isso como `Timestamp`, e lê de volta já
+    como `datetime` tz-aware, sem exigir parsing na leitura (`_entrada_de_doc`
+    conta com isso)."""
+    evento = entrada.evento
+    return {
+        "categoria": evento.categoria.value,
+        "fonte_colecao": evento.fonte_colecao,
+        "fonte_doc_id": evento.fonte_doc_id,
+        "occurred_at": evento.occurred_at,
+        "ingested_at": evento.ingested_at,
+        "payload_identificador": _descongelar(evento.payload_identificador),
+        "metadata": _descongelar(evento.metadata),
+        "estado": entrada.estado.value,
+        "tentativas": entrada.tentativas,
+        "criado_em": entrada.criado_em,
+        "disponivel_em": entrada.disponivel_em,
+        "ultima_tentativa_em": entrada.ultima_tentativa_em,
+        "ultimo_erro": entrada.ultimo_erro,
+    }
+
+
+def _entrada_de_doc(entry_id: str, dados: dict) -> OutboxEntry:
+    """Inverso de `_entrada_para_doc` -- reconstrói o `OutboxEntry`
+    (`EventEnvelope` incluso) a partir do `dict` bruto de
+    `snapshot.to_dict()`. `EventEnvelope.__post_init__`/`OutboxEntry.__post_init__`
+    recalculam e conferem `event_id`/`entry_id` normalmente -- um documento
+    corrompido (campo trocado por escrita manual, migração malfeita) falha
+    fechado aqui, mesma garantia que já vale para quem constrói em memória."""
+    evento = EventEnvelope(
+        event_id=entry_id,
+        categoria=CategoriaEvento(dados["categoria"]),
+        fonte_colecao=dados["fonte_colecao"],
+        fonte_doc_id=dados["fonte_doc_id"],
+        occurred_at=dados["occurred_at"],
+        ingested_at=dados["ingested_at"],
+        payload_identificador=dados.get("payload_identificador") or {},
+        metadata=dados.get("metadata") or {},
+    )
+    return OutboxEntry(
+        entry_id=entry_id,
+        evento=evento,
+        estado=EstadoOutbox(dados["estado"]),
+        tentativas=int(dados.get("tentativas") or 0),
+        criado_em=dados["criado_em"],
+        disponivel_em=dados["disponivel_em"],
+        ultima_tentativa_em=dados.get("ultima_tentativa_em"),
+        ultimo_erro=dados.get("ultimo_erro"),
+    )
+
+
+def registrar_evento_outbox(db, evento: EventEnvelope, *, agora: datetime) -> bool:
+    """Grava uma entrada nova de outbox para `evento`, em `PENDENTE`.
+    Idempotente por `evento.event_id` (mesmo padrão de
+    `email_action_linker.queue_and_maybe_send_suggestion`): se já existir
+    uma entrada com este ID -- reentrega do mesmo evento, escritor chamado
+    de novo sobre a mesma ocorrência -- não reinicia o estado de despacho
+    dela. Devolve `True` se gravou uma entrada nova, `False` se já existia
+    (no-op)."""
+    doc_ref = db.collection(COLECAO).document(evento.event_id)
+    if doc_ref.get().exists:
+        return False
+    entrada = criar_entrada(evento, agora)
+    doc_ref.set(_entrada_para_doc(entrada))
+    return True
+
+
+def _despachar_uma_entrada(doc_ref, entrada: OutboxEntry, *, agora: datetime) -> bool:
+    """Tenta "despachar" uma única entrada pronta e grava o resultado.
+    Devolve `True` se a entrada foi fechada como `ENVIADO` com sucesso.
+
+    Sem consumidor real ainda (ver docstring do módulo) -- o corpo do
+    `try` só loga a ocorrência; a exceção que ele pode pegar hoje é do
+    próprio `print`/formatação, não de uma entrega de verdade. Mantido como
+    `try/except` (em vez de chamar `registrar_sucesso` incondicionalmente)
+    para que o caminho de `registrar_falha` já exista e seja exercido pelo
+    dispatcher assim que um consumidor real substituir o `print` -- sem
+    precisar mudar esta função de novo."""
+    try:
+        print(
+            f"[outbox_eventos] despachando evento {entrada.evento.event_id} "
+            f"(categoria={entrada.evento.categoria.value}, "
+            f"fonte={entrada.evento.fonte_colecao}/{entrada.evento.fonte_doc_id}) "
+            "-- sem consumidor real ainda, entrada fechada como enviada."
+        )
+    except Exception as exc:  # noqa: BLE001
+        atualizada = registrar_falha(entrada, agora, str(exc))
+    else:
+        atualizada = registrar_sucesso(entrada, agora)
+
+    campos = {
+        "estado": atualizada.estado.value,
+        "tentativas": atualizada.tentativas,
+        "disponivel_em": atualizada.disponivel_em,
+        "ultima_tentativa_em": atualizada.ultima_tentativa_em,
+        "ultimo_erro": atualizada.ultimo_erro,
+    }
+    try:
+        doc_ref.update(campos)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[outbox_eventos] falha ao gravar despacho de {entrada.entry_id}: {exc}")
+        return False
+    return atualizada.estado == EstadoOutbox.ENVIADO
+
+
+def despachar_outbox_eventos_core(db, *, agora: datetime) -> tuple[int, int]:
+    """Núcleo do dispatcher, separado do decorator `on_schedule` para ser
+    testável sem simular o `ScheduledEvent` real -- mesma separação de
+    `mcp_jobs.sweep_mcp_jobs_travados_core`. Consulta `outbox_eventos` em
+    `estado="pendente"`, pagina por `order_by("__name__")` (ver a docstring
+    do módulo para o porquê) e despacha cada entrada elegível
+    (`pronta_para_despachar`). Devolve `(varridas, despachadas)`."""
+    consulta_base = (
+        db.collection(COLECAO)
+        .where(filter=firestore.FieldFilter("estado", "==", EstadoOutbox.PENDENTE.value))
+        .order_by("__name__")
+    )
+    varridas = 0
+    despachadas = 0
+    cursor = None
+    while varridas < _DESPACHO_MAX_DOCUMENTOS:
+        pagina = consulta_base.limit(_DESPACHO_TAMANHO_PAGINA)
+        if cursor is not None:
+            pagina = pagina.start_after(cursor)
+        docs_da_pagina = list(pagina.stream())
+        if not docs_da_pagina:
+            break
+        for snap in docs_da_pagina:
+            varridas += 1
+            dados = snap.to_dict() or {}
+            try:
+                entrada = _entrada_de_doc(snap.id, dados)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[outbox_eventos] entrada corrompida ignorada ({snap.id}): {exc}")
+                continue
+            if not pronta_para_despachar(entrada, agora):
+                continue
+            if _despachar_uma_entrada(snap.reference, entrada, agora=agora):
+                despachadas += 1
+        if len(docs_da_pagina) < _DESPACHO_TAMANHO_PAGINA:
+            break
+        cursor = docs_da_pagina[-1]
+    return varridas, despachadas
+
+
+def _db():
+    return firestore.client()
+
+
+@scheduler_fn.on_schedule(
+    schedule="every 15 minutes",
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=120,
+)
+def despachar_outbox_eventos(event: scheduler_fn.ScheduledEvent) -> None:
+    """Wiring do dispatcher (passo 3 do pacote P05) -- ver docstring do
+    módulo para o que "despachar" significa hoje (ainda sem consumidor
+    real)."""
+    db = _db()
+    agora = datetime.now(timezone.utc)
+    varridas, despachadas = despachar_outbox_eventos_core(db, agora=agora)
+    if varridas:
+        print(f"[outbox_eventos] dispatcher: {varridas} pendente(s) varrida(s), {despachadas} despachada(s).")

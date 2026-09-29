@@ -70,6 +70,7 @@ from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import sweep_mcp_jobs_travados  # noqa: F401 — registra a Cloud Function
+from event_outbox import despachar_outbox_eventos  # noqa: F401 — registra a Cloud Function
 # Fatias 2 e 3 da sincronização por webhook (Calendar/Drive, ação e7fe01f4): desligadas por
 # padrão (system/settings.calendar_watch.enabled / drive_watch.enabled).
 from google_push_watch import (  # noqa: F401 — registra as Cloud Functions
