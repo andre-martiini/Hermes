@@ -707,6 +707,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "saude", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
         dados_sensiveis_categoria="saúde",
     ),
+    "consultar_saude_integracoes": ToolInventoryEntry(
+        "autonomia_integracoes", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum necessário",
+        nota="Lê só metadados operacionais de sync (timestamps, status, mensagem de erro) dos 4 docs de "
+        "`system/*` já existentes -- nenhum dado pessoal do dono nem de terceiros passa por aqui, por isso "
+        "`dados_sensiveis=False` (ao contrário de `consultar_saude`, que é sobre o CORPO do dono). Sempre "
+        "recalcula sob demanda (nenhuma persistência de `IntegrationHealth` ainda -- ver docstring do "
+        "handler e a pendência registrada em docs/autonomia/execucao.md).",
+    ),
     "registrar_saude": ToolInventoryEntry(
         "saude", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático, mas upsert idempotente por dia+campo permite correção via nova chamada",

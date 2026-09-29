@@ -469,6 +469,75 @@ def _consultar_saude(ctx: ToolContext, args: dict):
         return f"ERRO|Erro ao consultar dados de saude: {e}"
 
 
+def _consultar_saude_integracoes(ctx: ToolContext, args: dict):
+    """Reporta a saúde (healthy/degraded/unavailable/unknown) de cada
+    integração -- tool `consultar_saude_integracoes` da seção 6 do plano de
+    autonomia (P05, continuação do passo 8). Lê os 4 docs de sync já
+    existentes hoje (`system/sync`, `system/<CONTACTS_SYNC_STATE_DOC_ID>`,
+    `system/gmail_sync`, `system/whatsapp_ingest`) e converte cada um em
+    `IntegrationHealth` via os leitores puros de
+    `autonomy/integrations_sync.py` (P05 sub-entrega 3/N) -- este handler é
+    só a wiring de Firestore que aqueles leitores deliberadamente não fazem
+    (lógica pura, sem I/O). SIPAC, finanças e repositório não têm nenhum doc
+    de sync persistido hoje -- sempre `unknown` via
+    `saude_sem_sincronizacao_persistida`, não uma ausência silenciosa da
+    integração na lista (mesma exigência de "indisponibilidade não é dado
+    vazio" do módulo base).
+
+    Não é chamada por `obter_estado_atual` -- essa wiring (substituir os
+    fallbacks de zero em `hermes_tools.py`/`morning_summary.py`) fica para
+    uma sub-entrega futura dedicada, que precisa decidir onde cachear o
+    resultado; esta tool sempre recalcula sob demanda."""
+    try:
+        from datetime import datetime, timezone
+
+        from autonomy.integrations_sync import (
+            saude_calendar,
+            saude_contacts,
+            saude_gmail,
+            saude_sem_sincronizacao_persistida,
+            saude_whatsapp,
+        )
+        from main import CONTACTS_SYNC_STATE_DOC_ID
+
+        heartbeat_at = datetime.now(timezone.utc)
+        sistema = ctx.db.collection("system")
+        calendar_doc = sistema.document("sync").get().to_dict()
+        contacts_doc = sistema.document(CONTACTS_SYNC_STATE_DOC_ID).get().to_dict()
+        gmail_doc = sistema.document("gmail_sync").get().to_dict()
+        whatsapp_doc = sistema.document("whatsapp_ingest").get().to_dict()
+
+        saudes = [
+            saude_calendar(calendar_doc, heartbeat_at),
+            saude_contacts(contacts_doc, heartbeat_at),
+            saude_gmail(gmail_doc, heartbeat_at),
+            saude_whatsapp(whatsapp_doc, heartbeat_at),
+            saude_sem_sincronizacao_persistida("sipac", heartbeat_at),
+            saude_sem_sincronizacao_persistida("financas", heartbeat_at),
+            saude_sem_sincronizacao_persistida("repositorio", heartbeat_at),
+        ]
+        return json.dumps(
+            {
+                "heartbeat_at": heartbeat_at.isoformat(),
+                "integracoes": [
+                    {
+                        "integration": s.integration,
+                        "status": s.status.value,
+                        "last_success_at": s.last_success_at.isoformat() if s.last_success_at else None,
+                        "coverage_until": s.coverage_until.isoformat() if s.coverage_until else None,
+                        "lag_seconds": s.lag_seconds,
+                        "error_code": s.error_code,
+                    }
+                    for s in saudes
+                ],
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+    except Exception as e:
+        return f"ERRO|Erro ao consultar saude das integracoes: {e}"
+
+
 def _consultar_dados_cadastrais(ctx: ToolContext, args: dict):
     try:
         from dados_cadastrais import get_dados_cadastrais
@@ -2672,6 +2741,7 @@ _HANDLERS: dict = {
     "encontrar_slot_livre": _encontrar_slot_livre,
     "consultar_saude": _consultar_saude,
     "registrar_saude": _registrar_saude,
+    "consultar_saude_integracoes": _consultar_saude_integracoes,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "consultar_investimentos": _consultar_investimentos,
     "registrar_aporte_investimento": _registrar_aporte_investimento,
