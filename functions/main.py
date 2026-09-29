@@ -70,6 +70,12 @@ from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import sweep_mcp_jobs_travados  # noqa: F401 — registra a Cloud Function
+# event_outbox.despachar_outbox_eventos_core existe e está testado, mas
+# deliberadamente NÃO é importado aqui ainda -- achado real de revisão
+# automática do Codex (PR #382): sem nenhum consumidor real de evento,
+# rodar o dispatcher a cada 15 min só fecharia entradas como "enviadas"
+# sem entregar nada a ninguém, destruindo a garantia de reconciliação do
+# outbox à toa. Ver a docstring de functions/event_outbox.py.
 # Fatias 2 e 3 da sincronização por webhook (Calendar/Drive, ação e7fe01f4): desligadas por
 # padrão (system/settings.calendar_watch.enabled / drive_watch.enabled).
 from google_push_watch import (  # noqa: F401 — registra as Cloud Functions

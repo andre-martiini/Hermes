@@ -275,7 +275,80 @@ def _save_whatsapp_digest(db, digest_id: str, wa_chat_id: str, chat_name: str, m
     except Exception as exc:
         print(f"[WA-INGEST] Falha ao gerar embedding do digest {digest_id}: {exc}")
 
-    db.collection(DIGEST_COLLECTION).document(digest_id).set(doc, merge=True)
+    from event_outbox import registrar_evento_outbox_transacional
+
+    digest_ref = db.collection(DIGEST_COLLECTION).document(digest_id)
+    evento = _montar_evento_outbox_digest(digest_id, wa_chat_id, messages, analysis)
+    registrar_evento_outbox_transacional(
+        db,
+        evento,
+        agora=datetime.now(timezone.utc),
+        escrever_efeito=lambda transaction: transaction.set(digest_ref, doc, merge=True),
+    )
+
+
+def _digest_occurred_at(messages: list[dict]) -> datetime:
+    """`occurred_at` do evento de outbox deste digest — fim da janela
+    (timestamp da última mensagem), NUNCA `datetime.now()`: um
+    reprocessamento da MESMA janela (reentrega, dispatcher retomando após
+    queda) precisa preservar o mesmo `occurred_at` para que
+    `autonomy.events.calcular_event_id` produza o mesmo `event_id` — usar o
+    instante de processamento faria a mesma ocorrência gerar um evento novo
+    a cada retry. Cai para `datetime.now(timezone.utc)` só quando a última
+    mensagem não tem `timestamp` utilizável (não deveria acontecer — o
+    worker de captura sempre grava `timestamp` —, mas `_window_digest_id`
+    já trata esse mesmo campo como potencialmente ausente, mesma cautela
+    aqui)."""
+    last_ts = messages[-1].get("timestamp") if messages else None
+    if isinstance(last_ts, datetime):
+        return last_ts if last_ts.tzinfo is not None else last_ts.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _montar_evento_outbox_digest(digest_id: str, wa_chat_id: str, messages: list[dict], analysis: dict):
+    """Monta (sem I/O) o `EventEnvelope` de outbox (P05 do plano de
+    autonomia, passo 3 do pacote — "outbox de eventos com dispatcher
+    reconciliável") para este digest — primeiro escritor real ligado a
+    `event_outbox.py`/`autonomy/events.py`/`autonomy/outbox.py` (P05
+    sub-entregas 1/N e 5/N definiram a forma pura; nenhum escritor real
+    existia até esta sub-entrega). O chamador persiste o evento retornado
+    na MESMA transação Firestore do `.set()` do digest, via
+    `event_outbox.registrar_evento_outbox_transacional` — ver a docstring
+    de `event_outbox.py` para o porquê (achado real de revisão automática
+    do Codex, PR #382: sem transação, uma falha transitória na escrita do
+    outbox logo após a escrita do digest suceder perdia o evento para
+    sempre, sem nenhum jeito de reconstruí-lo a partir do digest já
+    gravado).
+
+    `analysis["relevancia"]` (saída do modelo, não determinística — a
+    chamada de triagem usa `temperature=0.1`, não 0) vai em `metadata`, NÃO
+    em `payload_identificador` — segundo achado real do Codex nesta
+    sub-entrega: `payload_identificador` participa do hash de `event_id`
+    (`autonomy.events.calcular_event_id`), então um valor que pode variar
+    entre duas chamadas sobre a MESMA janela (retry) produziria `event_id`s
+    diferentes para a mesma ocorrência, quebrando a garantia de dedup por
+    reentrega que todo o resto do módulo depende — exatamente o problema
+    que `calcular_event_id` documenta para `occurred_at` (e por isso o
+    resolve normalizando para UTC), mas que aqui vinha de incluir um campo
+    de identidade instável, não de uma representação inconsistente de um
+    campo estável. `wa_chat_id`/`n_mensagens` continuam em
+    `payload_identificador`: são determinísticos para uma janela fixa (o
+    próprio `digest_id`, usado como `fonte_doc_id`, já é derivado do
+    timestamp da última mensagem — a janela não muda sob retry)."""
+    from autonomy.events import CategoriaEvento, montar_evento
+
+    return montar_evento(
+        CategoriaEvento.MENSAGEM,
+        DIGEST_COLLECTION,
+        digest_id,
+        {
+            "wa_chat_id": wa_chat_id,
+            "n_mensagens": len(messages),
+        },
+        occurred_at=_digest_occurred_at(messages),
+        ingested_at=datetime.now(timezone.utc),
+        metadata={"relevancia": analysis.get("relevancia")},
+    )
 
 
 def _msg_text(m: dict) -> str:
@@ -538,6 +611,17 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     analyzed = 0
 
     deferred_media = []  # janelas de chats vinculados aguardando o reparo de mídia do worker
+    # Janelas cuja gravação (digest + evento de outbox, agora uma única transação --
+    # ver _save_whatsapp_digest) falhou -- achado real de revisão adversarial desta
+    # sub-entrega: sem isolar essa falha por janela, uma exceção aqui propagava para
+    # fora do laço inteiro (mesmo _save_whatsapp_digest não tinha try/except antes
+    # desta sub-entrega), abortando as janelas restantes do lote e, pior, sem cursor
+    # avançado, fazendo a PRÓXIMA passada reprocessar do zero -- inclusive repetir a
+    # chamada de IA (paga) de janelas que já tinham sido analisadas com sucesso nesta
+    # mesma passada. Isolar por janela (mesmo padrão de deferred_media, que já
+    # segura o cursor pelo mesmo motivo) restringe o custo de uma falha transitória a
+    # só a janela afetada.
+    failed_digest_writes = []
     for wa_chat_id, messages in windows:
         messages.sort(key=lambda m: m.get("timestamp") or 0)
         chat_name = messages[-1].get("chat_name") or wa_chat_id
@@ -647,14 +731,19 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
             )
 
         if resumo:
-            _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
+            try:
+                _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
+            except Exception as exc:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha ao gravar digest da conversa '{chat_name}': {exc}", True)
+                failed_digest_writes.append((wa_chat_id, messages))
 
     # Avança o cursor só até onde é seguro: se alguma janela ficou de fora — pelo
-    # teto (`skipped_windows`) ou aguardando reparo de mídia (`deferred_media`) —
-    # o cursor não pode passar da mensagem mais antiga entre as adiadas, senão
-    # elas somem para sempre da próxima consulta por `ingested_at > cursor`.
-    # Sem adiadas, é seguro avançar até a mensagem mais recente deste lote inteiro.
-    held_windows = skipped_windows + deferred_media
+    # teto (`skipped_windows`), aguardando reparo de mídia (`deferred_media`) ou por
+    # falha na gravação (`failed_digest_writes`) — o cursor não pode passar da
+    # mensagem mais antiga entre as adiadas, senão elas somem para sempre da próxima
+    # consulta por `ingested_at > cursor`. Sem nenhuma adiada, é seguro avançar até a
+    # mensagem mais recente deste lote inteiro.
+    held_windows = skipped_windows + deferred_media + failed_digest_writes
     if held_windows:
         new_cursor = min(
             m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
@@ -668,10 +757,12 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
         )
     cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
-    if analyzed or skipped or ignored_unlinked or deferred_media:
+    if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
         if deferred_media:
             extra += f" {len(deferred_media)} janela(s) aguardando reparo de mídia."
+        if failed_digest_writes:
+            extra += f" {len(failed_digest_writes)} janela(s) com falha na gravação, retentando na próxima passada."
         if ignored_unlinked:
             extra += f" {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s)."
         log_to_firestore(sync_ref, logs, f"[WA-INGEST] {analyzed} janela(s) de conversa de WhatsApp analisada(s).{extra}", True)
