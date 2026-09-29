@@ -758,9 +758,34 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     # adiada, é seguro avançar até a mensagem mais recente deste lote inteiro.
     held_windows = skipped_windows + deferred_media + failed_digest_writes + failed_suggestion_writes
     if held_windows:
-        new_cursor = min(
+        oldest_held_ingested_at = min(
             m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
         )
+        # A consulta da próxima passada usa `ingested_at > cursor` (estrita, linha
+        # ~515) -- se o cursor fosse exatamente igual ao timestamp da mensagem mais
+        # antiga retida, essa mensagem específica (a que a retenção existe para
+        # preservar) seria excluída para sempre da próxima consulta, e não só
+        # reprocessada -- PERDA SILENCIOSA E PERMANENTE. CORREÇÃO (achado real de
+        # revisão adversarial, Codex, PR #384): recua 1 microssegundo para manter
+        # essa mensagem elegível na próxima passada.
+        #
+        # RISCO RESIDUAL (achado real de uma 2a rodada de revisão adversarial
+        # interna sobre esta própria correção, PR #384): `ingested_at` é gravado
+        # pelo worker de captura com resolução de MILISSEGUNDO (Date.now()), não
+        # microssegundo -- em rajada, duas mensagens de conversas DIFERENTES podem
+        # colidir no mesmo milissegundo. Se isso acontecer bem na fronteira, o
+        # recuo de 1 microssegundo pode trazer de volta, na próxima passada, uma
+        # mensagem de uma janela que já tinha sido processada com sucesso nesta
+        # passada -- na pior hipótese, uma sugestão duplicada (um segundo cartão no
+        # Telegram) se essa janela se combinar com mensagens novas do mesmo chat e
+        # gerar um digest_id diferente do original. Nenhum tamanho de recuo resolve
+        # isso por completo (a ambiguidade é entre documentos com timestamp igual,
+        # não uma questão de margem) -- precisaria de um cursor composto
+        # (timestamp, doc id), fora do escopo desta sub-entrega. Estritamente
+        # melhor que o bug original (que perdia essa mesma mensagem PARA SEMPRE, de
+        # forma silenciosa, em vez de arriscar reprocessar/duplicar) -- ver
+        # pendência registrada no diário de execução.
+        new_cursor = oldest_held_ingested_at - timedelta(microseconds=1)
     else:
         # Máximo sobre TODO o lote lido (não só as janelas analisadas): no modo
         # só-vinculados, conversas sem vínculo foram descartadas por decisão e não
