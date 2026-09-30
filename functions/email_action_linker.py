@@ -878,14 +878,31 @@ def queue_and_maybe_send_suggestion(
     `task` é o dicionário de candidata no formato de `_load_candidate_tasks`
     (precisa de ao menos `id`, `titulo`, `status`, `is_standby`).
 
-    Não escreve se já existir uma sugestão com esse ID — produtores devem
-    checar isso antes de fazer trabalho caro (embedding, chamada de IA); esta
-    função só protege contra a escrita em si.
+    Não escreve os campos da sugestão se já existir um doc com esse ID —
+    produtores devem checar isso antes de fazer trabalho caro (embedding,
+    chamada de IA); esta função só protege contra a escrita em si. Mas, se o
+    doc já existe com `telegram_sent=False` (uma tentativa anterior gravou a
+    sugestão e falhou ou foi interrompida antes de confirmar o envio), esta
+    chamada tenta reenviar só o cartão do Telegram — sem isso, um retry após
+    falha parcial nunca reenvia, porque o `exists` sozinho não distingue
+    "já concluído" de "gravado mas o envio ainda não foi confirmado".
     """
     suggestions_col = db.collection("email_action_suggestions")
     doc_ref = suggestions_col.document(suggestion_id)
-    if doc_ref.get().exists:
-        return {}
+    existing_snap = doc_ref.get()
+    if existing_snap.exists:
+        existing_doc = existing_snap.to_dict() or {}
+        if existing_doc.get("telegram_sent") or not chat_id:
+            return existing_doc
+        if send_fn is None:
+            from main import _send_telegram_message_raw_with_keyboard
+            send_fn = _send_telegram_message_raw_with_keyboard
+        if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
+            sent_at = datetime.now(timezone.utc).isoformat()
+            existing_doc["telegram_sent"] = True
+            existing_doc["sent_at"] = sent_at
+            doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
+        return existing_doc
 
     now_iso = datetime.now(timezone.utc).isoformat()
     base_doc = {
