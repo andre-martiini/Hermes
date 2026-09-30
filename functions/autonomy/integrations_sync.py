@@ -297,7 +297,26 @@ def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     "triagem desligada" -- então é a referência de frescor preferida aqui.
     `last_processed_at` continua como fallback só para o período de transição
     entre o deploy desta sub-entrega e a primeira rodada de polling seguinte
-    (doc antigo, ainda sem `last_attempt_at` gravado nele)."""
+    (doc antigo, ainda sem `last_attempt_at` gravado nele).
+
+    LIMITAÇÃO NOVA, INTRODUZIDA POR ESTA MESMA CORREÇÃO (achado real de
+    revisão adversarial independente desta sub-entrega -- mesmo espírito das
+    limitações documentadas em `saude_calendar`/`saude_gmail` acima): como
+    `_attempt_heartbeat_write` grava `last_attempt_at` ANTES de qualquer
+    trabalho falível de `triage_whatsapp_messages` (a query em
+    `whatsapp_messages`, a análise por IA, a gravação de digest/sugestão --
+    todas depois do heartbeat na função), um poller persistentemente QUEBRADO
+    nessas etapas (ex.: índice composto do Firestore faltando, regressão de
+    permissão) continua avançando `last_attempt_at` a cada rodada mesmo
+    processando ZERO mensagem com sucesso, para sempre -- `HEALTHY` aqui
+    passa a significar "a função foi invocada", não "a ingestão está
+    funcionando". Troca deliberada (a limitação anterior, cursor de dados
+    travado, ao menos soava alarme eventualmente para esse cenário; esta
+    troca prioriza não confundir conta ociosa com sync quebrado, às custas de
+    não detectar mais mecanicamente um sync quebrado bem no início da
+    função). Se uma sub-entrega futura precisar diferenciar os dois casos,
+    precisa de um sinal de SUCESSO real (ex.: heartbeat gravado só depois da
+    query completar sem exceção), não deste heartbeat de tentativa."""
     doc = doc or {}
     limite_degradado, limite_indisponivel = LIMITES_POR_INTEGRACAO["whatsapp"]
     referencia = doc.get("last_attempt_at")
