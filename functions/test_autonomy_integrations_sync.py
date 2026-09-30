@@ -400,6 +400,38 @@ class TestSaudeWhatsapp(unittest.TestCase):
         doc = {"last_processed_at": _AGORA - timedelta(seconds=limite_indisponivel)}
         self.assertEqual(saude_whatsapp(doc, _AGORA).status, IntegrationStatus.DEGRADED)
 
+    def test_query_success_recente_e_healthy_mesmo_com_cursor_de_dados_antigo(self):
+        # Cenário central da correção: conta legitimamente ociosa (ninguém manda
+        # mensagem nova há dias -- cursor de dados bem além do limite indisponível),
+        # mas a consulta do polling horário continua tendo êxito
+        # (`last_query_success_at` recente) -- antes desta sub-entrega, isso era
+        # reportado como UNAVAILABLE.
+        doc = {
+            "last_processed_at": _AGORA - timedelta(days=3),
+            "last_query_success_at": _AGORA - timedelta(minutes=10),
+        }
+        saude = saude_whatsapp(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertEqual(saude.lag_seconds, 600.0)
+
+    def test_query_success_ausente_cai_para_cursor_de_dados_legado(self):
+        # Doc gravado antes desta sub-entrega (sem last_query_success_at ainda) --
+        # migração automática, mesmo espírito do cursor composto de _messages_query.
+        doc = {"last_processed_at": _AGORA - timedelta(minutes=5)}
+        saude = saude_whatsapp(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertEqual(saude.lag_seconds, 300.0)
+
+    def test_query_success_antigo_sem_cursor_de_dados_e_unavailable(self):
+        doc = {"last_query_success_at": _AGORA - timedelta(hours=8)}
+        self.assertEqual(saude_whatsapp(doc, _AGORA).status, IntegrationStatus.UNAVAILABLE)
+
+    def test_query_success_muito_no_futuro_nao_levanta_e_vira_unknown(self):
+        doc = {"last_query_success_at": _AGORA + timedelta(seconds=TOLERANCIA_RELOGIO_SEGUNDOS + 1)}
+        saude = saude_whatsapp(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.UNKNOWN)
+        self.assertIsNone(saude.lag_seconds)
+
 
 class TestSaudeSemSincronizacaoPersistida(unittest.TestCase):
     def test_sipac_e_sempre_unknown(self):

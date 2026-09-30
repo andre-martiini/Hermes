@@ -137,6 +137,39 @@ def _cursor_write_after_batch(cursor_bootstrapped: bool, since_ts, result: tuple
     return {"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}
 
 
+def _query_success_heartbeat_write(now: datetime) -> dict:
+    """Dict a gravar em `system/whatsapp_ingest` (`cursor_ref.set(..., merge=True)`)
+    quando `triage_whatsapp_messages` consulta `whatsapp_messages` com ÊXITO
+    (sem exceção) -- sinal de SUCESSO DE LEITURA, separado do cursor de dados
+    (`last_processed_at`, que só avança quando existe mensagem nova
+    efetivamente processada).
+
+    Corrige a limitação conhecida documentada em `saude_whatsapp`
+    (`autonomy/integrations_sync.py`, achado real de revisão automática do
+    Codex, comment_id=4125412129): `last_processed_at` sozinho é a idade da
+    ÚLTIMA MENSAGEM processada, não da última consulta bem-sucedida -- uma
+    conta legitimamente ociosa (ninguém manda mensagem por horas) podia ser
+    reportada como DEGRADED/UNAVAILABLE mesmo com o polling horário rodando
+    perfeitamente, porque não havia nenhum sinal que avançasse independente
+    de haver mensagem nova ou não.
+
+    Gravado pelo chamador só DEPOIS que a consulta em si teve êxito (não a
+    cada chamada incondicionalmente) -- outro achado real de revisão
+    automática do Codex, comment_id=4147530697, sobre uma versão anterior
+    desta correção: um heartbeat gravado ANTES de qualquer trabalho falível
+    (ou, pior, usado como estampa de "sucesso" em `saude_whatsapp` mesmo sem
+    nenhuma confirmação de leitura) faria uma consulta persistentemente
+    quebrada (ex.: índice composto faltando, regressão de permissão) parecer
+    `HEALTHY` para sempre -- o `last_success_at` que `saude_whatsapp` repassa
+    para a tool `consultar_saude_integracoes` (\"último sucesso\") precisa
+    continuar significando uma leitura CONFIRMADA, não uma mera invocação da
+    função. Cobre os caminhos de "nenhuma mensagem nova" e "triagem
+    desligada" (ambos depois da consulta bem-sucedida), mas não cobre falha
+    na consulta em si nem quebra downstream (análise por IA, gravação de
+    digest/sugestão) -- ver LIMITAÇÃO em `saude_whatsapp`."""
+    return {"last_query_success_at": now}
+
+
 def _valid_date(value) -> str | None:
     s = str(value or "").strip()
     if not _DATE_RE.match(s):
@@ -627,6 +660,19 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     except Exception as exc:
         log_to_firestore(sync_ref, logs, f"[WA-INGEST][ERRO] Falha ao consultar whatsapp_messages: {exc}", True)
         return
+
+    # Heartbeat de SUCESSO de consulta (ver `_query_success_heartbeat_write`) --
+    # gravado só depois que a consulta acima teve êxito (sem exceção), mas
+    # incondicional quanto a haver mensagem nova ou não -- cobre também os
+    # caminhos de "nenhuma mensagem nova" e "triagem desligada" mais abaixo.
+    # Best-effort (não aborta a passada se a gravação falhar -- achado real de
+    # revisão automática do Codex, comment_id=4147530707: uma escrita de
+    # instrumentação não pode virar pré-requisito para processar mensagens
+    # reais já obtidas com sucesso).
+    try:
+        cursor_ref.set(_query_success_heartbeat_write(datetime.now(timezone.utc)), merge=True)
+    except Exception as exc:
+        log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha ao gravar heartbeat de sucesso da consulta: {exc}", True)
 
     if not docs:
         return
