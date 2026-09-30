@@ -1612,6 +1612,7 @@ def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
         return
 
     chat_id = _resolve_default_telegram_chat_id(db)
+    suggestions_col = db.collection("email_action_suggestions")
     linked = 0
 
     for event_doc in events:
@@ -1635,13 +1636,20 @@ def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
             continue
 
         suggestion_id = f"calendar_{google_id}"
-        # Sem pré-checagem de existência aqui, ao contrário de antes: um doc já
+        # Sem pré-checagem que pule a chamada aqui, ao contrário de antes: um doc já
         # existente com telegram_sent=False (tentativa anterior interrompida antes
         # de confirmar o envio) precisa continuar chegando a
         # queue_and_maybe_send_suggestion, que agora sabe retentar só o envio —
         # um `continue` aqui tornaria esse retry permanentemente inalcançável
-        # para o produtor de Calendar (achado real da revisão adversarial desta
-        # sub-entrega).
+        # para o produtor de Calendar (achado real da 1a rodada de revisão
+        # adversarial desta sub-entrega). A leitura abaixo serve só para o contador
+        # `linked`/o log de resumo não confundirem "já enviado numa passada anterior"
+        # com "enviado agora": sem ela, `linked` (e o log `[CAL-LINK]`) dispararia de
+        # novo a cada passada de `run_full_sync`, para a mesma reunião já resolvida,
+        # enquanto ela seguir dentro da janela de `CALENDAR_EVENT_LOOKBACK_MINUTES`
+        # (achado real da 2a rodada de revisão adversarial, sobre a própria correção
+        # acima).
+        already_sent_before = bool((suggestions_col.document(suggestion_id).get().to_dict() or {}).get("telegram_sent"))
 
         titulo = event.get("titulo") or "(sem título)"
         hora_fim = end_dt.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M")
@@ -1659,7 +1667,7 @@ def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
             reativar_sugerido=True,
             chat_id=chat_id,
         )
-        if result:
+        if result and result.get("telegram_sent") and not already_sent_before:
             linked += 1
 
     if linked:

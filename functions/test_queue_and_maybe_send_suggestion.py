@@ -232,16 +232,31 @@ class TestLinkCalendarEventsResend(unittest.TestCase):
             sent.append((chat_id, text, keyboard))
             return True
 
+        logs = []
         with mock.patch("main._cached_doc_get", side_effect=lambda db, coll, docid: db.collection(coll).document(docid).get()), \
              mock.patch("main._resolve_default_telegram_chat_id", return_value="chat-1"), \
              mock.patch("main._send_telegram_message_raw_with_keyboard", side_effect=send_fn):
-            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=[])
+            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=logs)
 
         self.assertEqual(len(sent), 1, "doc existente com telegram_sent=False deve ser reenviado, não pulado")
         doc = db.collection("email_action_suggestions").document("calendar_gcal-1")
         self.assertTrue(doc.to_dict()["telegram_sent"])
+        self.assertTrue(
+            any("[CAL-LINK]" in entry for entry in logs),
+            "um reenvio bem-sucedido (telegram_sent False -> True) deve contar como 'linked' no log de resumo",
+        )
 
     def test_doc_existente_com_telegram_sent_true_nao_e_reenviado(self):
+        """
+        Achado real da 2a rodada de revisão adversarial (sobre a correção do achado
+        da 1a rodada, acima): sem distinguir "já enviado numa passada anterior" de
+        "enviado agora", o contador `linked`/o log `[CAL-LINK]` dispararia de novo a
+        cada passada de `run_full_sync` para a MESMA reunião já totalmente resolvida,
+        enquanto ela seguir dentro da janela de `CALENDAR_EVENT_LOOKBACK_MINUTES` (3h)
+        -- um operador lendo o log concluiria (erradamente) que houve atividade nova
+        de vínculo a cada ciclo. Puramente cosmético/observabilidade (nada mais
+        consome esse log), mas real.
+        """
         db = self._build_db(suggestion_doc={
             "canal": "calendar",
             "task_id": "task-1",
@@ -254,12 +269,17 @@ class TestLinkCalendarEventsResend(unittest.TestCase):
             sent.append((chat_id, text, keyboard))
             return True
 
+        logs = []
         with mock.patch("main._cached_doc_get", side_effect=lambda db, coll, docid: db.collection(coll).document(docid).get()), \
              mock.patch("main._resolve_default_telegram_chat_id", return_value="chat-1"), \
              mock.patch("main._send_telegram_message_raw_with_keyboard", side_effect=send_fn):
-            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=[])
+            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=logs)
 
         self.assertEqual(sent, [], "doc já com telegram_sent=True não deve ser reenviado")
+        self.assertFalse(
+            any("[CAL-LINK]" in entry for entry in logs),
+            "uma reunião já totalmente resolvida numa passada anterior não deve gerar um novo log '[CAL-LINK]' a cada passada",
+        )
 
     def test_doc_novo_continua_gravando_e_enviando(self):
         db = self._build_db(suggestion_doc=None)
@@ -269,15 +289,17 @@ class TestLinkCalendarEventsResend(unittest.TestCase):
             sent.append((chat_id, text, keyboard))
             return True
 
+        logs = []
         with mock.patch("main._cached_doc_get", side_effect=lambda db, coll, docid: db.collection(coll).document(docid).get()), \
              mock.patch("main._resolve_default_telegram_chat_id", return_value="chat-1"), \
              mock.patch("main._send_telegram_message_raw_with_keyboard", side_effect=send_fn):
-            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=[])
+            link_calendar_events_to_actions(db, sync_ref=mock.MagicMock(), logs=logs)
 
         self.assertEqual(len(sent), 1)
         doc = db.collection("email_action_suggestions").document("calendar_gcal-1")
         self.assertTrue(doc.exists)
         self.assertTrue(doc.to_dict()["telegram_sent"])
+        self.assertTrue(any("[CAL-LINK]" in entry for entry in logs))
 
 
 if __name__ == "__main__":
