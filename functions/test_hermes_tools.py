@@ -1497,6 +1497,46 @@ class TestEscritaDireta(unittest.TestCase):
         self.assertEqual(res["respostas_pendentes_total"], 0)
         self.assertEqual(res["respostas_pendentes_filtrados"], {})
 
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_inclui_saude_integracoes(self, mock_build):
+        """P05 passo 8 (achado A09 do plano): `obter_estado_atual` passa a
+        expor a mesma saúde por integração que a tool
+        `consultar_saude_integracoes` já reportava isoladamente -- fecha a
+        pendência registrada na sub-entrega 3/N ("Não é chamada por
+        obter_estado_atual", docstring anterior de
+        `_consultar_saude_integracoes`)."""
+        from test_consultar_saude_integracoes import _Db
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        ctx = ToolContext(_db=_Db({"sync": {"status": "completed", "last_success": "2026-01-01T00:00:00+00:00"}}))
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertIn("saude_integracoes", res)
+        self.assertIn("integracoes", res["saude_integracoes"])
+        integracoes = {i["integration"] for i in res["saude_integracoes"]["integracoes"]}
+        self.assertEqual(
+            integracoes,
+            {"calendar", "contacts", "gmail", "whatsapp", "sipac", "financas", "repositorio"},
+        )
+
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_saude_integracoes_falha_fica_explicita(self, mock_build):
+        """Achado A09: uma falha ao consultar a saúde das integrações não
+        pode virar lista vazia (pareceria "tudo certo, nenhuma integração") --
+        precisa ficar visível como falha da própria checagem, mesmo padrão já
+        cobrado dos outros blocos que compõem `obter_estado_atual`."""
+        class _DbQuebrado:
+            def collection(self, nome):
+                raise RuntimeError("firestore fora do ar")
+
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        ctx = ToolContext(_db=_DbQuebrado())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertIn("erro", res["saude_integracoes"])
+        self.assertNotIn("integracoes", res["saude_integracoes"])
+
 
 class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):
     """Os três bugs de 28/08/2026 tinham a mesma forma: retorno sem efeito.
