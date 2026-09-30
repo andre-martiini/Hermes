@@ -279,10 +279,10 @@ def saude_gmail(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Integr
 def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> IntegrationHealth:
     """`system/whatsapp_ingest` -- cursor de dados (`last_processed_at`,
     `last_processed_doc_id` como desempate, irrelevante para saúde/frescor) e,
-    desde a correção abaixo, um heartbeat de TENTATIVA (`last_attempt_at`)
-    separado -- nenhum campo de status/erro existe neste doc (confirmado em
-    `whatsapp_ingest.py`), então `error_code` é sempre `None`; a única fonte
-    de sinal é a frescor.
+    desde a correção abaixo, um heartbeat de SUCESSO DE CONSULTA
+    (`last_query_success_at`) separado -- nenhum campo de status/erro existe
+    neste doc (confirmado em `whatsapp_ingest.py`), então `error_code` é
+    sempre `None`; a única fonte de sinal é a frescor.
 
     LIMITAÇÃO CONHECIDA E RESOLVIDA (achado real de revisão automática do
     Codex, comment_id=4125412129, P2, na PR da sub-entrega 3/N): usar só
@@ -291,35 +291,38 @@ def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     só avança esse cursor quando a query encontra mensagem nova, então uma
     conta legitimamente ociosa por horas podia ser reportada como
     `DEGRADED`/`UNAVAILABLE` mesmo com o polling horário rodando
-    perfeitamente. `triage_whatsapp_messages` agora grava `last_attempt_at`
-    (`_attempt_heartbeat_write`) a cada chamada, sucesso ou não, o mais cedo
-    possível na função -- inclusive nos caminhos de "nenhuma mensagem nova" e
-    "triagem desligada" -- então é a referência de frescor preferida aqui.
-    `last_processed_at` continua como fallback só para o período de transição
-    entre o deploy desta sub-entrega e a primeira rodada de polling seguinte
-    (doc antigo, ainda sem `last_attempt_at` gravado nele).
+    perfeitamente. `triage_whatsapp_messages` agora grava
+    `last_query_success_at` (`_query_success_heartbeat_write`) assim que a
+    consulta a `whatsapp_messages` tem êxito (sem exceção), incondicional
+    quanto a encontrar mensagem nova ou não -- cobre os caminhos de "nenhuma
+    mensagem nova" e "triagem desligada" -- então é a referência de frescor
+    preferida aqui. `last_processed_at` continua como fallback só para o
+    período de transição entre o deploy desta sub-entrega e a primeira
+    rodada de polling seguinte (doc antigo, ainda sem o campo novo).
 
-    LIMITAÇÃO NOVA, INTRODUZIDA POR ESTA MESMA CORREÇÃO (achado real de
-    revisão adversarial independente desta sub-entrega -- mesmo espírito das
-    limitações documentadas em `saude_calendar`/`saude_gmail` acima): como
-    `_attempt_heartbeat_write` grava `last_attempt_at` ANTES de qualquer
-    trabalho falível de `triage_whatsapp_messages` (a query em
-    `whatsapp_messages`, a análise por IA, a gravação de digest/sugestão --
-    todas depois do heartbeat na função), um poller persistentemente QUEBRADO
-    nessas etapas (ex.: índice composto do Firestore faltando, regressão de
-    permissão) continua avançando `last_attempt_at` a cada rodada mesmo
-    processando ZERO mensagem com sucesso, para sempre -- `HEALTHY` aqui
-    passa a significar "a função foi invocada", não "a ingestão está
-    funcionando". Troca deliberada (a limitação anterior, cursor de dados
-    travado, ao menos soava alarme eventualmente para esse cenário; esta
-    troca prioriza não confundir conta ociosa com sync quebrado, às custas de
-    não detectar mais mecanicamente um sync quebrado bem no início da
-    função). Se uma sub-entrega futura precisar diferenciar os dois casos,
-    precisa de um sinal de SUCESSO real (ex.: heartbeat gravado só depois da
-    query completar sem exceção), não deste heartbeat de tentativa."""
+    Deliberadamente NÃO é um heartbeat incondicional de "a função foi
+    invocada" (achado real de revisão automática do Codex,
+    comment_id=4147530697, sobre uma versão anterior desta correção que
+    gravava o heartbeat ANTES da consulta, cobrindo inclusive uma consulta
+    persistentemente quebrada): o valor repassado aqui para `last_success_at`
+    -- e, por extensão, exposto pela tool `consultar_saude_integracoes` como
+    "último sucesso" -- só avança quando a consulta em si é CONFIRMADA
+    bem-sucedida, preservando o contrato de `last_success_at` (leitura
+    confirmada, não mera tentativa).
+
+    LIMITAÇÃO RESIDUAL, AINDA ASSIM (mesmo espírito das limitações
+    documentadas em `saude_calendar`/`saude_gmail` acima): "consulta teve
+    êxito" não é o mesmo que "ingestão está funcionando de ponta a ponta" --
+    uma falha persistente DEPOIS da consulta (análise por IA sempre
+    lançando exceção, gravação de digest/sugestão sempre falhando) não é
+    capturada por este sinal e continuaria reportando `HEALTHY`. Escopo
+    deliberado desta sub-entrega (só a consulta, o mesmo tipo de sinal que
+    `last_success` já representa para `saude_calendar`/`saude_gmail`); um
+    sinal de saúde fim-a-fim exigiria instrumentar cada etapa downstream
+    separadamente, fora do escopo aqui."""
     doc = doc or {}
     limite_degradado, limite_indisponivel = LIMITES_POR_INTEGRACAO["whatsapp"]
-    referencia = doc.get("last_attempt_at")
+    referencia = doc.get("last_query_success_at")
     if referencia is None:
         referencia = doc.get("last_processed_at")
     return montar_saude_integracao(

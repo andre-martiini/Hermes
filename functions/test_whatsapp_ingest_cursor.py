@@ -16,17 +16,18 @@ migração automática do cursor antigo para o novo), `_cursor_write_after_batch
 (a decisão de o que gravar em `system/whatsapp_ingest`, extraída após o
 achado real do Codex na PR #387 sobre a janela deslizante do bootstrap --
 exatamente a wiring que nenhum dos 2 helpers acima cobria sozinho) e, desde
-P05 sub-entrega 11/N, `_attempt_heartbeat_write` (o heartbeat de tentativa,
-separado do cursor de dados -- ver `TestAttemptHeartbeatWrite` abaixo)."""
+P05 sub-entrega 11/N, `_query_success_heartbeat_write` (o heartbeat de
+sucesso de consulta, separado do cursor de dados -- ver
+`TestQuerySuccessHeartbeatWrite` abaixo)."""
 
 import unittest
 from datetime import datetime, timedelta, timezone
 
 from whatsapp_ingest import (
-    _attempt_heartbeat_write,
     _cursor_write_after_batch,
     _messages_query,
     _next_cursor_after_batch,
+    _query_success_heartbeat_write,
 )
 
 _T0 = datetime(2026, 9, 30, 12, 0, 0, 0, tzinfo=timezone.utc)
@@ -217,19 +218,21 @@ class TestCursorWriteAfterBatch(unittest.TestCase):
         self.assertIsNone(_cursor_write_after_batch(False, _T0, None))
 
 
-class TestAttemptHeartbeatWrite(unittest.TestCase):
-    """`_attempt_heartbeat_write` -- heartbeat de TENTATIVA (`last_attempt_at`),
-    separado do cursor de dados (`last_processed_at`/`_cursor_write_after_batch`
-    acima). `triage_whatsapp_messages` grava o resultado incondicionalmente, o
-    mais cedo possível na função, cobrindo também os early returns (query
-    vazia, triagem desligada) que `_cursor_write_after_batch` nunca alcança.
-    Ver `autonomy/integrations_sync.py::saude_whatsapp` para o consumidor."""
+class TestQuerySuccessHeartbeatWrite(unittest.TestCase):
+    """`_query_success_heartbeat_write` -- heartbeat de SUCESSO DE CONSULTA
+    (`last_query_success_at`), separado do cursor de dados (`last_processed_at`/
+    `_cursor_write_after_batch` acima). `triage_whatsapp_messages` grava o
+    resultado só depois que a consulta a `whatsapp_messages` tem êxito (sem
+    exceção), cobrindo os early returns posteriores (query vazia, triagem
+    desligada) mas não a consulta em si falhando -- ver
+    `autonomy/integrations_sync.py::saude_whatsapp` para o consumidor e a
+    limitação residual documentada lá."""
 
-    def test_devolve_so_o_campo_de_tentativa(self):
-        self.assertEqual(_attempt_heartbeat_write(_T0), {"last_attempt_at": _T0})
+    def test_devolve_so_o_campo_de_sucesso_de_consulta(self):
+        self.assertEqual(_query_success_heartbeat_write(_T0), {"last_query_success_at": _T0})
 
     def test_nao_inclui_nenhum_campo_do_cursor_de_dados(self):
-        resultado = _attempt_heartbeat_write(_T0)
+        resultado = _query_success_heartbeat_write(_T0)
         self.assertNotIn("last_processed_at", resultado)
         self.assertNotIn("last_processed_doc_id", resultado)
 
