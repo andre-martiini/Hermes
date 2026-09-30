@@ -878,14 +878,41 @@ def queue_and_maybe_send_suggestion(
     `task` é o dicionário de candidata no formato de `_load_candidate_tasks`
     (precisa de ao menos `id`, `titulo`, `status`, `is_standby`).
 
-    Não escreve se já existir uma sugestão com esse ID — produtores devem
-    checar isso antes de fazer trabalho caro (embedding, chamada de IA); esta
-    função só protege contra a escrita em si.
+    Não escreve os campos da sugestão se já existir um doc com esse ID —
+    produtores devem checar isso antes de fazer trabalho caro (embedding,
+    chamada de IA); esta função só protege contra a escrita em si. Mas, se o
+    doc já existe com `telegram_sent=False` (uma tentativa anterior gravou a
+    sugestão e falhou ou foi interrompida antes de confirmar o envio), esta
+    chamada tenta reenviar só o cartão do Telegram — sem isso, um retry após
+    falha parcial nunca reenvia, porque o `exists` sozinho não distingue
+    "já concluído" de "gravado mas o envio ainda não foi confirmado".
     """
     suggestions_col = db.collection("email_action_suggestions")
     doc_ref = suggestions_col.document(suggestion_id)
-    if doc_ref.get().exists:
-        return {}
+    existing_snap = doc_ref.get()
+    if existing_snap.exists:
+        existing_doc = existing_snap.to_dict() or {}
+        # Achado real da revisão adversarial de terceiros (Codex, PR #385): o cenário de
+        # falha parcial que este retry existe para cobrir é exatamente "o envio ao
+        # Telegram teve sucesso, mas a confirmação local de telegram_sent=True falhou/foi
+        # interrompida" -- ou seja, o cartão JÁ chegou ao usuário e é clicável mesmo com
+        # telegram_sent ainda False no Firestore. Se o usuário decidir (aplicar/dispensar)
+        # nesse intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
+        # `status` para "applied"/"applied_reactivated"/"dismissed" por sua própria
+        # transação, independente de `telegram_sent`. Sem checar `status` aqui, esta
+        # função reenviaria um SEGUNDO cartão para uma sugestão já resolvida -- o clique
+        # nele só informaria "já resolvida/expirada", confundindo o usuário à toa.
+        if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
+            return existing_doc
+        if send_fn is None:
+            from main import _send_telegram_message_raw_with_keyboard
+            send_fn = _send_telegram_message_raw_with_keyboard
+        if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
+            sent_at = datetime.now(timezone.utc).isoformat()
+            existing_doc["telegram_sent"] = True
+            existing_doc["sent_at"] = sent_at
+            doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
+        return existing_doc
 
     now_iso = datetime.now(timezone.utc).isoformat()
     base_doc = {
@@ -1619,8 +1646,20 @@ def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
             continue
 
         suggestion_id = f"calendar_{google_id}"
-        if suggestions_col.document(suggestion_id).get().exists:
-            continue
+        # Sem pré-checagem que pule a chamada aqui, ao contrário de antes: um doc já
+        # existente com telegram_sent=False (tentativa anterior interrompida antes
+        # de confirmar o envio) precisa continuar chegando a
+        # queue_and_maybe_send_suggestion, que agora sabe retentar só o envio —
+        # um `continue` aqui tornaria esse retry permanentemente inalcançável
+        # para o produtor de Calendar (achado real da 1a rodada de revisão
+        # adversarial desta sub-entrega). A leitura abaixo serve só para o contador
+        # `linked`/o log de resumo não confundirem "já enviado numa passada anterior"
+        # com "enviado agora": sem ela, `linked` (e o log `[CAL-LINK]`) dispararia de
+        # novo a cada passada de `run_full_sync`, para a mesma reunião já resolvida,
+        # enquanto ela seguir dentro da janela de `CALENDAR_EVENT_LOOKBACK_MINUTES`
+        # (achado real da 2a rodada de revisão adversarial, sobre a própria correção
+        # acima).
+        already_sent_before = bool((suggestions_col.document(suggestion_id).get().to_dict() or {}).get("telegram_sent"))
 
         titulo = event.get("titulo") or "(sem título)"
         hora_fim = end_dt.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M")
@@ -1638,7 +1677,7 @@ def link_calendar_events_to_actions(db, sync_ref, logs, tarefas_docs=None):
             reativar_sugerido=True,
             chat_id=chat_id,
         )
-        if result:
+        if result and result.get("telegram_sent") and not already_sent_before:
             linked += 1
 
     if linked:

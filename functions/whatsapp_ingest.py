@@ -725,7 +725,7 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
                 extra["mutacoes_propostas"] = mutacoes_propostas
 
             try:
-                queue_and_maybe_send_suggestion(
+                suggestion_result = queue_and_maybe_send_suggestion(
                     db,
                     f"whatsapp_{digest_id}",
                     canal="whatsapp",
@@ -739,6 +739,31 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
                     chat_id=telegram_chat_id,
                     extra=extra,
                 )
+                # Achado real da revisão adversarial de terceiros (Codex, PR #385): antes,
+                # só uma EXCEÇÃO segurava a janela para retry -- um retorno normal com
+                # telegram_sent=False (ex.: _send_telegram_message_raw_with_keyboard
+                # devolvendo False por timeout/credencial/HTTP não-2xx, sem levantar) não
+                # era tratado como falha; o cursor avançava e o suggestion_id
+                # determinístico (f"whatsapp_{digest_id}") nunca era revisitado, tornando
+                # o reenvio desta sub-entrega inalcançável para este produtor
+                # especificamente. Só conta como falha quando havia `chat_id` (i.e., o
+                # envio deveria ter acontecido) -- sem chat_id configurado é um "não
+                # enviar de propósito" já existente em queue_and_maybe_send_suggestion,
+                # não uma falha a retentar (retentar não mudaria nada sem configuração).
+                #
+                # Também exige `status == "pending"` -- achado real da revisão adversarial
+                # INTERNA sobre esta própria correção: se o usuário já resolveu a sugestão
+                # (aplicou/dispensou um cartão que chegou mas cuja confirmação local de
+                # telegram_sent falhou -- exatamente o cenário que o reenvio em
+                # queue_and_maybe_send_suggestion existe para cobrir), a função passa a
+                # devolver `telegram_sent=False` PARA SEMPRE para esse suggestion_id (ela
+                # nunca mais toca um doc com status != "pending"). Sem checar `status`
+                # aqui, essa janela seria adicionada a `failed_suggestion_writes` a CADA
+                # passada, travando o cursor de ingestão permanentemente nela (nenhum
+                # código reverte `status` para "pending") e reprocessando-a (com chamada
+                # de IA paga) para sempre -- um vazamento de custo pior que o bug original.
+                if telegram_chat_id and suggestion_result.get("status") == "pending" and not suggestion_result.get("telegram_sent"):
+                    failed_suggestion_writes.append((wa_chat_id, messages))
             except Exception as exc:
                 log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha ao registrar sugestão da conversa '{chat_name}': {exc}", True)
                 failed_suggestion_writes.append((wa_chat_id, messages))
