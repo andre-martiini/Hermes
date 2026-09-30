@@ -12,15 +12,22 @@ cobrindo o pipeline inteiro (IA, settings, digest, sugestão), este arquivo
 testa em isolamento as peças PURAS que carregam a correção:
 `_next_cursor_after_batch` (a lógica de posição -- onde mora o bug original e
 a correção), `_messages_query` (a construção da consulta -- onde mora a
-migração automática do cursor antigo para o novo) e `_cursor_write_after_batch`
+migração automática do cursor antigo para o novo), `_cursor_write_after_batch`
 (a decisão de o que gravar em `system/whatsapp_ingest`, extraída após o
 achado real do Codex na PR #387 sobre a janela deslizante do bootstrap --
-exatamente a wiring que nenhum dos 2 helpers acima cobria sozinho)."""
+exatamente a wiring que nenhum dos 2 helpers acima cobria sozinho) e, desde
+P05 sub-entrega 11/N, `_attempt_heartbeat_write` (o heartbeat de tentativa,
+separado do cursor de dados -- ver `TestAttemptHeartbeatWrite` abaixo)."""
 
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from whatsapp_ingest import _cursor_write_after_batch, _messages_query, _next_cursor_after_batch
+from whatsapp_ingest import (
+    _attempt_heartbeat_write,
+    _cursor_write_after_batch,
+    _messages_query,
+    _next_cursor_after_batch,
+)
 
 _T0 = datetime(2026, 9, 30, 12, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -208,6 +215,23 @@ class TestCursorWriteAfterBatch(unittest.TestCase):
         um limite fixo (não recalculado a cada chamada), então não precisa
         ser reescrito."""
         self.assertIsNone(_cursor_write_after_batch(False, _T0, None))
+
+
+class TestAttemptHeartbeatWrite(unittest.TestCase):
+    """`_attempt_heartbeat_write` -- heartbeat de TENTATIVA (`last_attempt_at`),
+    separado do cursor de dados (`last_processed_at`/`_cursor_write_after_batch`
+    acima). `triage_whatsapp_messages` grava o resultado incondicionalmente, o
+    mais cedo possível na função, cobrindo também os early returns (query
+    vazia, triagem desligada) que `_cursor_write_after_batch` nunca alcança.
+    Ver `autonomy/integrations_sync.py::saude_whatsapp` para o consumidor."""
+
+    def test_devolve_so_o_campo_de_tentativa(self):
+        self.assertEqual(_attempt_heartbeat_write(_T0), {"last_attempt_at": _T0})
+
+    def test_nao_inclui_nenhum_campo_do_cursor_de_dados(self):
+        resultado = _attempt_heartbeat_write(_T0)
+        self.assertNotIn("last_processed_at", resultado)
+        self.assertNotIn("last_processed_doc_id", resultado)
 
 
 if __name__ == "__main__":

@@ -137,6 +137,26 @@ def _cursor_write_after_batch(cursor_bootstrapped: bool, since_ts, result: tuple
     return {"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}
 
 
+def _attempt_heartbeat_write(now: datetime) -> dict:
+    """Dict a gravar em `system/whatsapp_ingest` (`cursor_ref.set(..., merge=True)`)
+    a cada CHAMADA de `triage_whatsapp_messages`, sucesso ou não -- sinal de
+    TENTATIVA, separado do cursor de dados (`last_processed_at`, que só avança
+    quando existe mensagem nova para processar).
+
+    Corrige a limitação conhecida documentada em `saude_whatsapp`
+    (`autonomy/integrations_sync.py`, achado real de revisão automática do
+    Codex, comment_id=4125412129): `last_processed_at` sozinho é a idade da
+    ÚLTIMA MENSAGEM processada, não da última tentativa de sincronização --
+    uma conta legitimamente ociosa (ninguém manda mensagem por horas) podia
+    ser reportada como DEGRADED/UNAVAILABLE mesmo com o polling horário
+    rodando perfeitamente, porque não havia nenhum sinal que avançasse
+    independente de haver mensagem nova ou não. `last_attempt_at` é gravado
+    incondicionalmente pelo chamador, o mais cedo possível na função (antes
+    de qualquer early return por query vazia, triagem desligada, falha de
+    consulta etc.), então também cobre esses caminhos."""
+    return {"last_attempt_at": now}
+
+
 def _valid_date(value) -> str | None:
     s = str(value or "").strip()
     if not _DATE_RE.match(s):
@@ -594,6 +614,10 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     from email_action_linker import _load_candidate_tasks, _format_candidates_for_prompt, queue_and_maybe_send_suggestion
 
     cursor_ref = db.collection("system").document("whatsapp_ingest")
+    # Heartbeat de tentativa (ver `_attempt_heartbeat_write`) -- gravado o mais cedo
+    # possível nesta função, ANTES de qualquer early return, para que cubra todos os
+    # caminhos de saída (inclusive "nenhuma mensagem nova" e "triagem desligada").
+    cursor_ref.set(_attempt_heartbeat_write(datetime.now(timezone.utc)), merge=True)
     cursor_doc = cursor_ref.get()
     cursor_data = (cursor_doc.to_dict() or {}) if cursor_doc.exists else {}
     since_ts = cursor_data.get("last_processed_at")
