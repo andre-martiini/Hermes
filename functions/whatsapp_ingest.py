@@ -43,6 +43,64 @@ DIGEST_EMBEDDING_DIM = 768
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _next_cursor_after_batch(docs: list, held_ids: set) -> tuple | None:
+    """Calcula o próximo cursor (ingested_at, doc_id) de `triage_whatsapp_messages`
+    a partir do lote `docs` — DocumentSnapshots na ordem EXATA devolvida pela
+    consulta, ordenada por (ingested_at, __name__) (ver `_messages_query`).
+
+    Substitui o antigo recuo de 1 microssegundo sobre `ingested_at` (achado de
+    risco residual da sub-entrega P05 7/N, PR #384): `ingested_at` é gravado
+    pelo worker de captura (services/whatsapp-capture/index.js) com resolução
+    de MILISSEGUNDO (Date.now()), não microssegundo — em rajada, duas
+    mensagens de conversas DIFERENTES podiam colidir no mesmo milissegundo, e
+    o recuo por tempo sozinho não conseguia distinguir "a mensagem retida que
+    preciso reler" de "uma mensagem de outra janela, já processada com
+    sucesso nesta mesma passada, que por acaso tem o mesmo timestamp". Usando
+    a ORDEM que o próprio Firestore devolveu (não uma suposição própria sobre
+    como ele desempata) para localizar exatamente o documento anterior ao
+    mais antigo retido, a ambiguidade desaparece: `doc_id` é sempre único,
+    então (ingested_at, doc_id) identifica uma posição exata na consulta,
+    mesmo quando vários documentos compartilham o mesmo milissegundo.
+
+    `held_ids`: doc_id das mensagens retidas nesta passada (teto de janelas,
+    mídia pendente, falha de gravação de digest/sugestão) — não podem sumir
+    da próxima consulta. Devolve `(novo_ingested_at, novo_doc_id)` apontando
+    para o cursor `start_after` seguro, ou `None` quando nada pode avançar
+    (o primeiro documento do próprio lote já está retido — cursor atual
+    continua válido, chamador não deve tocar o documento de cursor)."""
+    if not docs:
+        return None
+    if not held_ids:
+        last = docs[-1]
+        return (last.to_dict() or {}).get("ingested_at"), last.id
+    held_positions = [i for i, d in enumerate(docs) if d.id in held_ids]
+    if not held_positions:
+        # Defensivo: todo held_id vem de docs já iterados deste mesmo lote
+        # (ver chamador) — nunca deveria ficar vazio com held_ids não-vazio.
+        last = docs[-1]
+        return (last.to_dict() or {}).get("ingested_at"), last.id
+    oldest_held_idx = min(held_positions)
+    if oldest_held_idx == 0:
+        return None
+    prev = docs[oldest_held_idx - 1]
+    return (prev.to_dict() or {}).get("ingested_at"), prev.id
+
+
+def _messages_query(collection, since_ts, since_doc_id):
+    """Consulta paginada de `whatsapp_messages`, ordenada por (ingested_at,
+    __name__) — o desempate explícito por `__name__` é o que permite um
+    cursor composto (ingested_at, doc_id) sem ambiguidade (ver
+    `_next_cursor_after_batch`). Sem `since_doc_id` (cursor antigo, gravado
+    antes desta correção, ou primeira execução sem cursor nenhum), cai para o
+    filtro por intervalo `>` de sempre — mesmo comportamento de antes,
+    migração automática: a próxima passada já grava `last_processed_doc_id`
+    e passa a usar `start_after` daí em diante."""
+    query = collection.order_by("ingested_at").order_by("__name__")
+    if since_doc_id:
+        return query.start_after([since_ts, since_doc_id])
+    return query.where("ingested_at", ">", since_ts)
+
+
 def _valid_date(value) -> str | None:
     s = str(value or "").strip()
     if not _DATE_RE.match(s):
@@ -482,10 +540,14 @@ def _alert_pending_media_window(db, telegram_chat_id, wa_chat_id: str, chat_name
 def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     """
     Chamada no fim de `run_full_sync` (main.py). Consome mensagens novas de
-    `whatsapp_messages` (cursor em `system/whatsapp_ingest.last_processed_at`),
-    agrupa por conversa, classifica cada janela e roteia: `acao` propõe vínculo
-    com uma tarefa via o motor compartilhado de sugestões; `acao`/`conhecimento`
-    também viram um digest vetorizado; `ruido` é descartado sem gravar nada.
+    `whatsapp_messages` (cursor composto em `system/whatsapp_ingest`:
+    `last_processed_at` + `last_processed_doc_id`, ver `_messages_query`/
+    `_next_cursor_after_batch` — doc_id como desempate elimina a ambiguidade
+    de mensagens de conversas diferentes colidindo no mesmo milissegundo de
+    `ingested_at`), agrupa por conversa, classifica cada janela e roteia:
+    `acao` propõe vínculo com uma tarefa via o motor compartilhado de
+    sugestões; `acao`/`conhecimento` também viram um digest vetorizado;
+    `ruido` é descartado sem gravar nada.
     """
     from main import (
         _cached_doc_get,
@@ -497,9 +559,12 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
 
     cursor_ref = db.collection("system").document("whatsapp_ingest")
     cursor_doc = cursor_ref.get()
-    since_ts = (cursor_doc.to_dict() or {}).get("last_processed_at") if cursor_doc.exists else None
+    cursor_data = (cursor_doc.to_dict() or {}) if cursor_doc.exists else {}
+    since_ts = cursor_data.get("last_processed_at")
+    since_doc_id = cursor_data.get("last_processed_doc_id")
     if since_ts is None:
         since_ts = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_FIRST_RUN_LOOKBACK_HOURS)
+        since_doc_id = None
 
     from inbox_pendentes import atualizar_whatsapp_em_lote, backfill_whatsapp_inicial
     try:
@@ -511,9 +576,7 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
 
     try:
         docs = list(
-            db.collection("whatsapp_messages")
-            .where("ingested_at", ">", since_ts)
-            .order_by("ingested_at")
+            _messages_query(db.collection("whatsapp_messages"), since_ts, since_doc_id)
             .limit(1000)
             .stream()
         )
@@ -524,6 +587,14 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     if not docs:
         return
 
+    def _advance_cursor_full() -> None:
+        """Avança o cursor até o fim do lote inteiro (nenhuma mensagem retida) —
+        usa `_next_cursor_after_batch` com `held_ids` vazio para gravar sempre o
+        par (ingested_at, doc_id), nunca só o timestamp isolado (ver
+        `_next_cursor_after_batch`/`_messages_query`)."""
+        new_ts, new_doc_id = _next_cursor_after_batch(docs, set())
+        cursor_ref.set({"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}, merge=True)
+
     # Atualiza o índice de entrada antes de qualquer filtro/IA da triagem. A
     # pergunta "quem espera resposta" não depende de relevância semântica e não
     # pode sumir quando a triagem automática estiver desligada.
@@ -533,12 +604,12 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     if not settings["enabled"]:
         # A triagem semântica pode estar desligada; o índice operacional de
         # respostas continua válido e já foi atualizado acima.
-        latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
-        cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
+        _advance_cursor_full()
         return
 
     groups: dict[str, list[dict]] = {}
     refs_by_id: dict = {}  # doc-id -> DocumentReference (cache de transcrição de áudio)
+    doc_id_by_message: dict[int, str] = {}  # id(mensagem) -> doc.id (ver _next_cursor_after_batch)
     for doc in docs:
         data = doc.to_dict() or {}
         chat_id = data.get("chat_id")
@@ -546,12 +617,12 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
             continue
         groups.setdefault(chat_id, []).append(data)
         refs_by_id[doc.id] = doc.reference
+        doc_id_by_message[id(data)] = doc.id
 
     if not groups:
         # Nenhuma mensagem tinha chat_id (não deveria acontecer com o worker atualizado) —
         # seguro avançar o cursor, não há nada retido para reprocessar.
-        latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
-        cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
+        _advance_cursor_full()
         return
 
     # `tarefas_docs`: leitura de 'tarefas' já feita pelo run_full_sync neste passo (evita
@@ -586,8 +657,7 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
         for cid in unlinked_ids:
             groups.pop(cid)
         if not groups:
-            latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
-            cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
+            _advance_cursor_full()
             if ignored_unlinked:
                 log_to_firestore(sync_ref, logs, f"[WA-INGEST] {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s) (modo só-vinculados); nada a analisar.", True)
             return
@@ -779,46 +849,36 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     # teto (`skipped_windows`), aguardando reparo de mídia (`deferred_media`) ou por
     # falha na gravação (`failed_digest_writes`/`failed_suggestion_writes`) — o
     # cursor não pode passar da mensagem mais antiga entre as adiadas, senão elas
-    # somem para sempre da próxima consulta por `ingested_at > cursor`. Sem nenhuma
-    # adiada, é seguro avançar até a mensagem mais recente deste lote inteiro.
+    # somem para sempre da próxima consulta. Sem nenhuma adiada, é seguro avançar
+    # até a mensagem mais recente deste lote inteiro.
+    #
+    # CURSOR COMPOSTO (ingested_at, doc_id) — substitui o antigo recuo de 1
+    # microssegundo sobre `ingested_at` (achado de risco residual da
+    # sub-entrega P05 7/N, PR #384: `ingested_at` tem resolução de
+    # MILISSEGUNDO no worker de captura, então duas mensagens de conversas
+    # DIFERENTES podiam colidir no mesmo milissegundo, e o recuo por tempo
+    # sozinho podia trazer de volta, na próxima passada, uma janela já
+    # processada com sucesso nesta — risco de sugestão/digest duplicado).
+    # `_next_cursor_after_batch` usa a ORDEM que o próprio Firestore devolveu
+    # (ver `_messages_query`) para localizar o documento imediatamente
+    # anterior ao mais antigo retido — `doc_id` é sempre único, então a
+    # ambiguidade de timestamps colidindo desaparece por completo.
     held_windows = skipped_windows + deferred_media + failed_digest_writes + failed_suggestion_writes
-    if held_windows:
-        oldest_held_ingested_at = min(
-            m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
-        )
-        # A consulta da próxima passada usa `ingested_at > cursor` (estrita, linha
-        # ~515) -- se o cursor fosse exatamente igual ao timestamp da mensagem mais
-        # antiga retida, essa mensagem específica (a que a retenção existe para
-        # preservar) seria excluída para sempre da próxima consulta, e não só
-        # reprocessada -- PERDA SILENCIOSA E PERMANENTE. CORREÇÃO (achado real de
-        # revisão adversarial, Codex, PR #384): recua 1 microssegundo para manter
-        # essa mensagem elegível na próxima passada.
-        #
-        # RISCO RESIDUAL (achado real de uma 2a rodada de revisão adversarial
-        # interna sobre esta própria correção, PR #384): `ingested_at` é gravado
-        # pelo worker de captura com resolução de MILISSEGUNDO (Date.now()), não
-        # microssegundo -- em rajada, duas mensagens de conversas DIFERENTES podem
-        # colidir no mesmo milissegundo. Se isso acontecer bem na fronteira, o
-        # recuo de 1 microssegundo pode trazer de volta, na próxima passada, uma
-        # mensagem de uma janela que já tinha sido processada com sucesso nesta
-        # passada -- na pior hipótese, uma sugestão duplicada (um segundo cartão no
-        # Telegram) se essa janela se combinar com mensagens novas do mesmo chat e
-        # gerar um digest_id diferente do original. Nenhum tamanho de recuo resolve
-        # isso por completo (a ambiguidade é entre documentos com timestamp igual,
-        # não uma questão de margem) -- precisaria de um cursor composto
-        # (timestamp, doc id), fora do escopo desta sub-entrega. Estritamente
-        # melhor que o bug original (que perdia essa mesma mensagem PARA SEMPRE, de
-        # forma silenciosa, em vez de arriscar reprocessar/duplicar) -- ver
-        # pendência registrada no diário de execução.
-        new_cursor = oldest_held_ingested_at - timedelta(microseconds=1)
+    held_ids = {
+        doc_id_by_message[id(m)]
+        for _, msgs in held_windows
+        for m in msgs
+        if id(m) in doc_id_by_message
+    }
+    result = _next_cursor_after_batch(docs, held_ids)
+    if result is None:
+        # A mensagem retida mais antiga já é o primeiro documento deste lote —
+        # nada avança nesta passada; o cursor atual (since_ts/since_doc_id)
+        # continua exatamente o ponto seguro de retomada, sem gravar nada.
+        pass
     else:
-        # Máximo sobre TODO o lote lido (não só as janelas analisadas): no modo
-        # só-vinculados, conversas sem vínculo foram descartadas por decisão e não
-        # podem segurar o cursor — senão seriam relidas para sempre a cada passada.
-        new_cursor = max(
-            ts for ts in ((d.to_dict() or {}).get("ingested_at") for d in docs) if ts
-        )
-    cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
+        new_ts, new_doc_id = result
+        cursor_ref.set({"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}, merge=True)
 
     if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes or failed_suggestion_writes:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
