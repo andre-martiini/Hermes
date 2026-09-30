@@ -277,11 +277,15 @@ def saude_gmail(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Integr
 
 
 def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> IntegrationHealth:
-    """`system/whatsapp_ingest` -- só um cursor (`last_processed_at`), sem
-    nenhum campo de status/erro (confirmado em `whatsapp_ingest.py`: as 4
-    gravações deste doc são todas `cursor_ref.set({"last_processed_at":
-    ...}, merge=True)`) -- `error_code` é sempre `None`; a única fonte de
-    sinal é a frescor do cursor.
+    """`system/whatsapp_ingest` -- só um cursor (`last_processed_at`, lido
+    aqui; `last_processed_doc_id`, desempate por doc_id do cursor composto
+    desde a correção de colisão de milissegundo em `_next_cursor_after_batch`,
+    é irrelevante para saúde/frescor), sem nenhum campo de status/erro
+    (confirmado em `whatsapp_ingest.py`: toda gravação deste doc via
+    `cursor_ref.set(..., merge=True)` sempre inclui `last_processed_at`,
+    exceto quando a mensagem retida mais antiga já é o primeiro documento do
+    lote -- aí nada é gravado nesta passada) -- `error_code` é sempre `None`;
+    a única fonte de sinal é a frescor do cursor.
 
     LIMITAÇÃO CONHECIDA (achado real de revisão automática do Codex,
     comment_id=4125412129, P2, na PR desta sub-entrega): `last_processed_at`
