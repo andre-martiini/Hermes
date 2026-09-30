@@ -18,15 +18,15 @@ nenhum documento de sync persistido hoje.
 
 Este módulo faz a PONTE entre a forma bruta desses quatro documentos (lidos
 como `dict`, exatamente como `DocumentSnapshot.to_dict()` devolve) e
-`montar_saude_integracao` -- ainda sem nenhum trigger/scheduler real
-chamando isto (nenhum `main.py`/scheduler importa este módulo ainda; o
-wiring de verdade -- decidir QUANDO recalcular, onde EXPOR o resultado
--- fica para uma sub-entrega futura, que também precisa fechar a tool
-`consultar_saude_integracoes` da seção 6 do plano e o uso em
-`obter_estado_atual`/`hermes_tools.py` para substituir os fallbacks de zero
-hoje espalhados em `morning_summary.py`). Lógica pura -- recebe o `dict` já
-lido e um `heartbeat_at` explícito, nunca acessa Firestore diretamente --
-mesmo padrão incremental já usado no resto do pacote de autonomia."""
+`montar_saude_integracao`. Nenhum `main.py`/scheduler importa este módulo --
+a leitura sob demanda vive em `tools/hermes_tools.py`
+(`_coletar_saudes_integracoes`), que agora alimenta tanto a tool
+`consultar_saude_integracoes` (seção 6 do plano) quanto `obter_estado_atual`
+(substituindo ali o fallback de zero que existia antes para esta fonte --
+`morning_summary.py` continua com os fallbacks próprios dela, fora do escopo
+deste módulo). Lógica pura -- recebe o `dict` já lido e um `heartbeat_at`
+explícito, nunca acessa Firestore diretamente -- mesmo padrão incremental já
+usado no resto do pacote de autonomia."""
 
 from __future__ import annotations
 

@@ -469,68 +469,85 @@ def _consultar_saude(ctx: ToolContext, args: dict):
         return f"ERRO|Erro ao consultar dados de saude: {e}"
 
 
+def _coletar_saudes_integracoes(ctx: ToolContext):
+    """Lê os 4 docs de sync já existentes hoje (`system/sync`,
+    `system/<CONTACTS_SYNC_STATE_DOC_ID>`, `system/gmail_sync`,
+    `system/whatsapp_ingest`) e converte cada um em `IntegrationHealth` via
+    os leitores puros de `autonomy/integrations_sync.py` (P05 sub-entrega
+    3/N) -- esta função é só a wiring de Firestore que aqueles leitores
+    deliberadamente não fazem (lógica pura, sem I/O). SIPAC, finanças e
+    repositório não têm nenhum doc de sync persistido hoje -- sempre
+    `unknown` via `saude_sem_sincronizacao_persistida`, não uma ausência
+    silenciosa da integração na lista (mesma exigência de "indisponibilidade
+    não é dado vazio" do módulo base).
+
+    Devolve `(heartbeat_at, lista de IntegrationHealth)`; propaga qualquer
+    exceção de leitura para o chamador decidir como reportar a falha (achado
+    A09 do plano: uma fonte indisponível precisa ficar visível, nunca virar
+    lista vazia silenciosa) -- compartilhada entre a tool
+    `consultar_saude_integracoes` e `obter_estado_atual`."""
+    from datetime import datetime, timezone
+
+    from autonomy.integrations_sync import (
+        saude_calendar,
+        saude_contacts,
+        saude_gmail,
+        saude_sem_sincronizacao_persistida,
+        saude_whatsapp,
+    )
+    from main import CONTACTS_SYNC_STATE_DOC_ID
+
+    heartbeat_at = datetime.now(timezone.utc)
+    sistema = ctx.db.collection("system")
+    calendar_doc = sistema.document("sync").get().to_dict()
+    contacts_doc = sistema.document(CONTACTS_SYNC_STATE_DOC_ID).get().to_dict()
+    gmail_doc = sistema.document("gmail_sync").get().to_dict()
+    whatsapp_doc = sistema.document("whatsapp_ingest").get().to_dict()
+
+    saudes = [
+        saude_calendar(calendar_doc, heartbeat_at),
+        saude_contacts(contacts_doc, heartbeat_at),
+        saude_gmail(gmail_doc, heartbeat_at),
+        saude_whatsapp(whatsapp_doc, heartbeat_at),
+        saude_sem_sincronizacao_persistida("sipac", heartbeat_at),
+        saude_sem_sincronizacao_persistida("financas", heartbeat_at),
+        saude_sem_sincronizacao_persistida("repositorio", heartbeat_at),
+    ]
+    return heartbeat_at, saudes
+
+
+def _serializar_saudes_integracoes(heartbeat_at, saudes) -> dict:
+    """Forma JSON-serializável de `(heartbeat_at, lista de IntegrationHealth)`
+    -- mesma forma usada pela tool `consultar_saude_integracoes` e por
+    `obter_estado_atual`."""
+    return {
+        "heartbeat_at": heartbeat_at.isoformat(),
+        "integracoes": [
+            {
+                "integration": s.integration,
+                "status": s.status.value,
+                "last_success_at": s.last_success_at.isoformat() if s.last_success_at else None,
+                "coverage_until": s.coverage_until.isoformat() if s.coverage_until else None,
+                "lag_seconds": s.lag_seconds,
+                "error_code": s.error_code,
+            }
+            for s in saudes
+        ],
+    }
+
+
 def _consultar_saude_integracoes(ctx: ToolContext, args: dict):
     """Reporta a saúde (healthy/degraded/unavailable/unknown) de cada
     integração -- tool `consultar_saude_integracoes` da seção 6 do plano de
-    autonomia (P05, continuação do passo 8). Lê os 4 docs de sync já
-    existentes hoje (`system/sync`, `system/<CONTACTS_SYNC_STATE_DOC_ID>`,
-    `system/gmail_sync`, `system/whatsapp_ingest`) e converte cada um em
-    `IntegrationHealth` via os leitores puros de
-    `autonomy/integrations_sync.py` (P05 sub-entrega 3/N) -- este handler é
-    só a wiring de Firestore que aqueles leitores deliberadamente não fazem
-    (lógica pura, sem I/O). SIPAC, finanças e repositório não têm nenhum doc
-    de sync persistido hoje -- sempre `unknown` via
-    `saude_sem_sincronizacao_persistida`, não uma ausência silenciosa da
-    integração na lista (mesma exigência de "indisponibilidade não é dado
-    vazio" do módulo base).
-
-    Não é chamada por `obter_estado_atual` -- essa wiring (substituir os
-    fallbacks de zero em `hermes_tools.py`/`morning_summary.py`) fica para
-    uma sub-entrega futura dedicada, que precisa decidir onde cachear o
-    resultado; esta tool sempre recalcula sob demanda."""
+    autonomia (P05, continuação do passo 8). Wiring fina sobre
+    `_coletar_saudes_integracoes`/`_serializar_saudes_integracoes`, que
+    também alimentam `obter_estado_atual` -- ver docstring de
+    `_coletar_saudes_integracoes` para o que cada leitor faz. Esta tool
+    sempre recalcula sob demanda; nenhum cache."""
     try:
-        from datetime import datetime, timezone
-
-        from autonomy.integrations_sync import (
-            saude_calendar,
-            saude_contacts,
-            saude_gmail,
-            saude_sem_sincronizacao_persistida,
-            saude_whatsapp,
-        )
-        from main import CONTACTS_SYNC_STATE_DOC_ID
-
-        heartbeat_at = datetime.now(timezone.utc)
-        sistema = ctx.db.collection("system")
-        calendar_doc = sistema.document("sync").get().to_dict()
-        contacts_doc = sistema.document(CONTACTS_SYNC_STATE_DOC_ID).get().to_dict()
-        gmail_doc = sistema.document("gmail_sync").get().to_dict()
-        whatsapp_doc = sistema.document("whatsapp_ingest").get().to_dict()
-
-        saudes = [
-            saude_calendar(calendar_doc, heartbeat_at),
-            saude_contacts(contacts_doc, heartbeat_at),
-            saude_gmail(gmail_doc, heartbeat_at),
-            saude_whatsapp(whatsapp_doc, heartbeat_at),
-            saude_sem_sincronizacao_persistida("sipac", heartbeat_at),
-            saude_sem_sincronizacao_persistida("financas", heartbeat_at),
-            saude_sem_sincronizacao_persistida("repositorio", heartbeat_at),
-        ]
+        heartbeat_at, saudes = _coletar_saudes_integracoes(ctx)
         return json.dumps(
-            {
-                "heartbeat_at": heartbeat_at.isoformat(),
-                "integracoes": [
-                    {
-                        "integration": s.integration,
-                        "status": s.status.value,
-                        "last_success_at": s.last_success_at.isoformat() if s.last_success_at else None,
-                        "coverage_until": s.coverage_until.isoformat() if s.coverage_until else None,
-                        "lag_seconds": s.lag_seconds,
-                        "error_code": s.error_code,
-                    }
-                    for s in saudes
-                ],
-            },
+            _serializar_saudes_integracoes(heartbeat_at, saudes),
             ensure_ascii=False,
             default=str,
         )
@@ -2112,6 +2129,18 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             estado["outbox_pendentes"] = contar_outbox_pendentes(ctx.db)
         except Exception:
             estado["outbox_pendentes"] = 0
+        # P05 passo 8 (achado A09 do plano): ao contrário dos blocos acima,
+        # uma falha aqui NÃO vira lista/contador zero -- zero pareceria
+        # "todas as integrações saudáveis", exatamente o oposto de uma
+        # checagem que não pôde rodar. `saude_integracoes["integracoes"]`
+        # ausente/com `erro` é o sinal de que a checagem falhou; cada
+        # integração dentro da lista já carrega seu próprio "unknown"
+        # quando NELA faltam dados (ver `autonomy/integrations_sync.py`).
+        try:
+            heartbeat_at, saudes = _coletar_saudes_integracoes(ctx)
+            estado["saude_integracoes"] = _serializar_saudes_integracoes(heartbeat_at, saudes)
+        except Exception as exc:
+            estado["saude_integracoes"] = {"erro": f"Falha ao consultar saude das integracoes: {exc}"}
         # Perfil pessoal (ai_profile.personalidade, consolidado todo domingo):
         # substitui o `perfil` cru do resumo matinal pela versão compacta e
         # rotulada. Só aparece quando o perfil existe.
