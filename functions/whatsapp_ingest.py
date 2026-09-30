@@ -562,7 +562,15 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     cursor_data = (cursor_doc.to_dict() or {}) if cursor_doc.exists else {}
     since_ts = cursor_data.get("last_processed_at")
     since_doc_id = cursor_data.get("last_processed_doc_id")
-    if since_ts is None:
+    # Sem cursor persistido (nenhuma passada anterior gravou nada ainda), `since_ts`
+    # seria recalculado como `now() - lookback` a CADA chamada -- uma janela que
+    # desliza com o relogio, nao um limite fixo. Ver `cursor_bootstrapped` abaixo:
+    # se a primeira mensagem do lote ficar retida indefinidamente (ex.: falha
+    # persistente de gravacao), essa janela deslizante pode ultrapassar o
+    # `ingested_at` dela e exclui-la para sempre da consulta -- achado real da
+    # revisao automatica do Codex na PR #387.
+    cursor_bootstrapped = since_ts is None
+    if cursor_bootstrapped:
         since_ts = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_FIRST_RUN_LOOKBACK_HOURS)
         since_doc_id = None
 
@@ -873,9 +881,22 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     result = _next_cursor_after_batch(docs, held_ids)
     if result is None:
         # A mensagem retida mais antiga já é o primeiro documento deste lote —
-        # nada avança nesta passada; o cursor atual (since_ts/since_doc_id)
+        # nada avança nesta passada. Se já havia um cursor persistido, ele
         # continua exatamente o ponto seguro de retomada, sem gravar nada.
-        pass
+        #
+        # Mas se `cursor_bootstrapped` (nenhuma passada anterior gravou nada
+        # ainda — `since_ts` foi calculado agora mesmo como `now() - lookback`),
+        # NÃO grava tambem seria um bug: a proxima chamada recalcularia
+        # `now() - lookback` de novo, uma janela que desliza com o relogio a
+        # cada passada. Se essa retencao persistir (ex.: falha continua de
+        # gravacao) por mais tempo que o lookback, a janela deslizante
+        # ultrapassaria o `ingested_at` da mensagem retida e a excluiria da
+        # consulta PARA SEMPRE, silenciosamente -- achado real da revisao
+        # automatica do Codex na PR #387. CORREÇÃO: fixa `since_ts` (o mesmo
+        # limite usado NESTA consulta, sem doc_id -- forma legada) como
+        # cursor persistido, travando o limite em vez de deixá-lo deslizar.
+        if cursor_bootstrapped:
+            cursor_ref.set({"last_processed_at": since_ts}, merge=True)
     else:
         new_ts, new_doc_id = result
         cursor_ref.set({"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}, merge=True)
