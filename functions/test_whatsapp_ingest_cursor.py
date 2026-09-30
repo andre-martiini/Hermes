@@ -9,15 +9,18 @@ resolver por completo).
 outros arquivos que a referenciam -- test_sync_custos.py, test_gmail_sync_webhook.py,
 test_whatsapp_ingest_outbox.py) -- em vez de montar um fake de Firestore
 cobrindo o pipeline inteiro (IA, settings, digest, sugestão), este arquivo
-testa em isolamento as duas peças PURAS que carregam a correção:
-`_next_cursor_after_batch` (a lógica de posição -- onde mora o bug e a
-correção) e `_messages_query` (a construção da consulta -- onde mora a
-migração automática do cursor antigo para o novo)."""
+testa em isolamento as peças PURAS que carregam a correção:
+`_next_cursor_after_batch` (a lógica de posição -- onde mora o bug original e
+a correção), `_messages_query` (a construção da consulta -- onde mora a
+migração automática do cursor antigo para o novo) e `_cursor_write_after_batch`
+(a decisão de o que gravar em `system/whatsapp_ingest`, extraída após o
+achado real do Codex na PR #387 sobre a janela deslizante do bootstrap --
+exatamente a wiring que nenhum dos 2 helpers acima cobria sozinho)."""
 
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from whatsapp_ingest import _messages_query, _next_cursor_after_batch
+from whatsapp_ingest import _cursor_write_after_batch, _messages_query, _next_cursor_after_batch
 
 _T0 = datetime(2026, 9, 30, 12, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -171,6 +174,40 @@ class TestMessagesQuery(unittest.TestCase):
                 ("where", "ingested_at", ">", _T0),
             ],
         )
+
+
+class TestCursorWriteAfterBatch(unittest.TestCase):
+    """`_cursor_write_after_batch` -- decisão de o que `triage_whatsapp_messages`
+    grava em `system/whatsapp_ingest`, extraída após o achado real do Codex
+    (comment_id=4144266189, PR #387): sem esta função, `cursor_bootstrapped`
+    só era exercitado dentro da função inteira, sem nenhum teste."""
+
+    def test_com_resultado_grava_par_composto_independente_de_bootstrap(self):
+        for bootstrapped in (True, False):
+            with self.subTest(cursor_bootstrapped=bootstrapped):
+                self.assertEqual(
+                    _cursor_write_after_batch(bootstrapped, _T0, (_T0, "doc-x")),
+                    {"last_processed_at": _T0, "last_processed_doc_id": "doc-x"},
+                )
+
+    def test_sem_resultado_e_bootstrapped_grava_forma_legada_sem_doc_id(self):
+        """Cenário exato do achado do Codex: cursor nunca persistido
+        (`cursor_bootstrapped=True`) e a retenção cai no primeiro documento do
+        lote (`_next_cursor_after_batch` devolveu `None`). Sem gravar nada
+        aqui, a próxima chamada recalcularia `since_ts` como `now() - lookback`
+        de novo -- uma janela deslizante que podia excluir a mensagem retida
+        da consulta para sempre. A correção grava o MESMO `since_ts` usado
+        nesta consulta, travando o limite."""
+        self.assertEqual(
+            _cursor_write_after_batch(True, _T0, None),
+            {"last_processed_at": _T0},
+        )
+
+    def test_sem_resultado_e_ja_persistido_nao_grava_nada(self):
+        """Já havia um cursor persistido de uma passada anterior -- ele já é
+        um limite fixo (não recalculado a cada chamada), então não precisa
+        ser reescrito."""
+        self.assertIsNone(_cursor_write_after_batch(False, _T0, None))
 
 
 if __name__ == "__main__":

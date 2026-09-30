@@ -101,6 +101,42 @@ def _messages_query(collection, since_ts, since_doc_id):
     return query.where("ingested_at", ">", since_ts)
 
 
+def _cursor_write_after_batch(cursor_bootstrapped: bool, since_ts, result: tuple | None) -> dict | None:
+    """Decide o que `triage_whatsapp_messages` deve gravar em
+    `system/whatsapp_ingest` ao final de uma passada, dado o resultado de
+    `_next_cursor_after_batch`. Extraída como função pura (achado da revisão
+    adversarial focada no fix do achado do Codex na PR #387) para que a
+    lógica de decisão em si -- não só `_next_cursor_after_batch` -- tenha
+    cobertura de teste direta, já que esta é exatamente a wiring onde o
+    achado do Codex viveu (invisível para qualquer teste dos 2 helpers
+    puros isolados, que não exercitam `cursor_bootstrapped`).
+
+    - `result` não-`None` (algo seguro para avançar): grava sempre o par
+      composto `(last_processed_at, last_processed_doc_id)`.
+    - `result is None` (a mensagem retida mais antiga já é o primeiro
+      documento do lote) E `cursor_bootstrapped` (nenhuma passada anterior
+      gravou nada ainda -- `since_ts` foi calculado nesta mesma chamada como
+      `now() - lookback`): grava `{"last_processed_at": since_ts}` (forma
+      legada, sem doc_id) para travar esse limite em vez de deixá-lo
+      deslizar com o relógio a cada nova chamada -- sem isso, uma retenção
+      persistente no primeiro documento do lote poderia, com o tempo,
+      excluir essa mensagem da consulta PARA SEMPRE, silenciosamente
+      (achado real do Codex, comment_id=4144266189).
+    - `result is None` e NÃO `cursor_bootstrapped` (já havia um cursor
+      persistido de uma passada anterior): não grava nada -- o cursor já
+      persistido é um limite fixo e continua sendo o ponto seguro de
+      retomada.
+
+    Devolve o dict a passar para `cursor_ref.set(..., merge=True)`, ou
+    `None` quando nada deve ser gravado nesta passada."""
+    if result is None:
+        if cursor_bootstrapped:
+            return {"last_processed_at": since_ts}
+        return None
+    new_ts, new_doc_id = result
+    return {"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}
+
+
 def _valid_date(value) -> str | None:
     s = str(value or "").strip()
     if not _DATE_RE.match(s):
@@ -879,27 +915,15 @@ def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
         if id(m) in doc_id_by_message
     }
     result = _next_cursor_after_batch(docs, held_ids)
-    if result is None:
-        # A mensagem retida mais antiga já é o primeiro documento deste lote —
-        # nada avança nesta passada. Se já havia um cursor persistido, ele
-        # continua exatamente o ponto seguro de retomada, sem gravar nada.
-        #
-        # Mas se `cursor_bootstrapped` (nenhuma passada anterior gravou nada
-        # ainda — `since_ts` foi calculado agora mesmo como `now() - lookback`),
-        # NÃO grava tambem seria um bug: a proxima chamada recalcularia
-        # `now() - lookback` de novo, uma janela que desliza com o relogio a
-        # cada passada. Se essa retencao persistir (ex.: falha continua de
-        # gravacao) por mais tempo que o lookback, a janela deslizante
-        # ultrapassaria o `ingested_at` da mensagem retida e a excluiria da
-        # consulta PARA SEMPRE, silenciosamente -- achado real da revisao
-        # automatica do Codex na PR #387. CORREÇÃO: fixa `since_ts` (o mesmo
-        # limite usado NESTA consulta, sem doc_id -- forma legada) como
-        # cursor persistido, travando o limite em vez de deixá-lo deslizar.
-        if cursor_bootstrapped:
-            cursor_ref.set({"last_processed_at": since_ts}, merge=True)
-    else:
-        new_ts, new_doc_id = result
-        cursor_ref.set({"last_processed_at": new_ts, "last_processed_doc_id": new_doc_id}, merge=True)
+    # `_cursor_write_after_batch` (função pura, com testes dedicados) decide o
+    # que gravar -- inclusive o caso `cursor_bootstrapped` (achado real da
+    # revisão automática do Codex na PR #387: sem cursor persistido ainda,
+    # não gravar nada quando a retenção cai no primeiro documento do lote
+    # deixaria `since_ts` deslizar com o relógio a cada passada, podendo
+    # excluir a mensagem retida da consulta PARA SEMPRE).
+    write = _cursor_write_after_batch(cursor_bootstrapped, since_ts, result)
+    if write is not None:
+        cursor_ref.set(write, merge=True)
 
     if analyzed or skipped or ignored_unlinked or deferred_media or failed_digest_writes or failed_suggestion_writes:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
