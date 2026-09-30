@@ -892,7 +892,17 @@ def queue_and_maybe_send_suggestion(
     existing_snap = doc_ref.get()
     if existing_snap.exists:
         existing_doc = existing_snap.to_dict() or {}
-        if existing_doc.get("telegram_sent") or not chat_id:
+        # Achado real da revisão adversarial de terceiros (Codex, PR #385): o cenário de
+        # falha parcial que este retry existe para cobrir é exatamente "o envio ao
+        # Telegram teve sucesso, mas a confirmação local de telegram_sent=True falhou/foi
+        # interrompida" -- ou seja, o cartão JÁ chegou ao usuário e é clicável mesmo com
+        # telegram_sent ainda False no Firestore. Se o usuário decidir (aplicar/dispensar)
+        # nesse intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
+        # `status` para "applied"/"applied_reactivated"/"dismissed" por sua própria
+        # transação, independente de `telegram_sent`. Sem checar `status` aqui, esta
+        # função reenviaria um SEGUNDO cartão para uma sugestão já resolvida -- o clique
+        # nele só informaria "já resolvida/expirada", confundindo o usuário à toa.
+        if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
             return existing_doc
         if send_fn is None:
             from main import _send_telegram_message_raw_with_keyboard

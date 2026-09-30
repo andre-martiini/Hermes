@@ -181,6 +181,48 @@ class TestQueueAndMaybeSendSuggestion(unittest.TestCase):
         self.assertFalse(result.get("telegram_sent"))
         self.assertEqual(sent, [])
 
+    def test_doc_existente_ja_resolvido_pelo_usuario_nao_reenvia(self):
+        """
+        Achado real da revisão adversarial de terceiros (Codex, PR #385): o cenário de
+        falha parcial que o reenvio existe para cobrir é justamente "o envio ao Telegram
+        teve sucesso, mas a confirmação local de telegram_sent=True falhou" -- ou seja, o
+        cartão JÁ chegou ao usuário e é clicável mesmo com telegram_sent ainda False no
+        Firestore. Se o usuário decidir (aplicar/dispensar) nesse intervalo, `status` muda
+        para algo diferente de "pending" por uma transação separada (telegram_callbacks_
+        contatos.py), independente de `telegram_sent`. Reenviar aqui, checando só
+        telegram_sent, mandaria um SEGUNDO cartão para uma sugestão já resolvida.
+        """
+        db = MockDb({
+            "email_action_suggestions": {
+                "sipac_123": {
+                    "canal": "sipac",
+                    "task_id": "task-1",
+                    "status": "applied",
+                    "telegram_sent": False,
+                }
+            }
+        })
+        sent = []
+
+        def send_fn(_db, chat_id, text, keyboard):
+            sent.append((chat_id, text, keyboard))
+            return True
+
+        result = queue_and_maybe_send_suggestion(
+            db,
+            "sipac_123",
+            canal="sipac",
+            task=TASK,
+            titulo_sinal="Processo 123",
+            chat_id="chat-1",
+            send_fn=send_fn,
+        )
+
+        self.assertFalse(result.get("telegram_sent"))
+        self.assertEqual(sent, [], "sugestão já resolvida (status != pending) não deve receber um segundo cartão")
+        doc = db.collection("email_action_suggestions").document("sipac_123")
+        self.assertEqual(doc.to_dict()["status"], "applied", "status da sugestão já resolvida não deve ser tocado")
+
 
 class TestLinkCalendarEventsResend(unittest.TestCase):
     """
