@@ -177,9 +177,12 @@ def _sem_referencia_futura(instante: datetime | None, heartbeat_at: datetime) ->
 def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> IntegrationHealth:
     """`system/sync` -- Calendar/Tasks, escrito por `main.py::run_full_sync`.
 
-    `error_code` só quando `status == "error"` -- `status == "partial"` não
-    existe para este doc (só `run_full_sync`, que não distingue sucesso
-    parcial: ou completa tudo, ou marca `error`).
+    `error_code` vem de `last_calendar_error_at`/`last_calendar_error_message`
+    (sinal PRÓPRIO do passo Calendar/Tasks) quando o doc já tem o campo novo;
+    senão cai para `status == "error"` do doc inteiro -- `status == "partial"`
+    não existe para este doc (só `run_full_sync`, que não distingue sucesso
+    parcial: ou completa tudo, ou marca `error`). Ver LIMITAÇÃO RESOLVIDA
+    abaixo para o porquê dos dois caminhos.
 
     LIMITAÇÃO RESOLVIDA (achado real de revisão automática do Codex,
     comment_id=4131386963, P2, na PR que fechou a tool
@@ -200,52 +203,74 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     novo) -- durante essa janela a limitação antiga (refresh por boletos)
     ainda se aplica.
 
-    LIMITAÇÃO CONHECIDA, AINDA ABERTA #1 -- sinal mais fraco do que parece
-    (achado real de revisão adversarial independente desta sub-entrega,
-    confirmado lendo o corpo das 3 funções): "terminar sem exceção" é uma
-    barra bem mais baixa do que "sincronizou de verdade". `sync_google_calendar`
-    e `sync_google_tasks_push` (`main.py`) têm cada uma um único
-    `except Exception` externo que só RE-propaga `GoogleAuthRevokedError`
-    (credencial revogada) -- qualquer outro erro (API do Google fora do ar,
-    erro de quota, exceção de bug no processamento, falha de escrita no
-    Firestore) é só logado ("ERRO CAL"/"ERRO PUSH") e a função retorna
-    normalmente; `sync_google_tasks_pull` não repropaga NADA, nem credencial
-    revogada ("ERRO PULL", sempre retorna normalmente). Ou seja,
-    `last_calendar_success_at` avança sempre que o passo é alcançado e não
-    esbarra numa credencial revogada em `sync_google_calendar`/`push`
-    especificamente -- não é prova de que a listagem/gravação de eventos
-    tenha de fato funcionado. O ganho real desta sub-entrega é só isolar o
-    sinal do escritor alheio (`sync_gmail_bills_callable`); a força do sinal
-    em si (o que conta como "sem exceção") não mudou -- é a MESMA fraqueza
-    que `last_success` já tinha antes desta sub-entrega para o mesmo passo.
-    `test_falha_no_calendar_nao_grava_heartbeat_proprio`
-    (test_sync_custos.py) testa só o contrato "se uma exceção chega a
-    run_full_sync, o heartbeat não avança" via mock -- não exercita o
-    try/except real das 3 funções, que é precisamente o que normalmente
-    impede uma falha real de chegar até ali.
+    LIMITAÇÃO PARCIALMENTE RESOLVIDA (achado real de revisão adversarial
+    independente, confirmado lendo o corpo das 3 funções): "terminar sem
+    exceção" sozinho é uma barra bem mais baixa do que "sincronizou de
+    verdade". `sync_google_calendar` e `sync_google_tasks_push` (`main.py`)
+    têm cada uma um único `except Exception` externo que só RE-propaga
+    `GoogleAuthRevokedError` (credencial revogada) -- qualquer outro erro (API
+    do Google fora do ar, erro de quota, exceção de bug no processamento,
+    falha de escrita no Firestore) é só logado ("ERRO CAL"/"ERRO PUSH") e a
+    função retorna normalmente; `sync_google_tasks_pull` não repropaga NADA,
+    nem credencial revogada ("ERRO PULL", sempre retorna normalmente). A
+    sub-entrega que introduziu o sinal de erro PRÓPRIO (ver LIMITAÇÃO
+    RESOLVIDA abaixo) fechou boa parte desta lacuna sem mudar nenhuma das 3
+    funções: `run_full_sync` agora varre as linhas que elas escreveram em
+    `logs` durante o passo e trata qualquer "ERRO CAL"/"ERRO PUSH"/"ERRO PULL"
+    encontrada no INÍCIO de uma linha (depois de remover o prefixo
+    "[HH:MM:SS] " de `log_to_firestore`) como erro do passo, mesmo quando a
+    função engoliu a exceção e retornou normalmente -- esses casos hoje gravam
+    `last_calendar_error_at` (não mais um falso `last_calendar_success_at`).
+    O que PERMANECE aberto, concretamente (achado real da mesma revisão, não
+    hipotético): dois `except` POR ITEM dentro de `sync_google_tasks_push` e
+    `sync_google_calendar` logam com um prefixo DIFERENTE e continuam o loop
+    sem propagar -- `"[CAL][!] Falha ao sincronizar evento da tarefa '{title}':
+    {ce}"` (uma tarefa específica) e `"[CAL][!] Falha ao listar agenda
+    '{calendar_id}': {cal_err}"` (um `calendar_id` específico, quando há mais
+    de um configurado). Nenhum dos dois começa com "ERRO CAL"/"ERRO PUSH"/
+    "ERRO PULL", então uma falha real e persistente em UM item (mas não todos)
+    ainda grava heartbeat de SUCESSO -- mesma limitação de fundo que a
+    LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 já documentava para `calendar_id`,
+    agora também presente para tarefa individual. Mais genericamente: um erro
+    que não comece a mensagem com uma dessas 3 strings (um destes dois
+    `except`, um `except` futuro com texto diferente, ou um retorno silencioso
+    sem log nenhum) continua indetectável por este mecanismo -- ainda não é
+    prova formal de que a listagem/gravação de eventos funcionou, só uma rede
+    bem mais ampla do que "nenhuma exceção chegou até `run_full_sync`".
+    `test_falha_no_calendar_nao_grava_heartbeat_proprio` (test_sync_custos.py)
+    cobre o caso de exceção propagada (`GoogleAuthRevokedError` ou qualquer
+    outra, via mock, inclusive com mensagem vazia);
+    `test_erro_engolido_do_passo_calendar_grava_heartbeat_de_erro`
+    (test_sync_custos.py) cobre o caso antes invisível, de erro logado no
+    INÍCIO da mensagem mas não propagado;
+    `test_titulo_de_tarefa_com_texto_de_erro_nao_e_falso_positivo`
+    (test_sync_custos.py) cobre o falso positivo descartado por exigir o
+    marcador no início (um título de tarefa contendo literalmente "ERRO CAL:"
+    no meio de uma linha de SUCESSO não deve gravar erro).
 
-    LIMITAÇÃO CONHECIDA, AINDA ABERTA #2 -- `error_code`/`status` continuam
-    GLOBAIS ao ciclo inteiro de `run_full_sync`, não específicos do passo
-    Calendar/Tasks (mesmo achado de revisão adversarial independente, achado
-    espelhado do que esta sub-entrega resolveu para a frescor): se um passo
-    SEM relação com Calendar e rodando DEPOIS dele no mesmo ciclo falhar
-    (ex.: `sync_allcare_portal_bills`, chamado sem try/except próprio em
-    `run_full_sync`), o bloco de erro geral grava `status: "error"` e
+    LIMITAÇÃO RESOLVIDA (sub-entrega seguinte à anterior) -- `error_code`
+    deixou de depender do `status`/`error_message` GLOBAIS ao ciclo inteiro de
+    `run_full_sync` quando o doc já tem o par `last_calendar_error_at`/
+    `last_calendar_error_message` (gravado por `main.py::run_full_sync` a
+    CADA ciclo, logo após o passo Calendar/Tasks, erro OU `None`). Antes: se
+    um passo SEM relação com Calendar e rodando DEPOIS dele no mesmo ciclo
+    falhasse (ex.: `sync_allcare_portal_bills`, sem try/except próprio em
+    `run_full_sync`), o bloco de erro geral gravava `status: "error"` e
     `error_message` desse passo alheio no MESMO doc -- sem apagar
-    `last_calendar_success_at`, que continua fresco. `calcular_status_integracao`
-    (`autonomy/integrations.py`) força `UNAVAILABLE` sempre que `error_code`
-    não é `None`, independente da frescor -- então um Calendar que acabou de
-    sincronizar com sucesso pode ser reportado `UNAVAILABLE` só porque
-    Allcare falhou depois, no mesmo ciclo. Mecanismo PRÉ-EXISTENTE a esta
-    sub-entrega (o acoplamento de `status`/`error_code` ao doc inteiro já
-    existia antes de `last_calendar_success_at`); esta sub-entrega resolveu
-    só a metade da frescor (achado original do Codex), não esta metade do
-    erro -- registrado aqui para não ser confundido com algo já corrigido.
-    Correção de verdade exige um sinal de erro PRÓPRIO do passo Calendar/
-    Tasks, análogo ao heartbeat de frescor que esta sub-entrega introduziu;
-    fora do escopo aqui. `test_heartbeat_do_calendar_nao_depende_de_passos_posteriores`
-    (test_sync_custos.py) cobre o doc bruto resultante deste cenário, não o
-    `IntegrationHealth` que `saude_calendar` produz a partir dele.
+    `last_calendar_success_at` -- e `calcular_status_integracao`
+    (`autonomy/integrations.py`) forçava `UNAVAILABLE` sempre que `error_code`
+    não era `None`, independente da frescor. Agora, com o campo novo presente,
+    `error_code` só reflete um erro do PRÓPRIO passo Calendar/Tasks (inclusive
+    os antes engolidos sem propagar, "ERRO CAL"/"ERRO PUSH"/"ERRO PULL",
+    detectados varrendo os logs que o passo escreveu naquele ciclo -- ver
+    `run_full_sync`) -- um Allcare que falhe depois não derruba mais a saúde
+    reportada do Calendar. Mantém o MESMO padrão incremental de fallback já
+    usado para a frescor: enquanto o doc não tiver `last_calendar_error_at`
+    (período de transição, ciclo anterior ao deploy desta sub-entrega), cai
+    para o `status`/`error_message` globais, idêntico ao comportamento
+    anterior. `test_heartbeat_do_calendar_nao_depende_de_passos_posteriores`
+    (test_sync_custos.py) cobre o doc bruto e o `IntegrationHealth` resultante
+    deste cenário, agora confirmando a resolução em vez da limitação.
 
     LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 (achado real de revisão automática
     do Codex, comment_id=4125412121, P2, na PR da sub-entrega que introduziu
@@ -261,7 +286,14 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     docs/autonomia/execucao.md."""
     doc = doc or {}
     status = doc.get("status")
-    error_code = _error_code_de_mensagem(doc.get("error_message")) if status == "error" else None
+    if "last_calendar_error_at" in doc:
+        error_code = (
+            _error_code_de_mensagem(doc.get("last_calendar_error_message"))
+            if doc.get("last_calendar_error_at") is not None
+            else None
+        )
+    else:
+        error_code = _error_code_de_mensagem(doc.get("error_message")) if status == "error" else None
     limite_degradado, limite_indisponivel = LIMITES_POR_INTEGRACAO["calendar"]
     referencia = doc.get("last_calendar_success_at")
     if referencia is None:

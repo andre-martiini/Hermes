@@ -9,10 +9,13 @@ sem "Z", string ISO naive, valores inválidos), os 4 leitores por integração
 casos doc ausente/vazio, saudável, degradado, indisponível por frescor e
 indisponível por erro explícito, `saude_sem_sincronizacao_persistida`, a
 tabela `LIMITES_POR_INTEGRACAO` (sanidade: degradado < indisponível para
-todas as 4 integrações mapeadas), e a preferência de `saude_calendar` pelo
+todas as 4 integrações mapeadas), a preferência de `saude_calendar` pelo
 heartbeat próprio `last_calendar_success_at` sobre o `last_success`
 compartilhado com `sync_gmail_bills_callable` (fallback só durante a
-transição para um doc ainda sem o campo novo)."""
+transição para um doc ainda sem o campo novo), e a preferência análoga pelo
+par `last_calendar_error_at`/`last_calendar_error_message` (sinal de erro
+PRÓPRIO do passo Calendar/Tasks) sobre `status`/`error_message` globais do
+doc inteiro (mesmo fallback de transição)."""
 
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -250,12 +253,63 @@ class TestSaudeCalendar(unittest.TestCase):
         self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
 
     def test_doc_legado_sem_last_calendar_success_at_cai_para_last_success(self):
-        # Período de transição entre o deploy desta sub-entrega e a primeira
-        # rodada de sync seguinte -- doc antigo, ainda sem o campo novo.
+        # Período de transição entre o deploy da sub-entrega que introduziu
+        # last_calendar_success_at e a primeira rodada de sync seguinte -- doc
+        # antigo, ainda sem o campo novo.
         doc = {"status": "completed", "last_success": (_AGORA - timedelta(minutes=10)).isoformat()}
         saude = saude_calendar(doc, _AGORA)
         self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
         self.assertEqual(saude.lag_seconds, 600.0)
+
+    def test_last_calendar_error_at_presente_e_none_ignora_status_global(self):
+        # Sinal PRÓPRIO do passo Calendar/Tasks (gravado por run_full_sync a
+        # cada ciclo): quando presente e None, nenhum erro aconteceu NO PASSO,
+        # mesmo que o doc inteiro tenha status "error" por causa de um passo
+        # alheio e posterior (ex.: Allcare) -- resolve a antiga "LIMITAÇÃO
+        # CONHECIDA, AINDA ABERTA #2".
+        doc = {
+            "status": "error",
+            "error_message": "Allcare fora",
+            "last_calendar_success_at": (_AGORA - timedelta(minutes=5)).isoformat(),
+            "last_calendar_error_at": None,
+            "last_calendar_error_message": None,
+        }
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertIsNone(saude.error_code)
+
+    def test_last_calendar_error_at_presente_e_preenchido_vira_unavailable(self):
+        doc = {
+            "status": "completed",
+            "last_calendar_success_at": (_AGORA - timedelta(hours=10)).isoformat(),
+            "last_calendar_error_at": (_AGORA - timedelta(minutes=1)).isoformat(),
+            "last_calendar_error_message": "ERRO CAL: Falha ao listar eventos",
+        }
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+        self.assertEqual(saude.error_code, "ERRO CAL: Falha ao listar eventos")
+
+    def test_last_calendar_error_at_preenchido_sem_mensagem_usa_fallback(self):
+        doc = {
+            "last_calendar_success_at": (_AGORA - timedelta(minutes=5)).isoformat(),
+            "last_calendar_error_at": (_AGORA - timedelta(minutes=1)).isoformat(),
+            "last_calendar_error_message": "   ",
+        }
+        self.assertEqual(saude_calendar(doc, _AGORA).error_code, ERRO_SEM_MENSAGEM)
+
+    def test_doc_legado_sem_last_calendar_error_at_cai_para_status_global(self):
+        # Período de transição entre o deploy desta sub-entrega e a primeira
+        # rodada de sync seguinte -- doc antigo, ainda sem o par de campos
+        # novo, continua usando status/error_message globais (comportamento
+        # idêntico ao de antes desta sub-entrega).
+        doc = {
+            "status": "error",
+            "last_success": (_AGORA - timedelta(minutes=5)).isoformat(),
+            "error_message": "Falha ao chamar a API do Calendar",
+        }
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+        self.assertEqual(saude.error_code, "Falha ao chamar a API do Calendar")
 
 
 class TestSaudeContacts(unittest.TestCase):
