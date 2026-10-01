@@ -52,7 +52,7 @@ visivel sem criar uma segunda verdade.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 COL_PESOS = "health_weights"
 COL_CINTURA = "health_waist"
@@ -99,8 +99,14 @@ def _numero(campo: str, valor):
     return n
 
 
+def hoje_brasilia() -> str:
+    """O servidor roda em UTC: depois das 21h de Brasilia `date.today()` ja e amanha."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+
+
 def _data_valida(bruto) -> str:
-    hoje = date.today().isoformat()
+    hoje = hoje_brasilia()
     texto = str(bruto or "").strip() or hoje
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", texto):
         raise ValorRecusado(f"`data` precisa ser YYYY-MM-DD; veio {bruto!r}.")

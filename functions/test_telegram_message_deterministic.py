@@ -17,6 +17,7 @@ class TestMarcadorEdicaoRascunho(unittest.TestCase):
         # Isola o ramo do outbox: nenhum outro atalho determinístico dispara.
         patches = {
             "_try_register_walk_block": None,
+            "_try_register_weight": None,
             "_extract_action_search_context_query": None,
             "_extract_natural_context_query": None,
             "_is_list_actions_request": (False, None),
