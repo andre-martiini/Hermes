@@ -95,6 +95,7 @@ from telegram_utils import (
     _send_telegram_photo,
     _send_telegram_session_message,
     _try_register_weight,
+    _resposta_com_resultados_verificados,
     _send_telegram_typing,
     _send_telegram_voice,
     _send_tts_failure_notice_contextual,
@@ -612,6 +613,13 @@ def _process_telegram_message(db, data: dict):
 
     if processing_msg_id:
         _delete_telegram_message(token, chat_id, processing_msg_id)
+
+    resultados_verificados = session.pop("_resultados_verificados", None)
+    if resultados_verificados:
+        response_text = _resposta_com_resultados_verificados(
+            resultados_verificados, response_text,
+            [c.get("name") for c in perf_state.get("tool_calls", []) if c.get("name")],
+        )
 
     # --- Persist history — write to isolated buffer when action-locked ---
     user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}

@@ -1149,58 +1149,113 @@ def _format_km(value: float) -> str:
 
 _PESO_RE = re.compile(
     r"^(?:hoje\s+)?(?:(?:registrar?|registra|anotar?|anota)\s+(?:o\s+|meu\s+)?)?"
-    r"(?P<chave>(?:meu\s+)?peso|pesei|pesagem)?\s*(?:de\s+hoje|hoje)?\s*[:=\-]?\s*"
+    r"(?:(?:estou|t[oô])\s+com\s+)?"
+    r"(?P<chave>(?:meu\s+)?peso|pesei|pesagem|(?:estou|t[oô])\s+pesando)?\s*(?:de\s+hoje|hoje)?\s*[:=\-]?\s*"
     r"(?:(?:de|foi|é|e)\s+)?"
-    r"(?P<valor>\d{1,3}(?:[.,]\d{1,2})?)\s*(?P<unidade>kgs?|quilos?)?"
+    r"(?P<valor>\d{1,4}(?:[.,]\d{1,2})?)\s*(?P<unidade>kgs?|quilos?)?"
     r"(?P<resto>.*)$",
     re.IGNORECASE,
 )
 
 _PESO_FILLER_RE = re.compile(
-    r"\b(?:hoje|agora|de|da|pela|em|jejum|cedo|manh[aã]|registrado|anotado)\b", re.IGNORECASE
+    r"\b(?:hoje|agora|de|da|do|no|na|pela|em|jejum|cedo|manh[aã]|registrado|anotado)\b", re.IGNORECASE
 )
+
+_PESO_DATA_RE = re.compile(
+    r"\b(?:(?P<rel>anteontem|ontem)"
+    r"|(?:(?:n[oa]\s+)?dia\s+)?(?P<dd>\d{1,2})/(?P<mm>\d{1,2})(?:/(?P<aa>\d{2}|\d{4}))?"
+    r"|(?:n[oa]\s+)?dia\s+(?P<so_dia>\d{1,2}))\b",
+    re.IGNORECASE,
+)
+
+
+def _data_do_peso(texto: str):
+    """Tira do texto a data explícita ("ontem", "dia 28", "28/09") e a resolve.
+
+    Devolve (texto_sem_data, data_iso_ou_None, erro_ou_None). Sem data, vale hoje.
+    "dia 28" é o dia 28 mais recente que já passou.
+    """
+    achados = list(_PESO_DATA_RE.finditer(texto))
+    if not achados:
+        return texto, None, None
+    sem_data = re.sub(r"\s+", " ", _PESO_DATA_RE.sub(" ", texto)).strip()
+    if len(achados) > 1:
+        return sem_data, None, "duas datas na mesma mensagem"
+    m = achados[0]
+    from datetime import date, timedelta
+    from tools.registrar_saude import hoje_brasilia
+
+    hoje = date.fromisoformat(hoje_brasilia())
+    try:
+        if m.group("rel"):
+            dias = 2 if m.group("rel").lower() == "anteontem" else 1
+            return sem_data, (hoje - timedelta(days=dias)).isoformat(), None
+        if m.group("so_dia"):
+            dia = int(m.group("so_dia"))
+            if dia <= hoje.day:
+                return sem_data, hoje.replace(day=dia).isoformat(), None
+            anterior = hoje.replace(day=1) - timedelta(days=1)
+            return sem_data, anterior.replace(day=dia).isoformat(), None
+        ano = m.group("aa")
+        ano = hoje.year if not ano else (2000 + int(ano) if len(ano) == 2 else int(ano))
+        return sem_data, date(ano, int(m.group("mm")), int(m.group("dd"))).isoformat(), None
+    except ValueError:
+        return sem_data, None, f"a data “{m.group(0)}” não existe"
+
+
+_ICONE_CONFIRMACAO = {"registrar_peso": "⚖️"}
+
+
+def _linha_confirmacao(res) -> str:
+    """Frase ao usuário a partir de um ResultadoOperacao; o texto vem de montar_confirmacao."""
+    from verificacao import montar_confirmacao
+
+    icone = _ICONE_CONFIRMACAO.get(res.operacao, "✅") if res.ok else "⚠️"
+    return f"{icone} {html.escape(montar_confirmacao(res))}"
+
+
+def _resposta_com_resultados_verificados(resultados, resposta_modelo: str, ferramentas_usadas) -> str:
+    """Num turno do Gemini que gravou algo, a frase de sucesso ou de falha sai do
+    código, a partir do valor relido. Se o turno só registrou, a resposta é só
+    a do código; se fez mais coisas, as confirmações vêm antes do texto do modelo."""
+    from verificacao import ResultadoOperacao
+
+    linhas = []
+    for item in resultados:
+        linha = _linha_confirmacao(ResultadoOperacao(**item))
+        if linha not in linhas:
+            linhas.append(linha)
+    if not linhas:
+        return resposta_modelo
+    so_registros = set(ferramentas_usadas or ()) <= set(_ICONE_CONFIRMACAO)
+    if so_registros or not (resposta_modelo or "").strip():
+        return "\n".join(linhas)
+    return "\n".join(linhas) + "\n\n" + resposta_modelo
 
 
 def _try_register_weight(db, text: str) -> Optional[str]:
     """
-    Detecta "peso 94,4", "pesei 94.4" ou "94,4 kg" e grava em health_weights pelo
-    mesmo caminho do `registrar_saude` do MCP (uma entrada por dia, atualiza se
-    ja houver). So confirma depois de reler o que ficou gravado: em 28 e 30/09 o
-    Gemini respondeu "peso registrado" sem ferramenta nenhuma e nada foi gravado.
+    Detecta "peso 94,4", "pesei 94.4 ontem" ou "94,4 kg dia 28" e grava em
+    health_weights pela mesma escrita do `registrar_saude` do MCP (uma entrada
+    por dia, atualiza se ja houver). A resposta sai de `montar_confirmacao`,
+    depois de reler o documento: em 28 e 30/09 o Gemini respondeu "peso
+    registrado" sem ferramenta nenhuma e nada foi gravado.
     Retorna o texto de resposta, ou None para deixar a mensagem seguir ao LLM.
     """
-    match = _PESO_RE.match((text or "").strip())
+    texto, dia, erro_data = _data_do_peso((text or "").strip())
+    match = _PESO_RE.match(texto)
     if not match or not (match.group("chave") or match.group("unidade")):
         return None
     resto = _PESO_FILLER_RE.sub(" ", match.group("resto") or "")
     if re.sub(r"[\s.,;:!\-–—]+", "", resto):
         return None
+    if erro_data:
+        return (f"⚠️ Não registrei o peso: {html.escape(erro_data)}. "
+                "Mande de novo com uma data só, ex.: <code>peso 94,4 ontem</code>.")
 
-    from tools.registrar_saude import COL_PESOS, registrar
-    from tools.tool_context import ToolContext
+    from tools.registrar_saude import gravar_peso_verificado
 
-    valor_txt = match.group("valor")
-    try:
-        resultado = registrar(ToolContext(_db=db, canal="telegram"), {"peso": valor_txt})
-    except Exception as exc:
-        print(f"[Peso] Falha ao gravar o peso: {exc}")
-        return "⚠️ Não consegui gravar o peso agora; nada foi registrado. Tente de novo em instantes."
-    if resultado.get("erro"):
-        return f"⚠️ {html.escape(str(resultado['erro']))}"
-
-    dia = resultado.get("data")
-    valor = float(valor_txt.replace(",", "."))
-    try:
-        docs = list(db.collection(COL_PESOS).where("date", "==", dia).limit(1).stream())
-        gravado = (docs[0].to_dict() or {}).get("weight") if docs else None
-    except Exception as exc:
-        print(f"[Peso] Falha ao reler health_weights: {exc}")
-        gravado = None
-    if gravado is None or abs(float(gravado) - valor) > 1e-6:
-        return ("⚠️ Tentei gravar o peso, mas ele não aparece no registro de saúde. "
-                "Nada foi confirmado; tente de novo ou registre pela web.")
-    kg = f"{valor:.2f}".rstrip("0").rstrip(".").replace(".", ",")
-    return f"⚖️ Peso registrado: <b>{kg} kg</b> em {dia[8:10]}/{dia[5:7]}."
+    return _linha_confirmacao(gravar_peso_verificado(db, match.group("valor"), dia))
 
 
 def _try_register_walk_block(db, text: str) -> Optional[str]:
