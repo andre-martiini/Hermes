@@ -503,6 +503,49 @@ class TestRunFullSyncEscopos(unittest.TestCase):
         self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
         self.assertIn("Falha ao listar eventos", saude.error_code)
 
+    def test_erro_por_item_de_listar_agenda_grava_heartbeat_de_erro(self):
+        # P05 sub-entrega 15/N: sync_google_calendar loga erro POR
+        # `calendar_id` com o prefixo "[CAL][!]" (diferente de "ERRO CAL:")
+        # quando falha ao LISTAR um calendário específico e continua para o
+        # próximo (`continue`, sem propagar) -- antes desta sub-entrega essa
+        # linha não era reconhecida pela varredura de erro_engolido, e o
+        # heartbeat de SUCESSO avançava do mesmo jeito mesmo com um
+        # calendário persistentemente falhando. Simula o log como a função
+        # real escreveria (não propaga, função retorna normalmente).
+        db = _Db()
+
+        def cal_com_erro_por_item(cs, sync_ref, logs, tarefas_docs=None):
+            main.log_to_firestore(sync_ref, logs, "[CAL][!] Falha ao listar agenda 'outra@agenda': boom")
+            return {}
+
+        with _Patches(db) as m:
+            m["cal"].side_effect = cal_com_erro_por_item
+            self.assertTrue(main.run_full_sync("scheduled"))  # função real não propaga -- sync completa
+        sync_doc = db.store("system")["sync"]
+        self.assertNotIn("last_calendar_success_at", sync_doc)
+        self.assertIn("Falha ao listar agenda", sync_doc["last_calendar_error_message"])
+        self.assertIsNotNone(sync_doc["last_calendar_error_at"])
+
+        saude = saude_calendar(sync_doc, datetime.now(timezone.utc))
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+
+    def test_erro_por_item_de_tarefa_grava_heartbeat_de_erro(self):
+        # Mesmo caso acima, mas para sync_google_tasks_push: erro ao
+        # sincronizar o evento de UMA tarefa específica, também logado com
+        # "[CAL][!]" (não "ERRO PUSH:") e também sem propagar.
+        db = _Db()
+
+        def push_com_erro_por_item(ts, cs, sync_ref, logs, tarefas_atualizadas=None):
+            main.log_to_firestore(sync_ref, logs, "[CAL][!] Falha ao sincronizar evento da tarefa 'pagar boleto': boom")
+
+        with _Patches(db) as m:
+            m["push"].side_effect = push_com_erro_por_item
+            self.assertTrue(main.run_full_sync("scheduled"))
+        sync_doc = db.store("system")["sync"]
+        self.assertNotIn("last_calendar_success_at", sync_doc)
+        self.assertIn("Falha ao sincronizar evento da tarefa", sync_doc["last_calendar_error_message"])
+        self.assertIsNotNone(sync_doc["last_calendar_error_at"])
+
     def test_heartbeat_de_erro_e_limpo_no_proximo_ciclo_bem_sucedido(self):
         # last_calendar_error_at precisa refletir só o ciclo MAIS RECENTE -- um
         # erro de um ciclo anterior não pode continuar marcando o Calendar como
