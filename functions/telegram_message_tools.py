@@ -879,16 +879,17 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
     def registrar_peso(peso: float, data: str = None) -> str:
         """Registra o peso corporal do usuario em kg (ex.: 94.4) no modulo de saude.
         Uma entrada por dia: registrar de novo na mesma data atualiza. `data` em
-        YYYY-MM-DD; sem ela, vale hoje. So diga que registrou se o retorno trouxer
-        status 'completed'; se trouxer 'erro', reproduza o erro."""
-        from tools.hermes_tools import execute
-        from tools.tool_context import ToolContext
+        YYYY-MM-DD; sem ela, vale hoje. O retorno traz `estado` (verificado ou
+        falhou) e `confirmacao`, o texto exato a dizer; so diga que registrou se
+        `estado` for 'verificado'."""
+        from tools.registrar_saude import gravar_peso_verificado
+        from verificacao import montar_confirmacao
 
-        args = {"peso": peso}
-        if data:
-            args["data"] = data
-        resultado = execute("registrar_saude", args, ToolContext(_db=db, canal="telegram"))
-        return json.dumps(resultado, ensure_ascii=False, default=str)
+        res = gravar_peso_verificado(db, peso, data)
+        # O handler monta a resposta final a partir daqui, nao do texto do modelo.
+        session.setdefault("_resultados_verificados", []).append(res.to_dict())
+        return json.dumps({**res.to_dict(), "confirmacao": montar_confirmacao(res)},
+                          ensure_ascii=False, default=str)
 
     def desativar_modo_secretario() -> str:
         """Desativa imediatamente o atendimento autônomo do Modo Secretário no WhatsApp."""

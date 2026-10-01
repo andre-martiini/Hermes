@@ -116,13 +116,44 @@ def _data_valida(bruto) -> str:
     return texto
 
 
-def _gravar_por_data(db, colecao: str, dia: str, campo: str, valor) -> None:
-    """Atualiza o doc do dia, ou cria um se nao houver. Nunca duplica."""
+def _gravar_por_data(db, colecao: str, dia: str, campo: str, valor) -> str:
+    """Atualiza o doc do dia, ou cria um se nao houver. Nunca duplica. Devolve o caminho gravado."""
     existentes = list(db.collection(colecao).where("date", "==", dia).limit(1).stream())
     if existentes:
-        existentes[0].reference.set({campo: valor}, merge=True)
+        ref = existentes[0].reference
+        ref.set({campo: valor}, merge=True)
     else:
-        db.collection(colecao).document().set({"date": dia, campo: valor})
+        ref = db.collection(colecao).document()
+        ref.set({"date": dia, campo: valor})
+    return f"{colecao}/{ref.id}"
+
+
+def gravar_peso_verificado(db, peso, data=None):
+    """Unica escrita de peso (MCP, Telegram por texto, audio e Gemini): valida,
+    grava e rele o mesmo documento. Devolve um `verificacao.ResultadoOperacao`."""
+    from verificacao import falhou, verificar_escrita
+
+    try:
+        dia = _data_valida(data)
+    except ValorRecusado as exc:
+        return falhou("registrar_peso", COL_PESOS, str(exc))
+    try:
+        valor = float(str(peso).replace(",", "."))
+    except (TypeError, ValueError):
+        return falhou("registrar_peso", COL_PESOS,
+                      f"o peso precisa ser um número; veio {peso!r}. Nada foi gravado.")
+    minimo, maximo, _ = _FAIXAS["peso"]
+    if not (minimo <= valor <= maximo):
+        kg = f"{valor:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+        return falhou("registrar_peso", COL_PESOS,
+                      f"o peso de {kg} kg está fora da faixa plausível ({minimo:.0f} a {maximo:.0f} kg). "
+                      "Nada foi gravado — confira o valor.")
+    esperado = {"date": dia, "weight": valor}
+    try:
+        caminho = _gravar_por_data(db, COL_PESOS, dia, "weight", valor)
+    except Exception as exc:
+        return falhou("registrar_peso", COL_PESOS, f"falha ao gravar ({exc}). Nada foi gravado.", esperado)
+    return verificar_escrita(db, caminho, esperado, operacao="registrar_peso")
 
 
 def registrar(ctx, args: dict) -> dict:
@@ -144,10 +175,13 @@ def registrar(ctx, args: dict) -> dict:
     dor: dict = {}
     sono: dict = {}
 
+    if args.get("peso") is not None:
+        res_peso = gravar_peso_verificado(ctx.db, args["peso"], dia)
+        if not res_peso.ok:
+            return {"erro": res_peso.motivo, "aplicado": False, "campos_alterados": [], "data": dia}
+        alterados.append("peso")
+
     try:
-        if args.get("peso") is not None:
-            _gravar_por_data(ctx.db, COL_PESOS, dia, "weight", _numero("peso", args["peso"]))
-            alterados.append("peso")
         if args.get("cintura") is not None:
             _gravar_por_data(ctx.db, COL_CINTURA, dia, "cm", _numero("cintura", args["cintura"]))
             alterados.append("cintura")
