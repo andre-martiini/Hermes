@@ -3698,43 +3698,78 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
             except Exception as e_resp_esp:
                 log_to_firestore(sync_ref, logs, f"[RESPOSTA_ESPERADA][ERRO] Falha ao montar o indice das esperas: {e_resp_esp}", True)
 
-            # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
-            tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
-            sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
-            sync_google_tasks_pull(ts, sync_ref, logs)
-
-            # Heartbeat de sucesso PRÓPRIO do passo Calendar/Tasks, separado de
-            # `last_success` (achado real do Codex, comment_id=4131386963, sobre
-            # autonomy/integrations_sync.py::saude_calendar): `last_success` também é
-            # gravado por sync_gmail_bills_callable, uma ação manual de boletos
-            # totalmente alheia ao Calendar -- usá-lo como referência de frescor do
-            # Calendar deixa a saúde reportada vulnerável a um refresh que não teve
-            # nenhuma sincronização de agenda real. Gravado aqui, logo após os 3
-            # passos acima terminarem sem exceção, e nunca pelo bloco de conclusão
-            # geral do ciclo (lá embaixo) nem por sync_gmail_bills_callable. Melhor
-            # esforço com try/except próprio (mesmo padrão de
-            # whatsapp_ingest.py::_query_success_heartbeat_write): uma falha
-            # transitória só nesta escrita não deve derrubar o restante do sync.
-            #
-            # "Sem exceção" é um sinal mais fraco do que parece (achado real de
-            # revisão adversarial independente sobre esta sub-entrega): as 3 funções
-            # acima já engolem quase todo erro internamente -- sync_google_calendar e
-            # sync_google_tasks_push só propagam GoogleAuthRevokedError (credencial
-            # revogada), logando qualquer outro erro ("ERRO CAL"/"ERRO PUSH") e
-            # retornando normalmente; sync_google_tasks_pull não propaga NADA, nem
-            # credencial revogada ("ERRO PULL", sempre retorna normalmente). Este
-            # heartbeat avança sempre que o passo é alcançado e não bate numa
-            # credencial revogada em sync_google_calendar/push -- não é garantia de
-            # que a listagem/gravação de eventos tenha de fato funcionado. Ver
-            # docstring de saude_calendar (autonomy/integrations_sync.py) para o
-            # detalhamento completo desta limitação.
+            # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push.
+            # Envolvido em try/finally para capturar um sinal de erro PRÓPRIO do passo (ver bloco de
+            # heartbeat abaixo) -- o `raise` no except preserva o comportamento anterior a esta
+            # sub-entrega: uma GoogleAuthRevokedError vinda daqui continua abortando o ciclo inteiro
+            # (propaga até o `except Exception` geral de run_full_sync, lá embaixo).
+            calendar_step_error = None
+            logs_antes_do_passo_calendar = len(logs)
             try:
-                sync_ref.set(
-                    {'last_calendar_success_at': datetime.now(timezone.utc).isoformat()},
-                    merge=True
+                tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
+                sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
+                sync_google_tasks_pull(ts, sync_ref, logs)
+            except Exception as e_passo_calendar:
+                calendar_step_error = str(e_passo_calendar)
+                raise
+            finally:
+                # Heartbeat PRÓPRIO do passo Calendar/Tasks, separado de `last_success`
+                # (achado real do Codex, comment_id=4131386963, sobre
+                # autonomy/integrations_sync.py::saude_calendar): `last_success` também é
+                # gravado por sync_gmail_bills_callable, uma ação manual de boletos
+                # totalmente alheia ao Calendar -- usá-lo como referência de frescor do
+                # Calendar deixa a saúde reportada vulnerável a um refresh que não teve
+                # nenhuma sincronização de agenda real. Melhor esforço com try/except
+                # próprio (mesmo padrão de whatsapp_ingest.py::_query_success_heartbeat_write):
+                # uma falha transitória só nesta escrita não deve derrubar o restante do sync
+                # (nem, no caso de calendar_step_error, impedir o `raise` acima de propagar).
+                #
+                # last_calendar_error_at/last_calendar_error_message (nesta sub-entrega):
+                # sinal de erro PRÓPRIO do passo, resolvendo a limitação de "sem exceção" ser
+                # mais fraco que "sincronizou de verdade" nos dois sentidos documentados em
+                # saude_calendar -- (1) sync_google_calendar/push só propagam
+                # GoogleAuthRevokedError e logam ("ERRO CAL"/"ERRO PUSH") qualquer outro erro
+                # sem propagar; sync_google_tasks_pull não propaga NADA ("ERRO PULL"), então
+                # esses erros hoje engolidos agora são detectados aqui varrendo as linhas que
+                # os 3 passos acrescentaram a `logs` neste ciclo; (2) ao escrever este sinal
+                # a cada ciclo (erro OU None), um passo alheio e POSTERIOR (ex.: Allcare) que
+                # falhe no mesmo ciclo não marca mais o Calendar como indisponível -- ver
+                # saude_calendar (autonomy/integrations_sync.py) para como o sinal é consumido.
+                novos_logs_calendar = logs[logs_antes_do_passo_calendar:]
+                erro_engolido = next(
+                    (
+                        entrada
+                        for entrada in novos_logs_calendar
+                        if "ERRO CAL:" in entrada or "ERRO PUSH:" in entrada or "ERRO PULL:" in entrada
+                    ),
+                    None,
                 )
-            except Exception as e_cal_heartbeat:
-                log_to_firestore(sync_ref, logs, f"[CAL][ERRO] Falha ao gravar heartbeat de sucesso do Calendar/Tasks: {e_cal_heartbeat}", True)
+                erro_calendar_final = calendar_step_error or erro_engolido
+                try:
+                    if erro_calendar_final:
+                        sync_ref.set(
+                            {
+                                'last_calendar_error_at': datetime.now(timezone.utc).isoformat(),
+                                'last_calendar_error_message': erro_calendar_final,
+                            },
+                            merge=True,
+                        )
+                    else:
+                        sync_ref.set(
+                            {
+                                'last_calendar_success_at': datetime.now(timezone.utc).isoformat(),
+                                'last_calendar_error_at': None,
+                                'last_calendar_error_message': None,
+                            },
+                            merge=True,
+                        )
+                except Exception as e_cal_heartbeat:
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[CAL][ERRO] Falha ao gravar heartbeat de {'erro' if erro_calendar_final else 'sucesso'} do Calendar/Tasks: {e_cal_heartbeat}",
+                        True,
+                    )
 
             if escopo_completo:
                 # Sincronização de Contatos do Google People API: no máximo uma vez por
