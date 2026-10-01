@@ -344,6 +344,27 @@ class TestRunFullSyncEscopos(unittest.TestCase):
         self.assertIsNotNone(heartbeat.tzinfo)
         self.assertGreaterEqual(heartbeat, antes)
 
+    def test_falha_ao_construir_servico_do_calendar_tambem_grava_heartbeat_de_erro(self):
+        # Achado real de revisão automática do Codex (comment_id=4155015370, P1,
+        # nesta mesma PR): get_tasks_service()/get_calendar_service() (que chamam
+        # get_google_creds(), e por isso PODEM levantar GoogleAuthRevokedError --
+        # escopo ausente ou falha ao renovar o token expirado, o cenário de
+        # credencial revogada mais comum na prática) entravam FORA do try/finally
+        # que grava o sinal de erro próprio do passo -- essa exceção propagava
+        # direto para o `except Exception` geral de run_full_sync sem nunca
+        # gravar last_calendar_error_at, furando o mecanismo inteiro desta
+        # sub-entrega bem no cenário que ela existe para cobrir. Corrigido
+        # movendo a construção dos 2 serviços para DENTRO do try. Este teste
+        # simula a falha na construção do serviço (não dentro de sync_google_calendar).
+        db = _Db()
+        with _Patches(db) as m:
+            m["cs"].side_effect = main.GoogleAuthRevokedError(main.GOOGLE_REAUTH_MESSAGE)
+            self.assertFalse(main.run_full_sync("scheduled"))
+        sync_doc = db.store("system")["sync"]
+        self.assertNotIn("last_calendar_success_at", sync_doc)
+        self.assertIsNotNone(sync_doc["last_calendar_error_at"])
+        self.assertIn(main.GOOGLE_REAUTH_MESSAGE, sync_doc["last_calendar_error_message"])
+
     def test_falha_no_calendar_nao_grava_heartbeat_proprio(self):
         # Testa só o contrato de run_full_sync: SE uma exceção chega até ele vinda
         # do passo Calendar/Tasks, o heartbeat de SUCESSO não deve avançar. NÃO

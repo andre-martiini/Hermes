@@ -3669,7 +3669,6 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
 
             escopo_completo = pass_scope != SYNC_SCOPE_CALENDAR
 
-            ts, cs = get_tasks_service(), get_calendar_service()
             # Leitura unica de 'tarefas' para este ciclo: antes, sync_google_calendar
             # e sync_google_tasks_push liam a colecao inteira cada um por conta
             # propria (2 leituras completas redundantes por ciclo de sync, 48
@@ -3703,10 +3702,24 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
             # heartbeat abaixo) -- o `raise` no except preserva o comportamento anterior a esta
             # sub-entrega: uma GoogleAuthRevokedError vinda daqui continua abortando o ciclo inteiro
             # (propaga até o `except Exception` geral de run_full_sync, lá embaixo).
+            #
+            # get_tasks_service()/get_calendar_service() entram DENTRO do guard (achado real de
+            # revisão automática do Codex, comment_id=4155015370, P1, nesta mesma PR): as duas
+            # chamam get_google_creds(), que levanta GoogleAuthRevokedError diretamente (escopo
+            # ausente, ou falha ao renovar o token expirado) -- o cenário de credencial revogada
+            # mais comum na prática, bem antes de qualquer chamada à API do Calendar/Tasks
+            # dentro de sync_google_calendar/push. Construí-las FORA do guard (como a 1ª versão
+            # desta sub-entrega fazia) deixava esse cenário furar o mecanismo inteiro: a exceção
+            # propagava direto para o `except Exception` geral de run_full_sync sem passar pelo
+            # `finally` abaixo, então last_calendar_error_at nunca era gravado -- e, se o ciclo
+            # anterior tivesse gravado None (sucesso), saude_calendar reportaria HEALTHY com base
+            # no last_calendar_success_at antigo, ignorando o status:error global. Exatamente o
+            # tipo de mascaramento que esta sub-entrega existe para fechar.
             calendar_step_error = None
             houve_excecao_no_passo_calendar = False
             logs_antes_do_passo_calendar = len(logs)
             try:
+                ts, cs = get_tasks_service(), get_calendar_service()
                 tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
                 sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
                 sync_google_tasks_pull(ts, sync_ref, logs)
