@@ -707,6 +707,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "saude", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
         dados_sensiveis_categoria="saúde",
     ),
+    "consultar_atividades_mes": ToolInventoryEntry(
+        "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum necessário",
+        nota="Varre `tarefas` inteira (acompanhamento + data_conclusao) e agrupa por dia no fuso de Brasília; "
+        "base da skill `pgd-execucao`. Notas cortadas e limitadas por ação e dia para caber no contexto "
+        "(um mês inteiro com todas as notas passou de 900 mil caracteres em 09/2026).",
+    ),
     "consultar_saude_integracoes": ToolInventoryEntry(
         "autonomia_integracoes", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum necessário",

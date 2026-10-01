@@ -536,6 +536,12 @@ def _serializar_saudes_integracoes(heartbeat_at, saudes) -> dict:
     }
 
 
+def _consultar_atividades_mes(ctx: ToolContext, args: dict):
+    from tools.atividades_mes import consultar
+
+    return consultar(ctx, args)
+
+
 def _consultar_saude_integracoes(ctx: ToolContext, args: dict):
     """Reporta a saúde (healthy/degraded/unavailable/unknown) de cada
     integração -- tool `consultar_saude_integracoes` da seção 6 do plano de
@@ -2770,6 +2776,7 @@ _HANDLERS: dict = {
     "encontrar_slot_livre": _encontrar_slot_livre,
     "consultar_saude": _consultar_saude,
     "registrar_saude": _registrar_saude,
+    "consultar_atividades_mes": _consultar_atividades_mes,
     "consultar_saude_integracoes": _consultar_saude_integracoes,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "consultar_investimentos": _consultar_investimentos,
