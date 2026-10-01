@@ -12,9 +12,17 @@ do bloco daquela sub-entrega em docs/autonomia/execucao.md. Este módulo é a
 PONTE: converte `OutboxEntry`/`EventEnvelope` de/para o `dict` que o
 Firestore lê e grava (mesmo papel que `agent_requests.py` cumpre para
 `autonomy/requests.py` e `mcp_jobs.py` cumpre para `autonomy/mcp_jobs_adapter.py`),
-e implementa o primeiro (e, por ora, único) escritor ponta a ponta:
-`whatsapp_ingest.py::_save_whatsapp_digest` -- ver `registrar_evento_outbox_transacional`
-e seu único chamador.
+e implementa o primeiro escritor ponta a ponta: `whatsapp_ingest.py::_save_whatsapp_digest`
+-- ver `registrar_evento_outbox_transacional` e seu chamador. Um SEGUNDO
+escritor foi ligado em P05 sub-entrega 14/N:
+`email_action_linker.py::queue_and_maybe_send_suggestion` (ponto de entrada
+compartilhado de todos os produtores de sinal -- SIPAC, Calendar, WhatsApp,
+Monitor de Páginas), para os canais com categoria clara (SIPAC, AGENDA,
+MENSAGEM; "pagina" fica de fora, sem categoria mapeada ainda -- ver
+`email_action_linker._CANAL_PARA_CATEGORIA_EVENTO`). O produtor de e-mail
+(`link_emails_to_actions`) NÃO passa por `queue_and_maybe_send_suggestion`
+(grava `email_action_suggestions` diretamente) e por isso ainda não emite
+evento -- fora do escopo desta sub-entrega.
 
 Coleção nova: `outbox_eventos` -- deliberadamente NÃO `outbox` nem
 `event_outbox` (colidiria em leitura apressada com a coleção pré-existente
@@ -100,8 +108,9 @@ COLECAO = "outbox_eventos"
 #: -- ver a docstring de lá para o raciocínio completo (paginação por
 #: `__name__` evita que entradas nunca-elegíveis ocupem a janela de uma
 #: página para sempre). Volume de produção hoje é uma fração do de
-#: `mcp_jobs` (só um escritor -- `whatsapp_ingest.py` -- emite eventos até
-#: agora), mas o mesmo teto genérico evita reintroduzir o mesmo bug de
+#: `mcp_jobs` (2 escritores -- `whatsapp_ingest.py` e, desde P05 sub-entrega
+#: 14/N, `email_action_linker.py::queue_and_maybe_send_suggestion` -- emitem
+#: eventos até agora), mas o mesmo teto genérico evita reintroduzir o mesmo bug de
 #: escala se mais escritores forem ligados a este outbox no futuro.
 _DESPACHO_TAMANHO_PAGINA = 500
 _DESPACHO_MAX_DOCUMENTOS = 15 * _DESPACHO_TAMANHO_PAGINA

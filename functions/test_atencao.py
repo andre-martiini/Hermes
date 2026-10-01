@@ -50,7 +50,7 @@ class MockDoc:
     def to_dict(self):
         return dict(self._data or {})
 
-    def get(self):
+    def get(self, transaction=None):
         return self
 
     def update(self, fields):
@@ -116,6 +116,46 @@ class MockQuery:
         return new_doc
 
 
+class MockTransaction:
+    """Double mínimo do protocolo real de
+    `google.cloud.firestore_v1.transaction.Transaction` (mesmo modelo de
+    `test_event_outbox.py::_MockTransaction`/`test_agent_requests.py::_MockTransaction`)
+    para que o decorator real `@firestore.transactional` (usado por
+    `event_outbox.registrar_evento_outbox_transacional`) exercite o mesmo
+    caminho de código de produção em testes que usam `MockDb`/`MockDoc` —
+    sem isso, qualquer código de produção que passe a escrever dentro de uma
+    transação Firestore real quebraria com `AttributeError` ao rodar contra
+    este double. `MockDoc.get()/set()/update()` já fazem a escrita de
+    verdade (sem isolamento transacional real, como o resto deste módulo) —
+    `.set()/.update()` aqui só repassam para eles."""
+
+    def __init__(self):
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, doc_ref):
+        return doc_ref.get()
+
+    def set(self, doc_ref, data, merge=False):
+        doc_ref.set(data, merge=merge)
+
+    def update(self, doc_ref, data):
+        doc_ref.update(data)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        self._id = retry_id or b"mock-tx-id"
+
+
 class MockDb:
     def __init__(self, data=None):
         self.data = data if data is not None else {}
@@ -126,6 +166,9 @@ class MockDb:
             docs = [MockDoc(k, v) for k, v in self.data.get(name, {}).items()]
             self._collections[name] = MockQuery(docs)
         return self._collections[name]
+
+    def transaction(self):
+        return MockTransaction()
 
 
 class TestAguardandoTerceiroVencido(unittest.TestCase):

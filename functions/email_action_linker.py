@@ -850,6 +850,160 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, apply_mutati
     return _run(transaction)
 
 
+#: Canais de `queue_and_maybe_send_suggestion` com categoria clara dentre as 8
+#: do envelope único (P05, passo 1 do pacote: "mensagens, agenda, tarefa,
+#: documento, SIPAC, transcrição, finanças e eventos de repositório"). "pagina"
+#: (Monitor de Páginas, main.py) fica de fora deliberadamente: nenhuma das 8
+#: categorias descreve com clareza o que uma página monitorada representa, e
+#: forçar uma (ex. "documento") sem decisão de produto arriscaria um mapeamento
+#: errado que um consumidor futuro (P06/P07) passaria a tratar como fato —
+#: ver pendências em docs/autonomia/execucao.md para a decisão em aberto.
+_CANAL_PARA_CATEGORIA_EVENTO = {
+    "sipac": "SIPAC",
+    "calendar": "AGENDA",
+    "whatsapp": "MENSAGEM",
+}
+
+
+def _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, origem_sinal, agora):
+    """Monta (sem I/O) o `EventEnvelope` de outbox (P05 do plano de autonomia,
+    passo 3 do pacote) para uma sugestão NOVA de `queue_and_maybe_send_suggestion`
+    — SEGUNDO escritor real ligado a `event_outbox.py`/`autonomy/events.py`/
+    `autonomy/outbox.py` (o primeiro foi o digest de WhatsApp,
+    `whatsapp_ingest.py::_montar_evento_outbox_digest`, P05 sub-entrega 6/N).
+    `queue_and_maybe_send_suggestion` é o ponto de entrada COMPARTILHADO de
+    todos os produtores de sinal (SIPAC, Calendar, WhatsApp, Monitor de
+    Páginas — ver docstring do módulo) — ligar o outbox aqui, uma única vez,
+    cobre de um golpe os canais com categoria clara (ver
+    `_CANAL_PARA_CATEGORIA_EVENTO`).
+
+    Devolve `None` para um `canal` sem categoria mapeada — o chamador trata
+    `None` como "não emitir evento", só gravando a sugestão normalmente
+    (exatamente o comportamento de antes desta sub-entrega para esses canais,
+    sem regressão).
+
+    `occurred_at`/`ingested_at` usam `agora` (quando ESTE processo detectou e
+    está gravando a sugestão) — ao contrário do digest de WhatsApp, que usa o
+    timestamp da ÚLTIMA MENSAGEM da janela para sobreviver a reprocessamento
+    (ver `whatsapp_ingest._digest_occurred_at`), este caminho só é alcançado
+    quando `suggestion_id` AINDA NÃO existe no Firestore —
+    `queue_and_maybe_send_suggestion` já verifica isso antes de chamar esta
+    função; uma segunda chamada para o MESMO `suggestion_id` depois que o doc
+    já existe entra pelo ramo de reenvio (`existing_snap.exists`), que nunca
+    volta a montar um evento novo. A janela de corrida check-then-act entre
+    essa verificação (não-transacional) e a escrita (duas chamadas
+    concorrentes para o mesmo `suggestion_id` novo) é uma limitação
+    PRÉ-EXISTENTE do próprio `queue_and_maybe_send_suggestion` (já registrada
+    como achado A05/pendência em docs/autonomia/execucao.md, candidata a
+    redesenho maior) — ATUALIZADO: a 1a versão desta sub-entrega na verdade
+    AGRAVAVA essa corrida (2 chamadas concorrentes montavam eventos com
+    `agora` diferentes -> `event_id`s diferentes -> as DUAS transações
+    commitavam, gravando 2 entradas de outbox para a mesma sugestão — achado
+    real de revisão automática do Codex, PR #398). Corrigido por
+    `_gravar_sugestao_se_ainda_nao_existe`, que relê `doc_ref` DENTRO da
+    transação e aborta com `_SugestaoJaExistenteError` se outra chamada já
+    venceu a corrida — ver a docstring daquela função para o design
+    completo. O que PERMANECE em aberto (achado A05 propriamente dito, não
+    fechado por esta correção): a chamada perdedora ainda pode enviar um
+    SEGUNDO cartão de Telegram sobre o doc da vencedora, se esta ainda não
+    tiver confirmado `telegram_sent` no momento em que a perdedora detecta a
+    corrida — mesma classe de duplicata de cartão que já existia antes desta
+    sub-entrega (não agravada, não corrigida).
+
+    `payload_identificador` carrega só `task_id`/`titulo_sinal` — determinístico
+    para a mesma ocorrência, sem nada derivado de IA ou contagem mutável
+    (diferente do `relevancia` do digest de WhatsApp, que por isso foi para
+    `metadata` — ver `_montar_evento_outbox_digest` para o porquê)."""
+    nome_categoria = _CANAL_PARA_CATEGORIA_EVENTO.get(canal)
+    if nome_categoria is None:
+        return None
+    from autonomy.events import CategoriaEvento, montar_evento
+
+    return montar_evento(
+        CategoriaEvento[nome_categoria],
+        "email_action_suggestions",
+        suggestion_id,
+        {"task_id": task["id"], "titulo_sinal": titulo_sinal},
+        occurred_at=agora,
+        ingested_at=agora,
+        metadata={"canal": canal, "origem_sinal": origem_sinal},
+    )
+
+
+class _SugestaoJaExistenteError(Exception):
+    """Sinal interno, NUNCA deve escapar de `queue_and_maybe_send_suggestion`:
+    levantado por `_gravar_sugestao_se_ainda_nao_existe` quando `doc_ref` já
+    existe no momento em que a transação tenta gravá-lo -- ver a docstring
+    dessa função para o raciocínio completo (achado real de revisão
+    automática do Codex, PR #398)."""
+
+
+def _gravar_sugestao_se_ainda_nao_existe(transaction, doc_ref, base_doc):
+    """`escrever_efeito` de `registrar_evento_outbox_transacional` para uma
+    sugestão NOVA -- achado real de revisão automática do Codex (PR #398)
+    sobre a 1a versão desta sub-entrega: sem reler `doc_ref` DENTRO da
+    transação, 2 chamadas concorrentes para o MESMO `suggestion_id` novo
+    (ambas passando pela checagem não-transacional `existing_snap.exists` no
+    topo de `queue_and_maybe_send_suggestion` antes de qualquer uma
+    commitar) montam eventos com `agora` diferentes -> `event_id`s
+    diferentes -> cada transação lê um documento de outbox DIFERENTE (nenhum
+    dos dois já existe) -> as DUAS transações commitam, gravando 2 entradas
+    de outbox para a MESMA sugestão -- pior do que o `doc_ref.set()` direto
+    de antes desta sub-entrega, que na mesma corrida já era só
+    last-write-wins (sem bookkeeping duplicado, achado A05 pré-existente e
+    ainda em aberto, ver pendências).
+
+    Relendo `doc_ref` aqui, DENTRO da transação (depois do `.get()` do
+    outbox já feito por `registrar_evento_outbox_transacional` -- ainda
+    antes de qualquer escrita, respeitando a ordem leitura-antes-de-escrita
+    exigida pelo protocolo de transação do Firestore), a corrida se fecha:
+    a transação que tenta commitar DEPOIS da outra é abortada pelo Firestore
+    por contenção real (o documento que ela leu mudou sob ela), o decorator
+    `@firestore.transactional` a RETENTA automaticamente com uma transação
+    nova, e nesse retry esta função relê `doc_ref` e encontra `exists=True`
+    de verdade (não é mais contenção) -- levanta `_SugestaoJaExistenteError`,
+    que aborta a transação (nenhum efeito nem entrada de outbox são
+    gravados, mesma garantia de `registrar_evento_outbox_transacional` para
+    qualquer `escrever_efeito` que levante) e propaga para o chamador tratar
+    como "perdeu a corrida" em vez de gravar um 2o evento para a mesma
+    ocorrência."""
+    if doc_ref.get(transaction=transaction).exists:
+        raise _SugestaoJaExistenteError()
+    transaction.set(doc_ref, base_doc)
+
+
+def _resultado_de_sugestao_existente(db, doc_ref, suggestion_id, chat_id, send_fn, existing_doc):
+    """Comportamento comum para quando `suggestion_id` já tem um doc gravado
+    -- seja porque a checagem inicial de `queue_and_maybe_send_suggestion`
+    (não-transacional) já viu isso, seja porque uma chamada concorrente
+    venceu a corrida de criação (`_gravar_sugestao_se_ainda_nao_existe`
+    detectou e `queue_and_maybe_send_suggestion` chama esta função de novo
+    sobre o doc que a vencedora acabou de gravar). Mesma lógica de retry de
+    Telegram de antes desta sub-entrega (achado real da revisão adversarial
+    de terceiros, Codex, PR #385): o cenário de falha parcial que este retry
+    existe para cobrir é exatamente "o envio ao Telegram teve sucesso, mas a
+    confirmação local de telegram_sent=True falhou/foi interrompida" -- ou
+    seja, o cartão JÁ chegou ao usuário e é clicável mesmo com telegram_sent
+    ainda False no Firestore. Se o usuário decidir (aplicar/dispensar) nesse
+    intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
+    `status` para "applied"/"applied_reactivated"/"dismissed" por sua
+    própria transação, independente de `telegram_sent`. Sem checar `status`
+    aqui, esta função reenviaria um SEGUNDO cartão para uma sugestão já
+    resolvida -- o clique nele só informaria "já resolvida/expirada",
+    confundindo o usuário à toa."""
+    if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
+        return existing_doc
+    if send_fn is None:
+        from main import _send_telegram_message_raw_with_keyboard
+        send_fn = _send_telegram_message_raw_with_keyboard
+    if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
+        sent_at = datetime.now(timezone.utc).isoformat()
+        existing_doc["telegram_sent"] = True
+        existing_doc["sent_at"] = sent_at
+        doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
+    return existing_doc
+
+
 def queue_and_maybe_send_suggestion(
     db,
     suggestion_id: str,
@@ -891,30 +1045,12 @@ def queue_and_maybe_send_suggestion(
     doc_ref = suggestions_col.document(suggestion_id)
     existing_snap = doc_ref.get()
     if existing_snap.exists:
-        existing_doc = existing_snap.to_dict() or {}
-        # Achado real da revisão adversarial de terceiros (Codex, PR #385): o cenário de
-        # falha parcial que este retry existe para cobrir é exatamente "o envio ao
-        # Telegram teve sucesso, mas a confirmação local de telegram_sent=True falhou/foi
-        # interrompida" -- ou seja, o cartão JÁ chegou ao usuário e é clicável mesmo com
-        # telegram_sent ainda False no Firestore. Se o usuário decidir (aplicar/dispensar)
-        # nesse intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
-        # `status` para "applied"/"applied_reactivated"/"dismissed" por sua própria
-        # transação, independente de `telegram_sent`. Sem checar `status` aqui, esta
-        # função reenviaria um SEGUNDO cartão para uma sugestão já resolvida -- o clique
-        # nele só informaria "já resolvida/expirada", confundindo o usuário à toa.
-        if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
-            return existing_doc
-        if send_fn is None:
-            from main import _send_telegram_message_raw_with_keyboard
-            send_fn = _send_telegram_message_raw_with_keyboard
-        if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
-            sent_at = datetime.now(timezone.utc).isoformat()
-            existing_doc["telegram_sent"] = True
-            existing_doc["sent_at"] = sent_at
-            doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
-        return existing_doc
+        return _resultado_de_sugestao_existente(
+            db, doc_ref, suggestion_id, chat_id, send_fn, existing_snap.to_dict() or {}
+        )
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    agora = datetime.now(timezone.utc)
+    now_iso = agora.isoformat()
     base_doc = {
         "canal": canal,
         "titulo_sinal": titulo_sinal,
@@ -934,7 +1070,30 @@ def queue_and_maybe_send_suggestion(
     if extra:
         base_doc.update(extra)
 
-    doc_ref.set(base_doc)
+    evento_outbox = _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, origem_sinal, agora)
+    if evento_outbox is not None:
+        from event_outbox import registrar_evento_outbox_transacional
+
+        try:
+            registrar_evento_outbox_transacional(
+                db,
+                evento_outbox,
+                agora=agora,
+                escrever_efeito=lambda transaction: _gravar_sugestao_se_ainda_nao_existe(
+                    transaction, doc_ref, base_doc
+                ),
+            )
+        except _SugestaoJaExistenteError:
+            # Perdeu a corrida de criação (ver _gravar_sugestao_se_ainda_nao_existe) --
+            # outra chamada concorrente já gravou suggestion_id e seu próprio evento de
+            # outbox. Trata exatamente como "doc já existente", sobre o doc que a
+            # vencedora de fato gravou (não o base_doc desta chamada, que nunca chegou a
+            # ser persistido).
+            return _resultado_de_sugestao_existente(
+                db, doc_ref, suggestion_id, chat_id, send_fn, doc_ref.get().to_dict() or {}
+            )
+    else:
+        doc_ref.set(base_doc)
 
     if chat_id:
         if send_fn is None:
