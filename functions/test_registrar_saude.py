@@ -15,13 +15,15 @@ O criterio de aceite do pedido esta em `TestGravaELeDeVolta`: depois da escrita,
 `consultar_saude` daquele dia reflete o valor.
 """
 
+import datetime as _dt
 import unittest
 from datetime import date, timedelta
+from unittest import mock
 
 from tools import registrar_saude as rs
 
-HOJE = date.today().isoformat()
-AMANHA = (date.today() + timedelta(days=1)).isoformat()
+HOJE = rs.hoje_brasilia()
+AMANHA = (date.fromisoformat(HOJE) + timedelta(days=1)).isoformat()
 
 
 class _Doc:
@@ -87,6 +89,24 @@ class _Ctx:
     def __init__(self):
         self.db = _Db()
         self.user_uid = "uid"
+
+
+class TestDataDeBrasilia(unittest.TestCase):
+    """O servidor roda em UTC: sem fuso, um peso das 22h30 caía no dia seguinte."""
+
+    def test_depois_das_21h_de_brasilia_ainda_e_hoje(self):
+        instante = _dt.datetime(2026, 10, 2, 1, 30, tzinfo=_dt.timezone.utc)  # 22h30 de 01/10
+
+        class _Relogio(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return instante.astimezone(tz) if tz else instante
+
+        ctx = _Ctx()
+        with mock.patch.object(rs, "datetime", _Relogio):
+            self.assertEqual(rs.hoje_brasilia(), "2026-10-01")
+            rs.registrar(ctx, {"peso": 94.4})
+        self.assertEqual(list(ctx.db.cols[rs.COL_PESOS].dados.values())[0]["date"], "2026-10-01")
 
 
 class TestIdempotencia(unittest.TestCase):

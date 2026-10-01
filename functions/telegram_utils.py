@@ -1106,7 +1106,8 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
             "• <code>/entrar [termo]</code> — busca ações e trava o contexto nelas\n"
             "• <code>/sair</code> — sai do contexto trancado, retorna ao modo geral\n"
             "• <code>/status</code> — mostra o contexto e histórico atuais\n"
-            "• <code>caminhada 2.5</code> — registra bloco de esteira em km (aceita min, passos e kcal)\n\n"
+            "• <code>caminhada 2.5</code> — registra bloco de esteira em km (aceita min, passos e kcal)\n"
+            "• <code>peso 94,4</code> — registra o peso do dia (também por áudio)\n\n"
             "Envie texto, áudio ou arquivos. Tamanho máximo: 20 MB."
         )
 
@@ -1145,6 +1146,62 @@ _WALK_FILLER_RE = re.compile(r"\b(?:em|e|com|de|na|no|esteira|hoje|agora)\b", re
 def _format_km(value: float) -> str:
     text = f"{value:.2f}".rstrip("0").rstrip(".")
     return text.replace(".", ",")
+
+_PESO_RE = re.compile(
+    r"^(?:hoje\s+)?(?:(?:registrar?|registra|anotar?|anota)\s+(?:o\s+|meu\s+)?)?"
+    r"(?P<chave>(?:meu\s+)?peso|pesei|pesagem)?\s*(?:de\s+hoje|hoje)?\s*[:=\-]?\s*"
+    r"(?:(?:de|foi|é|e)\s+)?"
+    r"(?P<valor>\d{1,3}(?:[.,]\d{1,2})?)\s*(?P<unidade>kgs?|quilos?)?"
+    r"(?P<resto>.*)$",
+    re.IGNORECASE,
+)
+
+_PESO_FILLER_RE = re.compile(
+    r"\b(?:hoje|agora|de|da|pela|em|jejum|cedo|manh[aã]|registrado|anotado)\b", re.IGNORECASE
+)
+
+
+def _try_register_weight(db, text: str) -> Optional[str]:
+    """
+    Detecta "peso 94,4", "pesei 94.4" ou "94,4 kg" e grava em health_weights pelo
+    mesmo caminho do `registrar_saude` do MCP (uma entrada por dia, atualiza se
+    ja houver). So confirma depois de reler o que ficou gravado: em 28 e 30/09 o
+    Gemini respondeu "peso registrado" sem ferramenta nenhuma e nada foi gravado.
+    Retorna o texto de resposta, ou None para deixar a mensagem seguir ao LLM.
+    """
+    match = _PESO_RE.match((text or "").strip())
+    if not match or not (match.group("chave") or match.group("unidade")):
+        return None
+    resto = _PESO_FILLER_RE.sub(" ", match.group("resto") or "")
+    if re.sub(r"[\s.,;:!\-–—]+", "", resto):
+        return None
+
+    from tools.registrar_saude import COL_PESOS, registrar
+    from tools.tool_context import ToolContext
+
+    valor_txt = match.group("valor")
+    try:
+        resultado = registrar(ToolContext(_db=db, canal="telegram"), {"peso": valor_txt})
+    except Exception as exc:
+        print(f"[Peso] Falha ao gravar o peso: {exc}")
+        return "⚠️ Não consegui gravar o peso agora; nada foi registrado. Tente de novo em instantes."
+    if resultado.get("erro"):
+        return f"⚠️ {html.escape(str(resultado['erro']))}"
+
+    dia = resultado.get("data")
+    valor = float(valor_txt.replace(",", "."))
+    try:
+        docs = list(db.collection(COL_PESOS).where("date", "==", dia).limit(1).stream())
+        gravado = (docs[0].to_dict() or {}).get("weight") if docs else None
+    except Exception as exc:
+        print(f"[Peso] Falha ao reler health_weights: {exc}")
+        gravado = None
+    if gravado is None or abs(float(gravado) - valor) > 1e-6:
+        return ("⚠️ Tentei gravar o peso, mas ele não aparece no registro de saúde. "
+                "Nada foi confirmado; tente de novo ou registre pela web.")
+    kg = f"{valor:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    return f"⚖️ Peso registrado: <b>{kg} kg</b> em {dia[8:10]}/{dia[5:7]}."
+
 
 def _try_register_walk_block(db, text: str) -> Optional[str]:
     """
@@ -2346,6 +2403,7 @@ def _build_system_instruction_guarded_v2(
         "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
         "13. EFICIENCIA: quando precisar de varias consultas independentes, solicite todas na mesma rodada de ferramentas. Evite rodadas sequenciais se uma unica rodada paralela resolver. Nunca chame mais de uma ferramenta de escrita/registro no mesmo turno; proponha uma confirmacao por vez.\n"
         "14. WHATSAPP: para enviar ou agendar mensagem de WhatsApp, use schedule_whatsapp_message. A ferramenta deve apenas preparar a proposta; o envio real depende de confirmacao por botao. Para cancelar um envio ja agendado, use cancelar_envio_whatsapp (se faltar o job_id, ache-o com consultar_envio_whatsapp sem job_id) e informe o resultado real: se o envio ja estiver 'sent', diga que a mensagem ja saiu.\n"
+        "15. REGISTROS: so diga que registrou, gravou, anotou ou salvou algo se, NESTE turno, chamou a ferramenta correspondente e o retorno dela indicou sucesso. Peso corporal: use registrar_peso. Se nao houver ferramenta para o que foi pedido, diga que nao consegue registrar por aqui.\n"
     )
 
     if not acao_snapshot:

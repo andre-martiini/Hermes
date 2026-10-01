@@ -876,6 +876,20 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         )
         return json.dumps(resultado, ensure_ascii=False, default=str)
 
+    def registrar_peso(peso: float, data: str = None) -> str:
+        """Registra o peso corporal do usuario em kg (ex.: 94.4) no modulo de saude.
+        Uma entrada por dia: registrar de novo na mesma data atualiza. `data` em
+        YYYY-MM-DD; sem ela, vale hoje. So diga que registrou se o retorno trouxer
+        status 'completed'; se trouxer 'erro', reproduza o erro."""
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        args = {"peso": peso}
+        if data:
+            args["data"] = data
+        resultado = execute("registrar_saude", args, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
     def desativar_modo_secretario() -> str:
         """Desativa imediatamente o atendimento autônomo do Modo Secretário no WhatsApp."""
         from tools.hermes_tools import execute
@@ -917,6 +931,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         ativar_modo_secretario,
         desativar_modo_secretario,
         consultar_status_modo_secretario,
+        registrar_peso,
     ]
 
     # function_map não é recalculado aqui: quem chama (telegram_handlers_core.py)

@@ -40,6 +40,7 @@ from telegram_utils import (
     _send_telegram_message_with_keyboard,
     _send_telegram_session_message,
     _try_register_walk_block,
+    _try_register_weight,
 )
 
 PERFIL_AJUSTE_VALIDADE_HORAS = 12
@@ -89,6 +90,13 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
     if walk_reply:
         _persist_turn_to_copilot(text, walk_reply)
         _send_telegram_session_message(db, token, chat_id, walk_reply, session=session)
+        return True
+
+    # --- Registro rápido de peso (determinístico, sem LLM) ---
+    peso_reply = _try_register_weight(db, text)
+    if peso_reply:
+        _persist_turn_to_copilot(text, peso_reply)
+        _send_telegram_session_message(db, token, chat_id, peso_reply, session=session)
         return True
 
     # --- Ajuste de diário pessoal pendente (botão "✍️ Ajustar") — a próxima mensagem

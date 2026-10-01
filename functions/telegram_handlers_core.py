@@ -94,6 +94,7 @@ from telegram_utils import (
     _send_telegram_message,
     _send_telegram_photo,
     _send_telegram_session_message,
+    _try_register_weight,
     _send_telegram_typing,
     _send_telegram_voice,
     _send_tts_failure_notice_contextual,
@@ -338,6 +339,13 @@ def _process_telegram_message(db, data: dict):
                 voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
                 print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
                 file_context_text = f"[Transcrição de áudio]: {transcription}"
+                # Peso dito por voz (caso de 30/09) não passa pelo caminho sem LLM,
+                # que roda antes da transcrição.
+                peso_reply = _try_register_weight(db, transcription)
+                if peso_reply:
+                    _persist_turn_to_copilot(file_context_text, peso_reply)
+                    _send_telegram_session_message(db, token, chat_id, peso_reply, session=session)
+                    return
                 user_parts.append(types.Part(text=file_context_text))
             else:
                 user_parts.append(types.Part(text="[Áudio recebido mas a transcrição falhou]"))
