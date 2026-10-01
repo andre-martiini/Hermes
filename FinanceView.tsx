@@ -4,6 +4,8 @@ import { storage, db, functions } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { BoletoBarras } from './src/components/BoletoBarras';
+import { analisarBoleto } from './src/utils/boleto';
 
 const parseDateDay = (dateStr?: string) => {
     if (!dateStr) return null;
@@ -2988,13 +2990,22 @@ const FinanceView = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Código de Barras (Linha Digitável)</label>
-                                        <input type="text" placeholder="Cole a linha digitável do boleto..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => setNewBill({ ...newBill, barcode: e.target.value })} />
+                                        <input type="text" placeholder="Cole a linha digitável do boleto..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => {
+                                            const barcode = e.target.value;
+                                            const analise = analisarBoleto(barcode);
+                                            // Só preenche o que está vazio: o que a pessoa digitou não é sobrescrito.
+                                            const doBoleto: Partial<FixedBill> = {};
+                                            if (analise?.valido && analise.valor && !newBill.amount) doBoleto.amount = analise.valor;
+                                            if (analise?.valido && analise.vencimento && !newBill.dueDay) doBoleto.dueDay = Number(analise.vencimento.slice(8, 10));
+                                            setNewBill({ ...newBill, barcode, ...doBoleto });
+                                        }} />
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Código Pix Copia e Cola</label>
                                         <input type="text" placeholder="Cole o código Pix Copia e Cola..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
                                     </div>
                                 </div>
+                                <BoletoBarras analise={analisarBoleto(newBill.barcode)} />
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-primary-tactile bg-blue-50/50' : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100'}`} onClick={() => {
@@ -3263,6 +3274,7 @@ const FinanceView = ({
                                                                     </div>
 
                                                                     {activeBillTab === 'codigo' ? (
+                                                                        <>
                                                                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                                                                             <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-4 shadow-sm">
                                                                                 <label className="mb-2 block text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500">Código de Barras</label>
@@ -3287,6 +3299,8 @@ const FinanceView = ({
                                                                                 </div>
                                                                             </div>
                                                                         </div>
+                                                                        <BoletoBarras analise={analisarBoleto(bill.barcode)} />
+                                                                        </>
                                                                     ) : (
                                                                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                                                                             <div
