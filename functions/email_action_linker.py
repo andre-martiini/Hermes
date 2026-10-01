@@ -920,6 +920,80 @@ def _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, ori
     )
 
 
+class _SugestaoJaExistenteError(Exception):
+    """Sinal interno, NUNCA deve escapar de `queue_and_maybe_send_suggestion`:
+    levantado por `_gravar_sugestao_se_ainda_nao_existe` quando `doc_ref` já
+    existe no momento em que a transação tenta gravá-lo -- ver a docstring
+    dessa função para o raciocínio completo (achado real de revisão
+    automática do Codex, PR #398)."""
+
+
+def _gravar_sugestao_se_ainda_nao_existe(transaction, doc_ref, base_doc):
+    """`escrever_efeito` de `registrar_evento_outbox_transacional` para uma
+    sugestão NOVA -- achado real de revisão automática do Codex (PR #398)
+    sobre a 1a versão desta sub-entrega: sem reler `doc_ref` DENTRO da
+    transação, 2 chamadas concorrentes para o MESMO `suggestion_id` novo
+    (ambas passando pela checagem não-transacional `existing_snap.exists` no
+    topo de `queue_and_maybe_send_suggestion` antes de qualquer uma
+    commitar) montam eventos com `agora` diferentes -> `event_id`s
+    diferentes -> cada transação lê um documento de outbox DIFERENTE (nenhum
+    dos dois já existe) -> as DUAS transações commitam, gravando 2 entradas
+    de outbox para a MESMA sugestão -- pior do que o `doc_ref.set()` direto
+    de antes desta sub-entrega, que na mesma corrida já era só
+    last-write-wins (sem bookkeeping duplicado, achado A05 pré-existente e
+    ainda em aberto, ver pendências).
+
+    Relendo `doc_ref` aqui, DENTRO da transação (depois do `.get()` do
+    outbox já feito por `registrar_evento_outbox_transacional` -- ainda
+    antes de qualquer escrita, respeitando a ordem leitura-antes-de-escrita
+    exigida pelo protocolo de transação do Firestore), a corrida se fecha:
+    a transação que tenta commitar DEPOIS da outra é abortada pelo Firestore
+    por contenção real (o documento que ela leu mudou sob ela), o decorator
+    `@firestore.transactional` a RETENTA automaticamente com uma transação
+    nova, e nesse retry esta função relê `doc_ref` e encontra `exists=True`
+    de verdade (não é mais contenção) -- levanta `_SugestaoJaExistenteError`,
+    que aborta a transação (nenhum efeito nem entrada de outbox são
+    gravados, mesma garantia de `registrar_evento_outbox_transacional` para
+    qualquer `escrever_efeito` que levante) e propaga para o chamador tratar
+    como "perdeu a corrida" em vez de gravar um 2o evento para a mesma
+    ocorrência."""
+    if doc_ref.get(transaction=transaction).exists:
+        raise _SugestaoJaExistenteError()
+    transaction.set(doc_ref, base_doc)
+
+
+def _resultado_de_sugestao_existente(db, doc_ref, suggestion_id, chat_id, send_fn, existing_doc):
+    """Comportamento comum para quando `suggestion_id` já tem um doc gravado
+    -- seja porque a checagem inicial de `queue_and_maybe_send_suggestion`
+    (não-transacional) já viu isso, seja porque uma chamada concorrente
+    venceu a corrida de criação (`_gravar_sugestao_se_ainda_nao_existe`
+    detectou e `queue_and_maybe_send_suggestion` chama esta função de novo
+    sobre o doc que a vencedora acabou de gravar). Mesma lógica de retry de
+    Telegram de antes desta sub-entrega (achado real da revisão adversarial
+    de terceiros, Codex, PR #385): o cenário de falha parcial que este retry
+    existe para cobrir é exatamente "o envio ao Telegram teve sucesso, mas a
+    confirmação local de telegram_sent=True falhou/foi interrompida" -- ou
+    seja, o cartão JÁ chegou ao usuário e é clicável mesmo com telegram_sent
+    ainda False no Firestore. Se o usuário decidir (aplicar/dispensar) nesse
+    intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
+    `status` para "applied"/"applied_reactivated"/"dismissed" por sua
+    própria transação, independente de `telegram_sent`. Sem checar `status`
+    aqui, esta função reenviaria um SEGUNDO cartão para uma sugestão já
+    resolvida -- o clique nele só informaria "já resolvida/expirada",
+    confundindo o usuário à toa."""
+    if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
+        return existing_doc
+    if send_fn is None:
+        from main import _send_telegram_message_raw_with_keyboard
+        send_fn = _send_telegram_message_raw_with_keyboard
+    if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
+        sent_at = datetime.now(timezone.utc).isoformat()
+        existing_doc["telegram_sent"] = True
+        existing_doc["sent_at"] = sent_at
+        doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
+    return existing_doc
+
+
 def queue_and_maybe_send_suggestion(
     db,
     suggestion_id: str,
@@ -961,28 +1035,9 @@ def queue_and_maybe_send_suggestion(
     doc_ref = suggestions_col.document(suggestion_id)
     existing_snap = doc_ref.get()
     if existing_snap.exists:
-        existing_doc = existing_snap.to_dict() or {}
-        # Achado real da revisão adversarial de terceiros (Codex, PR #385): o cenário de
-        # falha parcial que este retry existe para cobrir é exatamente "o envio ao
-        # Telegram teve sucesso, mas a confirmação local de telegram_sent=True falhou/foi
-        # interrompida" -- ou seja, o cartão JÁ chegou ao usuário e é clicável mesmo com
-        # telegram_sent ainda False no Firestore. Se o usuário decidir (aplicar/dispensar)
-        # nesse intervalo, o callback do Telegram (telegram_callbacks_contatos.py) muda
-        # `status` para "applied"/"applied_reactivated"/"dismissed" por sua própria
-        # transação, independente de `telegram_sent`. Sem checar `status` aqui, esta
-        # função reenviaria um SEGUNDO cartão para uma sugestão já resolvida -- o clique
-        # nele só informaria "já resolvida/expirada", confundindo o usuário à toa.
-        if existing_doc.get("telegram_sent") or existing_doc.get("status") != "pending" or not chat_id:
-            return existing_doc
-        if send_fn is None:
-            from main import _send_telegram_message_raw_with_keyboard
-            send_fn = _send_telegram_message_raw_with_keyboard
-        if _send_suggestion_telegram(db, chat_id, suggestion_id, existing_doc, send_fn):
-            sent_at = datetime.now(timezone.utc).isoformat()
-            existing_doc["telegram_sent"] = True
-            existing_doc["sent_at"] = sent_at
-            doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
-        return existing_doc
+        return _resultado_de_sugestao_existente(
+            db, doc_ref, suggestion_id, chat_id, send_fn, existing_snap.to_dict() or {}
+        )
 
     agora = datetime.now(timezone.utc)
     now_iso = agora.isoformat()
@@ -1009,12 +1064,24 @@ def queue_and_maybe_send_suggestion(
     if evento_outbox is not None:
         from event_outbox import registrar_evento_outbox_transacional
 
-        registrar_evento_outbox_transacional(
-            db,
-            evento_outbox,
-            agora=agora,
-            escrever_efeito=lambda transaction: transaction.set(doc_ref, base_doc),
-        )
+        try:
+            registrar_evento_outbox_transacional(
+                db,
+                evento_outbox,
+                agora=agora,
+                escrever_efeito=lambda transaction: _gravar_sugestao_se_ainda_nao_existe(
+                    transaction, doc_ref, base_doc
+                ),
+            )
+        except _SugestaoJaExistenteError:
+            # Perdeu a corrida de criação (ver _gravar_sugestao_se_ainda_nao_existe) --
+            # outra chamada concorrente já gravou suggestion_id e seu próprio evento de
+            # outbox. Trata exatamente como "doc já existente", sobre o doc que a
+            # vencedora de fato gravou (não o base_doc desta chamada, que nunca chegou a
+            # ser persistido).
+            return _resultado_de_sugestao_existente(
+                db, doc_ref, suggestion_id, chat_id, send_fn, doc_ref.get().to_dict() or {}
+            )
     else:
         doc_ref.set(base_doc)
 
