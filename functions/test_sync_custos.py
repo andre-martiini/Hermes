@@ -23,6 +23,8 @@ from unittest import mock
 import main
 import atencao
 import email_action_linker
+from autonomy.integrations import IntegrationStatus
+from autonomy.integrations_sync import saude_calendar
 
 
 # --------------------------------------------------------------------------- fakes
@@ -326,6 +328,83 @@ class TestRunFullSyncEscopos(unittest.TestCase):
             main.run_full_sync("firestore-request:agenda", scope=main.SYNC_SCOPE_CALENDAR)
         self.assertIsNone(db.store("system")["sync"].get("requested_scope"))
         self.assertEqual(db.store("system")["sync"]["status"], "completed")
+
+    def test_grava_heartbeat_proprio_do_calendar_apos_o_passo_calendar_tasks(self):
+        # Achado real do Codex (comment_id=4131386963, ver
+        # autonomy/integrations_sync.py::saude_calendar): last_success também é
+        # gravado por sync_gmail_bills_callable, sem nenhuma sincronização de
+        # Calendar envolvida -- last_calendar_success_at é um heartbeat PRÓPRIO
+        # do passo Calendar/Tasks, gravado logo após ele terminar sem exceção.
+        db = _Db()
+        antes = datetime.now(timezone.utc)
+        with _Patches(db):
+            self.assertTrue(main.run_full_sync("scheduled"))
+        sync = db.store("system")["sync"]
+        heartbeat = datetime.fromisoformat(sync["last_calendar_success_at"])
+        self.assertIsNotNone(heartbeat.tzinfo)
+        self.assertGreaterEqual(heartbeat, antes)
+
+    def test_falha_no_calendar_nao_grava_heartbeat_proprio(self):
+        # Testa só o contrato de run_full_sync: SE uma exceção chega até ele vinda
+        # do passo Calendar/Tasks, o heartbeat não deve avançar. NÃO testa (nem
+        # pode, com sync_google_calendar mockado) se uma falha real dispararia essa
+        # exceção -- na função real, isso só acontece para GoogleAuthRevokedError
+        # (credencial revogada); qualquer outro erro é engolido internamente e a
+        # função retorna normalmente (achado real de revisão adversarial
+        # independente desta sub-entrega -- ver "LIMITAÇÃO CONHECIDA, AINDA ABERTA
+        # #1" na docstring de saude_calendar, autonomy/integrations_sync.py).
+        db = _Db()
+        with _Patches(db) as m:
+            m["cal"].side_effect = RuntimeError("Calendar fora")
+            self.assertFalse(main.run_full_sync("scheduled"))
+        self.assertNotIn("last_calendar_success_at", db.store("system")["sync"])
+
+    def test_heartbeat_do_calendar_avanca_a_cada_passada_bem_sucedida(self):
+        # Pedido de escopo completo chega no meio da 1ª passada (só agenda) --
+        # a 2ª passada roda Calendar/Tasks de novo e o heartbeat avança junto.
+        db = _Db()
+        passos = []
+
+        def cal(*a, **k):
+            passos.append("cal")
+            if len(passos) == 1:
+                main.queue_sync_request(db, "sync-busy:scheduled")
+            return {}
+
+        with _Patches(db) as m:
+            m["cal"].side_effect = cal
+            main.run_full_sync("firestore-request:agenda", scope=main.SYNC_SCOPE_CALENDAR)
+        self.assertEqual(len(passos), 2)
+        self.assertIn("last_calendar_success_at", db.store("system")["sync"])
+
+    def test_heartbeat_do_calendar_nao_depende_de_passos_posteriores(self):
+        # O heartbeat é gravado logo após Calendar/Tasks -- uma falha num passo
+        # independente mais adiante (ex.: Allcare) não deve impedi-lo de avançar
+        # NO DOC BRUTO, mesma classe de acoplamento indevido que esta sub-entrega
+        # corrige na direção oposta (boletos do Gmail não devem mascarar o
+        # Calendar). MAS: isso não basta para o Calendar ser reportado saudável --
+        # ver a 2ª metade deste teste e "LIMITAÇÃO CONHECIDA, AINDA ABERTA #2" na
+        # docstring de saude_calendar (achado real de revisão adversarial
+        # independente desta sub-entrega, mecanismo pré-existente e não corrigido
+        # aqui: status/error_code continuam globais ao ciclo inteiro).
+        db = _Db()
+        with _Patches(db) as m:
+            m["allcare"].side_effect = RuntimeError("Allcare fora")
+            self.assertFalse(main.run_full_sync("scheduled"))
+        sync_doc = db.store("system")["sync"]
+        self.assertIn("last_calendar_success_at", sync_doc)
+        self.assertEqual(sync_doc["status"], "error")
+
+        # A falha do Allcare, alheia ao Calendar, ainda derruba a saúde reportada
+        # do Calendar para UNAVAILABLE -- calcular_status_integracao força
+        # UNAVAILABLE sempre que error_code não é None, independente da frescor
+        # de last_calendar_success_at. Comportamento conhecido e documentado,
+        # NÃO o que esta sub-entrega corrige (que é só a frescor); este teste
+        # existe para que uma correção futura dessa metade não regrida
+        # silenciosamente sem que ninguém perceba que o comportamento mudou.
+        saude = saude_calendar(sync_doc, datetime.now(timezone.utc))
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+        self.assertIn("Allcare fora", saude.error_code)
 
 
 class TestQueueSyncRequest(unittest.TestCase):
