@@ -3778,6 +3778,21 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
                 # um prefixo próprio antes do título, como "[-] ATUALIZADA: "); só as 3 linhas
                 # de erro engolido (`ERRO CAL:`/`ERRO PUSH:`/`ERRO PULL:`, main.py) começam a
                 # mensagem exatamente com o marcador.
+                #
+                # "[CAL][!]" (P05 sub-entrega 15/N, fecha a LIMITAÇÃO CONHECIDA, AINDA ABERTA
+                # #3 de autonomy/integrations_sync.py::saude_calendar): sync_google_calendar
+                # e sync_google_tasks_push também engolem erro POR ITEM (um `calendar_id`
+                # específico ao listar, uma tarefa específica ao sincronizar seu evento) com
+                # `continue`/sem propagar, logando com este prefixo em vez de "ERRO CAL:"/
+                # "ERRO PUSH:" -- por isso ficavam fora da varredura acima, e uma falha
+                # persistente em UM item (mas não todos) gravava heartbeat de SUCESSO do
+                # mesmo jeito. Mesma âncora de início de mensagem (as duas linhas reais
+                # começam exatamente com "[CAL][!]"; a linha de SUCESSO de
+                # sync_google_calendar é "[CAL] {count} eventos..." -- sem "[!]", não colide).
+                # Resolve com a MESMA agregação "pior resultado vence" que o resto deste
+                # mecanismo já usa (qualquer erro no passo -> last_calendar_error_at, não
+                # um sinal por `calendar_id`/tarefa -- isso continua fora de escopo, ver
+                # docstring de saude_calendar).
                 novos_logs_calendar = logs[logs_antes_do_passo_calendar:]
                 erro_engolido = next(
                     (
@@ -3785,7 +3800,7 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
                         for mensagem in (
                             re.sub(r"^\[\d{2}:\d{2}:\d{2}\] ", "", entrada) for entrada in novos_logs_calendar
                         )
-                        if mensagem.startswith(("ERRO CAL:", "ERRO PUSH:", "ERRO PULL:"))
+                        if mensagem.startswith(("ERRO CAL:", "ERRO PUSH:", "ERRO PULL:", "[CAL][!]"))
                     ),
                     None,
                 )
