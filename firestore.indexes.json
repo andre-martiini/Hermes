@@ -1,6 +1,38 @@
 {
   "indexes": [
     {
+      "collectionGroup": "agent_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rotina", "order": "ASCENDING" },
+        { "fieldPath": "criado_em", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agent_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "origem", "order": "ASCENDING" },
+        { "fieldPath": "criado_em", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agent_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "criado_em", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agent_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "aguarda_usuario", "order": "ASCENDING" },
+        { "fieldPath": "criado_em", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "promessas_abertas",
       "queryScope": "COLLECTION",
       "fields": [
@@ -181,6 +213,12 @@
     },
     {
       "collectionGroup": "trava_confirmacao",
+      "fieldPath": "expira_em",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "agent_runs",
       "fieldPath": "expira_em",
       "ttl": true,
       "indexes": []
