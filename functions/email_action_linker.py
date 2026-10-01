@@ -891,14 +891,24 @@ def _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, ori
     função; uma segunda chamada para o MESMO `suggestion_id` depois que o doc
     já existe entra pelo ramo de reenvio (`existing_snap.exists`), que nunca
     volta a montar um evento novo. A janela de corrida check-then-act entre
-    essa verificação e a escrita (duas chamadas concorrentes para o mesmo
-    `suggestion_id` novo) é uma limitação PRÉ-EXISTENTE do próprio
-    `queue_and_maybe_send_suggestion` (já registrada como achado A05/pendência
-    em docs/autonomia/execucao.md, candidata a redesenho maior) — esta
-    sub-entrega não a fecha nem a agrava: na pior hipótese já documentada
-    (duplo toque, corrida web/Telegram), o pior caso novo é uma segunda
-    entrada de outbox para a mesma sugestão, mesma classe de duplicata que já
-    podia acontecer no doc principal.
+    essa verificação (não-transacional) e a escrita (duas chamadas
+    concorrentes para o mesmo `suggestion_id` novo) é uma limitação
+    PRÉ-EXISTENTE do próprio `queue_and_maybe_send_suggestion` (já registrada
+    como achado A05/pendência em docs/autonomia/execucao.md, candidata a
+    redesenho maior) — ATUALIZADO: a 1a versão desta sub-entrega na verdade
+    AGRAVAVA essa corrida (2 chamadas concorrentes montavam eventos com
+    `agora` diferentes -> `event_id`s diferentes -> as DUAS transações
+    commitavam, gravando 2 entradas de outbox para a mesma sugestão — achado
+    real de revisão automática do Codex, PR #398). Corrigido por
+    `_gravar_sugestao_se_ainda_nao_existe`, que relê `doc_ref` DENTRO da
+    transação e aborta com `_SugestaoJaExistenteError` se outra chamada já
+    venceu a corrida — ver a docstring daquela função para o design
+    completo. O que PERMANECE em aberto (achado A05 propriamente dito, não
+    fechado por esta correção): a chamada perdedora ainda pode enviar um
+    SEGUNDO cartão de Telegram sobre o doc da vencedora, se esta ainda não
+    tiver confirmado `telegram_sent` no momento em que a perdedora detecta a
+    corrida — mesma classe de duplicata de cartão que já existia antes desta
+    sub-entrega (não agravada, não corrigida).
 
     `payload_identificador` carrega só `task_id`/`titulo_sinal` — determinístico
     para a mesma ocorrência, sem nada derivado de IA ou contagem mutável

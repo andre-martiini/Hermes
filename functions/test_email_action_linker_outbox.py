@@ -23,7 +23,17 @@ Três classes de teste:
   gravando 2 entradas de outbox para a mesma sugestão (pior do que o
   `doc_ref.set()` direto de antes, que era só last-write-wins sem
   bookkeeping duplicado). Ver `_gravar_sugestao_se_ainda_nao_existe` em
-  email_action_linker.py para o design da correção.
+  email_action_linker.py para o design da correção. `TestCorridaDeCriacaoDetectada`
+  simula o sinal diretamente (mock do ponto que o detectaria em produção);
+  `TestCorridaViaDecoratorReal` (achado de uma 2a rodada de revisão
+  adversarial interna -- gap de cobertura, não bug: a 1a classe não provava
+  que o decorator real `@firestore.transactional` de fato aciona
+  `_gravar_sugestao_se_ainda_nao_existe` de novo após um retry por
+  contenção) exercita o decorator real de ponta a ponta, com um double que
+  REALMENTE buferiza escritas e aborta a 1a tentativa com
+  `google.api_core.exceptions.Aborted` -- a mesma exceção que o Firestore
+  real usa para sinalizar contenção -- confirmando que o retry automático do
+  decorator é o que de fato aciona a releitura que detecta a corrida.
 """
 
 import sys
@@ -34,7 +44,8 @@ from unittest import mock
 
 sys.path.insert(0, '.')
 
-from test_atencao import MockDb
+from google.api_core import exceptions as google_api_exceptions
+from test_atencao import MockDb, MockTransaction
 
 import email_action_linker
 from autonomy.events import CategoriaEvento
@@ -244,6 +255,114 @@ class TestCorridaDeCriacaoDetectada(unittest.TestCase):
 
         self.assertTrue(result["telegram_sent"])
         self.assertEqual(len(sent), 1)
+
+
+class _BufferingAbortTransaction(MockTransaction):
+    """Extensão de `MockTransaction` (test_atencao.py) que de fato buferiza
+    `.set()` até `_commit()` -- ao contrário de `MockTransaction`, que escreve
+    direto no doc subjacente (suficiente para os outros testes, que nunca
+    precisaram simular uma transação concorrente abortando no meio). Aqui
+    isso importa: a 1a tentativa precisa poder "perder a corrida" (uma
+    sugestão concorrente já commitada) SEM ter aplicado nenhuma escrita
+    própria, exatamente como o Firestore real buferiza escritas até o commit
+    e descarta tudo se o commit falhar.
+
+    A 1a chamada a `_commit()` simula a transação concorrente vencedora
+    commitando o PRÓPRIO doc bem no meio da nossa (escrevendo direto no
+    MockDb, por fora desta transação) e levanta `google.api_core.exceptions.
+    Aborted` -- a MESMA exceção que o decorator real `@firestore.transactional`
+    trata como retryable (`_Transactional.__call__`, biblioteca
+    google-cloud-firestore) e que aciona o retry automático -- REUSANDO o
+    MESMO objeto de transação (o decorator real não cria um novo: chama
+    `_clean_up()`/`_begin()` de novo sobre o mesmo `transaction` para
+    "resetá-lo", confirmado lendo `_Transactional._pre_commit`). No retry,
+    `_gravar_sugestao_se_ainda_nao_existe` relê `doc_ref` (agora existente,
+    graças à escrita direta simulada acima) e levanta
+    `_SugestaoJaExistenteError` ANTES de bufferizar qualquer `.set()` --
+    então `_commit()` nunca é chamada uma 2a vez (a exceção escapa de
+    `_pre_commit`, fora do bloco `try/except` que envolve só `_commit()`);
+    `.attempts` (via `_begin()`) é o jeito certo de confirmar que o retry
+    aconteceu, não `.commits`, que fica em 1 mesmo com o retry (achado desta
+    própria sub-entrega -- uma 1a versão deste teste assumia erradamente
+    `commits == 2`, corrigido depois de instrumentar e confirmar contra o
+    decorator real que `_pre_commit`/a função decorada rodam 2x mas
+    `_commit()` só roda 1x)."""
+
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+        self.buffer = []
+        self.attempts = 0
+        self.commits = 0
+        self.rollbacks = 0
+
+    def set(self, doc_ref, data, merge=False):
+        self.buffer.append((doc_ref, data, merge))
+
+    def _clean_up(self):
+        self.buffer = []
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        self.attempts += 1
+        super()._begin(retry_id)
+
+    def _rollback(self):
+        self.rollbacks += 1
+        self.buffer = []
+
+    def _commit(self):
+        self.commits += 1
+        if self.commits == 1:
+            self.db.collection("email_action_suggestions").document("sug-1").set(
+                {"canal": "sipac", "task_id": "task-1", "status": "pending", "telegram_sent": True}
+            )
+            self.buffer = []
+            raise google_api_exceptions.Aborted("contenção simulada (concorrente commitou primeiro)")
+        for doc_ref, data, merge in self.buffer:
+            doc_ref.set(data, merge=merge)
+        self.buffer = []
+
+
+class TestCorridaViaDecoratorReal(unittest.TestCase):
+    """Mesmo cenário de `TestCorridaDeCriacaoDetectada`, mas sem mockar
+    `_gravar_sugestao_se_ainda_nao_existe` -- exercita o decorator real
+    `@firestore.transactional` de ponta a ponta contra um double que
+    buferiza escritas e aborta a 1a tentativa com `Aborted`, confirmando que
+    o retry automático do decorator é o que de fato aciona a releitura que
+    detecta a corrida (gap de cobertura apontado por uma 2a rodada de
+    revisão adversarial interna sobre `TestCorridaDeCriacaoDetectada`, que
+    só provava o comportamento do `except` em `queue_and_maybe_send_suggestion`,
+    não o caminho real de detecção dentro da transação)."""
+
+    def test_retry_por_contencao_detecta_a_corrida_e_nao_duplica_outbox(self):
+        db = MockDb({"email_action_suggestions": {}})
+        tx = _BufferingAbortTransaction(db)
+        db.transaction = lambda: tx
+        sent = []
+
+        result = queue_and_maybe_send_suggestion(
+            db, "sug-1", canal="sipac", task=TASK, titulo_sinal="Sinal X",
+            chat_id="chat-1", send_fn=lambda *a: sent.append(a) or True,
+        )
+
+        self.assertEqual(tx.attempts, 2, "1a tentativa aborta (contenção), decorator retenta 1x")
+        self.assertEqual(
+            tx.commits, 1,
+            "_commit() só roda na 1a tentativa -- o retry detecta a corrida dentro de "
+            "_pre_commit (via _gravar_sugestao_se_ainda_nao_existe) e nunca chega a chamar _commit() de novo",
+        )
+        self.assertEqual(tx.rollbacks, 1)
+        self.assertEqual(result["status"], "pending")
+        outbox_docs = db.collection("outbox_eventos").docs
+        self.assertFalse(
+            any(d.exists for d in outbox_docs),
+            "retry que detecta a corrida nao deve deixar nenhuma entrada de outbox gravada",
+        )
+        suggestion_doc = db.collection("email_action_suggestions").document("sug-1")
+        self.assertTrue(suggestion_doc.exists)
+        self.assertTrue(suggestion_doc.to_dict()["telegram_sent"], "doc da vencedora já tinha telegram_sent=True")
+        self.assertEqual(sent, [], "vencedora já tinha confirmado telegram_sent -- perdedora não deve reenviar")
 
 
 if __name__ == "__main__":
