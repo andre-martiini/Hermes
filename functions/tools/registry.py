@@ -87,6 +87,7 @@ _CATALOG: dict[str, str] = {
     "consultar_saude_integracoes": "Reporta a saude (healthy/degraded/unavailable/unknown) de cada integracao: calendar, contacts, gmail, whatsapp, sipac, financas, repositorio",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
     "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
+    "consultar_atividades_mes": "O que as acoes registraram em cada dia de um mes (diario e conclusoes), com dias uteis sem atividade e feriados nacionais; base da execucao do PGD",
     "gerar_imagem": "Gera imagem (GPT Image da OpenAI) a partir de uma descricao; devolve a imagem visivel, o link de download e o do Drive, e anexa a acao com task_id",
     "editar_imagem": "Cria imagem a partir de imagens de referencia (Drive, upload, url ou Gmail) e uma instrucao: trocar fundo, usar logotipo, refazer num estilo",
     "preparar_reagendamento_em_lote": "Prepara reagendamento de varias acoes redistribuidas por dias uteis, sem gravar",

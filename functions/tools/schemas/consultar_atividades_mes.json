@@ -1,0 +1,42 @@
+{
+  "name": "consultar_atividades_mes",
+  "description": "O que as ações registraram em cada dia de um mês, pelo diário (acompanhamento) e pela conclusão, no fuso de Brasília. Devolve, por dia útil (e fim de semana com atividade), as ações e até 4 notas do diário por ação, os dias úteis sem nenhuma atividade e os feriados nacionais. É a base do registro da execução do PGD (skill pgd-execucao). Um mês inteiro é grande: use `areas` para ficar só nas áreas do trabalho (ex.: CLC, ASSISTÊNCIA ESTUDANTIL), `com_notas=false` para a visão geral e `dia_inicio`/`dia_fim` para ler as notas semana a semana. Somente leitura.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "mes": {
+        "type": "string",
+        "description": "YYYY-MM (ex.: 2026-09)"
+      },
+      "areas": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Só estas áreas temáticas (ex.: [\"CLC\", \"ASSISTÊNCIA ESTUDANTIL\"]). Omitir = todas"
+      },
+      "excluir_areas": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Áreas a deixar de fora. Padrão: [\"FAMÍLIA\"]"
+      },
+      "dia_inicio": {
+        "type": "integer",
+        "description": "Primeiro dia do mês a trazer (padrão 1)"
+      },
+      "dia_fim": {
+        "type": "integer",
+        "description": "Último dia do mês a trazer (padrão: fim do mês)"
+      },
+      "com_notas": {
+        "type": "boolean",
+        "description": "false = só títulos, áreas e contagem de notas (visão geral do mês). Padrão true"
+      }
+    },
+    "required": [
+      "mes"
+    ]
+  }
+}
