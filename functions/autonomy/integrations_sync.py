@@ -179,49 +179,97 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
 
     `error_code` só quando `status == "error"` -- `status == "partial"` não
     existe para este doc (só `run_full_sync`, que não distingue sucesso
-    parcial: ou completa tudo, ou marca `error`). Usa `last_success` (não
-    `finished_at`) como referência de frescor: `finished_at` também é gravado
-    em `status == "error"` (fim da rodada, com ou sem sucesso), então usá-lo
-    misturaria "quando a última rodada terminou" com "quando a última
-    LEITURA confiável aconteceu" -- exatamente a distinção que
-    `last_success_at` existe para preservar.
+    parcial: ou completa tudo, ou marca `error`).
 
-    LIMITAÇÃO CONHECIDA (achado real de revisão automática do Codex,
-    comment_id=4125412121, P2, na PR desta sub-entrega): `last_success` é do
-    job GLOBAL de `run_full_sync`, não específico do Calendar --
+    LIMITAÇÃO RESOLVIDA (achado real de revisão automática do Codex,
+    comment_id=4131386963, P2, na PR que fechou a tool
+    `consultar_saude_integracoes`, seção 6 do plano): `system/sync` também é
+    escrito por `sync_gmail_bills_callable` (`main.py`, sincronização MANUAL
+    de boletos do Gmail via app) -- `sync_ref.update({"status": "completed",
+    "last_success": ...})` ao final, SEM nenhuma sincronização de Calendar
+    envolvida. Usar `last_success` como referência de frescor do Calendar
+    deixava a saúde reportada vulnerável a um refresh causado por uma ação
+    totalmente alheia (boletos). `run_full_sync` agora grava
+    `last_calendar_success_at` logo após o passo Calendar/Tasks (chamadas a
+    `sync_google_calendar`/`sync_google_tasks_push`/`sync_google_tasks_pull`)
+    terminar sem exceção -- mesmo padrão de heartbeat PRÓPRIO já usado para o
+    WhatsApp (`saude_whatsapp`/`last_query_success_at`, sub-entrega
+    anterior). Este leitor prefere o campo novo; `last_success` continua como
+    fallback só para o período de transição entre o deploy desta sub-entrega
+    e a primeira rodada de sync seguinte (doc antigo, ainda sem o campo
+    novo) -- durante essa janela a limitação antiga (refresh por boletos)
+    ainda se aplica.
+
+    LIMITAÇÃO CONHECIDA, AINDA ABERTA #1 -- sinal mais fraco do que parece
+    (achado real de revisão adversarial independente desta sub-entrega,
+    confirmado lendo o corpo das 3 funções): "terminar sem exceção" é uma
+    barra bem mais baixa do que "sincronizou de verdade". `sync_google_calendar`
+    e `sync_google_tasks_push` (`main.py`) têm cada uma um único
+    `except Exception` externo que só RE-propaga `GoogleAuthRevokedError`
+    (credencial revogada) -- qualquer outro erro (API do Google fora do ar,
+    erro de quota, exceção de bug no processamento, falha de escrita no
+    Firestore) é só logado ("ERRO CAL"/"ERRO PUSH") e a função retorna
+    normalmente; `sync_google_tasks_pull` não repropaga NADA, nem credencial
+    revogada ("ERRO PULL", sempre retorna normalmente). Ou seja,
+    `last_calendar_success_at` avança sempre que o passo é alcançado e não
+    esbarra numa credencial revogada em `sync_google_calendar`/`push`
+    especificamente -- não é prova de que a listagem/gravação de eventos
+    tenha de fato funcionado. O ganho real desta sub-entrega é só isolar o
+    sinal do escritor alheio (`sync_gmail_bills_callable`); a força do sinal
+    em si (o que conta como "sem exceção") não mudou -- é a MESMA fraqueza
+    que `last_success` já tinha antes desta sub-entrega para o mesmo passo.
+    `test_falha_no_calendar_nao_grava_heartbeat_proprio`
+    (test_sync_custos.py) testa só o contrato "se uma exceção chega a
+    run_full_sync, o heartbeat não avança" via mock -- não exercita o
+    try/except real das 3 funções, que é precisamente o que normalmente
+    impede uma falha real de chegar até ali.
+
+    LIMITAÇÃO CONHECIDA, AINDA ABERTA #2 -- `error_code`/`status` continuam
+    GLOBAIS ao ciclo inteiro de `run_full_sync`, não específicos do passo
+    Calendar/Tasks (mesmo achado de revisão adversarial independente, achado
+    espelhado do que esta sub-entrega resolveu para a frescor): se um passo
+    SEM relação com Calendar e rodando DEPOIS dele no mesmo ciclo falhar
+    (ex.: `sync_allcare_portal_bills`, chamado sem try/except próprio em
+    `run_full_sync`), o bloco de erro geral grava `status: "error"` e
+    `error_message` desse passo alheio no MESMO doc -- sem apagar
+    `last_calendar_success_at`, que continua fresco. `calcular_status_integracao`
+    (`autonomy/integrations.py`) força `UNAVAILABLE` sempre que `error_code`
+    não é `None`, independente da frescor -- então um Calendar que acabou de
+    sincronizar com sucesso pode ser reportado `UNAVAILABLE` só porque
+    Allcare falhou depois, no mesmo ciclo. Mecanismo PRÉ-EXISTENTE a esta
+    sub-entrega (o acoplamento de `status`/`error_code` ao doc inteiro já
+    existia antes de `last_calendar_success_at`); esta sub-entrega resolveu
+    só a metade da frescor (achado original do Codex), não esta metade do
+    erro -- registrado aqui para não ser confundido com algo já corrigido.
+    Correção de verdade exige um sinal de erro PRÓPRIO do passo Calendar/
+    Tasks, análogo ao heartbeat de frescor que esta sub-entrega introduziu;
+    fora do escopo aqui. `test_heartbeat_do_calendar_nao_depende_de_passos_posteriores`
+    (test_sync_custos.py) cobre o doc bruto resultante deste cenário, não o
+    `IntegrationHealth` que `saude_calendar` produz a partir dele.
+
+    LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 (achado real de revisão automática
+    do Codex, comment_id=4125412121, P2, na PR da sub-entrega que introduziu
+    este módulo): o sinal também não é específico de cada `calendar_id` --
     `sync_google_calendar` (`main.py`, por `calendar_id`) captura falhas
     comuns de listagem (qualquer erro exceto credencial revogada) e apenas
     loga e CONTINUA para o próximo calendário (`continue`, sem propagar),
-    então uma falha persistente ao listar um ou mais calendários não impede
-    o job global de terminar com `status="completed"` e `last_success`
-    fresco. Um Calendar genuinamente quebrado (não por credencial revogada)
-    pode ser reportado como `HEALTHY` por este leitor. Correção de verdade
-    exige um sinal de sucesso/erro PRÓPRIO do Calendar, que não existe hoje
-    -- fora do escopo desta sub-entrega (leitor puro dos docs já existentes,
-    sem novo escritor); ver `pendencias` do bloco desta sub-entrega em
-    docs/autonomia/execucao.md.
-
-    CONFIRMAÇÃO ADICIONAL (achado real de revisão automática do Codex,
-    comment_id=4131386963, P2, na PR que fechou a tool
-    `consultar_saude_integracoes`, seção 6 do plano): o mesmo doc
-    `system/sync` também é escrito por `sync_gmail_bills_callable`
-    (`main.py`, sincronização MANUAL de boletos do Gmail via app) --
-    `sync_ref.update({"status": "completed", "last_success": ...})` ao
-    final, SEM nenhuma sincronização de Calendar envolvida. Ou seja, o
-    escritor que "refresca" `last_success` nem sempre é `run_full_sync`
-    (job periódico que ao menos tenta o Calendar) -- pode ser uma ação de
-    usuário sobre boletos, completamente alheia ao Calendar. Mesma causa
-    raiz do achado anterior (o timestamp é do doc, não da integração),
-    mesma correção pendente (sinal próprio do Calendar), mesmo motivo de
-    não ser corrigido aqui."""
+    então uma falha persistente ao listar um ou mais calendários (mas não
+    todos) não impede o heartbeat de avançar. Correção de verdade exige um
+    sinal POR `calendar_id`, decisão de produto própria (como agregar vários
+    calendários num único `IntegrationHealth`) -- fora do escopo desta
+    sub-entrega; ver `pendencias` do bloco desta sub-entrega em
+    docs/autonomia/execucao.md."""
     doc = doc or {}
     status = doc.get("status")
     error_code = _error_code_de_mensagem(doc.get("error_message")) if status == "error" else None
     limite_degradado, limite_indisponivel = LIMITES_POR_INTEGRACAO["calendar"]
+    referencia = doc.get("last_calendar_success_at")
+    if referencia is None:
+        referencia = doc.get("last_success")
     return montar_saude_integracao(
         integration="calendar",
         heartbeat_at=heartbeat_at,
-        last_success_at=_sem_referencia_futura(_extrair_instante(doc.get("last_success")), heartbeat_at),
+        last_success_at=_sem_referencia_futura(_extrair_instante(referencia), heartbeat_at),
         error_code=error_code,
         limite_degradado_segundos=limite_degradado,
         limite_indisponivel_segundos=limite_indisponivel,

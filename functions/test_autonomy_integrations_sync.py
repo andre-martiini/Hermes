@@ -7,9 +7,12 @@ Cobre: `_extrair_instante` (datetime nativo tz-aware/naive, string ISO com/
 sem "Z", string ISO naive, valores inválidos), os 4 leitores por integração
 (`saude_calendar`, `saude_contacts`, `saude_gmail`, `saude_whatsapp`) nos
 casos doc ausente/vazio, saudável, degradado, indisponível por frescor e
-indisponível por erro explícito, `saude_sem_sincronizacao_persistida`, e a
+indisponível por erro explícito, `saude_sem_sincronizacao_persistida`, a
 tabela `LIMITES_POR_INTEGRACAO` (sanidade: degradado < indisponível para
-todas as 4 integrações mapeadas)."""
+todas as 4 integrações mapeadas), e a preferência de `saude_calendar` pelo
+heartbeat próprio `last_calendar_success_at` sobre o `last_success`
+compartilhado com `sync_gmail_bills_callable` (fallback só durante a
+transição para um doc ainda sem o campo novo)."""
 
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -219,6 +222,40 @@ class TestSaudeCalendar(unittest.TestCase):
             "last_success": (_AGORA - timedelta(seconds=limite_indisponivel + 1)).isoformat(),
         }
         self.assertEqual(saude_calendar(doc, _AGORA).status, IntegrationStatus.UNAVAILABLE)
+
+    def test_prefere_last_calendar_success_at_quando_presente(self):
+        # Campo novo, escrito por run_full_sync logo após o passo Calendar/Tasks
+        # (ver main.py) -- é a referência de frescor preferida.
+        doc = {
+            "status": "completed",
+            "last_calendar_success_at": (_AGORA - timedelta(minutes=10)).isoformat(),
+            "last_success": (_AGORA - timedelta(hours=7)).isoformat(),
+        }
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertEqual(saude.lag_seconds, 600.0)
+
+    def test_refresh_de_last_success_por_boletos_do_gmail_nao_mascara_calendar_parado(self):
+        # Achado real do Codex (comment_id=4131386963): sync_gmail_bills_callable
+        # também grava last_success em system/sync, sem nenhuma sincronização de
+        # Calendar envolvida -- com last_calendar_success_at presente e antigo,
+        # esse refresh alheio não deve mais mascarar um Calendar genuinamente
+        # parado como saudável.
+        doc = {
+            "status": "completed",
+            "last_calendar_success_at": (_AGORA - timedelta(hours=7)).isoformat(),
+            "last_success": (_AGORA - timedelta(minutes=1)).isoformat(),  # refresh de boletos, não de Calendar
+        }
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+
+    def test_doc_legado_sem_last_calendar_success_at_cai_para_last_success(self):
+        # Período de transição entre o deploy desta sub-entrega e a primeira
+        # rodada de sync seguinte -- doc antigo, ainda sem o campo novo.
+        doc = {"status": "completed", "last_success": (_AGORA - timedelta(minutes=10)).isoformat()}
+        saude = saude_calendar(doc, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertEqual(saude.lag_seconds, 600.0)
 
 
 class TestSaudeContacts(unittest.TestCase):
