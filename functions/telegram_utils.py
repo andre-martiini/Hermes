@@ -2458,7 +2458,7 @@ def _build_system_instruction_guarded_v2(
         "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
         "13. EFICIENCIA: quando precisar de varias consultas independentes, solicite todas na mesma rodada de ferramentas. Evite rodadas sequenciais se uma unica rodada paralela resolver. Nunca chame mais de uma ferramenta de escrita/registro no mesmo turno; proponha uma confirmacao por vez.\n"
         "14. WHATSAPP: para enviar ou agendar mensagem de WhatsApp, use schedule_whatsapp_message. A ferramenta deve apenas preparar a proposta; o envio real depende de confirmacao por botao. Para cancelar um envio ja agendado, use cancelar_envio_whatsapp (se faltar o job_id, ache-o com consultar_envio_whatsapp sem job_id) e informe o resultado real: se o envio ja estiver 'sent', diga que a mensagem ja saiu.\n"
-        "15. REGISTROS: so diga que registrou, gravou, anotou ou salvou algo se, NESTE turno, chamou a ferramenta correspondente e o retorno dela indicou sucesso. Peso corporal: use registrar_peso. Se nao houver ferramenta para o que foi pedido, diga que nao consegue registrar por aqui.\n"
+        "15. REGISTROS: so diga que registrou, gravou, anotou ou salvou algo se, NESTE turno, chamou a ferramenta correspondente e o retorno dela indicou sucesso. O retorno das ferramentas de escrita traz `verificacao` com `estado`: so afirme que fez se for 'verificado'; se for 'falhou', diga que nao conseguiu e o motivo. Proposta aguardando confirmacao nao e acao feita. Peso corporal: use registrar_peso. Se nao houver ferramenta para o que foi pedido, diga que nao consegue registrar por aqui.\n"
     )
 
     if not acao_snapshot:
@@ -2881,23 +2881,29 @@ def _run_gemini_turn(
         return tool_name in read_only_parallel_tools
 
     def _execute_tool_call(fc, *, parallel: bool = False):
+        from trava_confirmacao import anotar_chamada, anotar_resultado, verificar_ferramenta
+
         fn = function_map.get(fc.name)
         tool_start_ms = _perf_now_ms()
+        kwargs = dict(fc.args or {})
         if fn is None:
             result_text = f"Ferramenta '{fc.name}' não encontrada."
         else:
             try:
-                kwargs = dict(fc.args or {})
                 result = fn(**kwargs)
                 result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
             except Exception as tool_err:
                 result_text = f"Erro ao executar {fc.name}: {tool_err}"
+        verificacao = verificar_ferramenta(db, fc.name, kwargs, result_text)
+        result_text = anotar_resultado(result_text, verificacao)
         if perf_state is not None:
-            perf_state.setdefault("tool_calls", []).append({
+            chamada = {
                 "name": fc.name,
                 "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
                 "parallel": parallel,
-            })
+            }
+            anotar_chamada(chamada, verificacao)
+            perf_state.setdefault("tool_calls", []).append(chamada)
         return types.Part.from_function_response(
             name=fc.name,
             response={"result": result_text},
