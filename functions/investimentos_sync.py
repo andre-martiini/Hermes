@@ -15,6 +15,8 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
+from firebase_functions import options, scheduler_fn
+
 import subtarefas
 
 
@@ -60,6 +62,13 @@ def sincronizar_decisao_investimentos(db) -> dict:
 
     nova_posicao = decisao.get("nova_posicao")
     posicao_anterior = decisao.get("posicao_anterior")
+
+    # Carteira ja na posicao nova: a troca foi executada e confirmada antes desta
+    # rodada. O servico devolve ordens vazias nesse caso, e criar a acao agora
+    # pediria para fazer de novo o que ja foi feito.
+    if nova_posicao and carteira_info.get("posicao") == nova_posicao:
+        return {"status": "ja_executada", "mes": mes, "posicao": nova_posicao}
+
     titulo = (
         f"Executar rebalanceamento de investimentos: {posicao_anterior} → {nova_posicao} ({mes})"
     )
@@ -113,13 +122,18 @@ def sincronizar_decisao_investimentos(db) -> dict:
         "para registrar a nova posição e atualizar o caixa."
     )
 
+    # Mesma validacao do caminho normal de criacao (hermes_tools.criar_acao_no_sistema):
+    # area fora da lista vira GERAL. "FINANCAS" fixo criava acao numa area inexistente.
+    from hermes_core_logic import carregar_areas_tematicas_validas, normalizar_area_tematica
+    area = normalizar_area_tematica("FINANÇAS", carregar_areas_tematicas_validas(db))
+
     task_id = str(uuid.uuid4())[:20]
     task_doc = {
         "id": task_id,
         "titulo": titulo,
         "descricao": descricao,
         "data_limite": today_str,
-        "area_tematica": "FINANCAS",
+        "area_tematica": area,
         "tipo_acao": "fast",
         "tags": ["investimentos", "decisao-mensal", tag_dedup],
         "notas": decisao.get("justificativa") or "",
@@ -154,3 +168,22 @@ def sincronizar_decisao_investimentos(db) -> dict:
         "mes": mes,
         "ordens": len(plano_etapas),
     }
+
+
+@scheduler_fn.on_schedule(
+    schedule="30 7 1 * *",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=120,
+)
+def sincronizar_investimentos_pos_decisao(event: scheduler_fn.ScheduledEvent = None) -> None:
+    """Rodada do dia 1 depois da decisao mensal.
+
+    A decisao sai as 06h (com novas tentativas ate ~06h45) e o briefing das 05h
+    ainda ve a decisao do mes anterior: sem esta rodada, a acao de uma troca so
+    nasceria no dia seguinte. Idempotente pela tag do mes.
+    """
+    from main import get_db
+
+    resultado = sincronizar_decisao_investimentos(get_db())
+    print(f"[InvestimentosSync] Rodada pos-decisao: {resultado}")

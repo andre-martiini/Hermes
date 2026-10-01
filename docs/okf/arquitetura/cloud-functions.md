@@ -177,6 +177,7 @@ Portais públicos (sem autenticação Firebase) acessados por links externos —
 | Função | Trigger | O que faz |
 |---|---|---|
 | `daily_wip_reset_and_degradation` | Scheduler | Reset diário de status WIP e contagem de degradação |
+| `sincronizar_investimentos_pos_decisao` (`investimentos_sync.py`) | Scheduler (dia 1 de cada mês, 07h30 BRT) | Rodada do sync de investimentos depois da decisão mensal do serviço `decisao-investimentos` (06h, com novas tentativas até ~06h45). Se a decisão vigente trocou de posição, cria a ação com as ordens no plano (área validada como no caminho normal; idempotente pela tag `investimentos-decisao-{mes}`; não cria se a carteira já estiver na posição nova). O briefing das 05h e `consultar_investimentos` também chamam o mesmo sync |
 
 ## `functions/atencao.py` (Fila de Atenção)
 
