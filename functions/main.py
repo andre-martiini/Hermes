@@ -14634,6 +14634,9 @@ from daily_reset_job import daily_wip_reset_and_degradation
 # Import daily morning briefing job
 from daily_morning_briefing import briefing_matinal_acoes
 
+# Rodada do sync de investimentos depois da decisao mensal (dia 1, 07h30)
+from investimentos_sync import sincronizar_investimentos_pos_decisao
+
 # Import morning summary (Resumo Matinal) — coletor prospectivo + regeneração sob demanda
 from morning_summary import gerar_resumo_matinal, gerarResumoMatinal
 
