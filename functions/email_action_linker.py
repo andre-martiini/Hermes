@@ -850,6 +850,76 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, apply_mutati
     return _run(transaction)
 
 
+#: Canais de `queue_and_maybe_send_suggestion` com categoria clara dentre as 8
+#: do envelope único (P05, passo 1 do pacote: "mensagens, agenda, tarefa,
+#: documento, SIPAC, transcrição, finanças e eventos de repositório"). "pagina"
+#: (Monitor de Páginas, main.py) fica de fora deliberadamente: nenhuma das 8
+#: categorias descreve com clareza o que uma página monitorada representa, e
+#: forçar uma (ex. "documento") sem decisão de produto arriscaria um mapeamento
+#: errado que um consumidor futuro (P06/P07) passaria a tratar como fato —
+#: ver pendências em docs/autonomia/execucao.md para a decisão em aberto.
+_CANAL_PARA_CATEGORIA_EVENTO = {
+    "sipac": "SIPAC",
+    "calendar": "AGENDA",
+    "whatsapp": "MENSAGEM",
+}
+
+
+def _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, origem_sinal, agora):
+    """Monta (sem I/O) o `EventEnvelope` de outbox (P05 do plano de autonomia,
+    passo 3 do pacote) para uma sugestão NOVA de `queue_and_maybe_send_suggestion`
+    — SEGUNDO escritor real ligado a `event_outbox.py`/`autonomy/events.py`/
+    `autonomy/outbox.py` (o primeiro foi o digest de WhatsApp,
+    `whatsapp_ingest.py::_montar_evento_outbox_digest`, P05 sub-entrega 6/N).
+    `queue_and_maybe_send_suggestion` é o ponto de entrada COMPARTILHADO de
+    todos os produtores de sinal (SIPAC, Calendar, WhatsApp, Monitor de
+    Páginas — ver docstring do módulo) — ligar o outbox aqui, uma única vez,
+    cobre de um golpe os canais com categoria clara (ver
+    `_CANAL_PARA_CATEGORIA_EVENTO`).
+
+    Devolve `None` para um `canal` sem categoria mapeada — o chamador trata
+    `None` como "não emitir evento", só gravando a sugestão normalmente
+    (exatamente o comportamento de antes desta sub-entrega para esses canais,
+    sem regressão).
+
+    `occurred_at`/`ingested_at` usam `agora` (quando ESTE processo detectou e
+    está gravando a sugestão) — ao contrário do digest de WhatsApp, que usa o
+    timestamp da ÚLTIMA MENSAGEM da janela para sobreviver a reprocessamento
+    (ver `whatsapp_ingest._digest_occurred_at`), este caminho só é alcançado
+    quando `suggestion_id` AINDA NÃO existe no Firestore —
+    `queue_and_maybe_send_suggestion` já verifica isso antes de chamar esta
+    função; uma segunda chamada para o MESMO `suggestion_id` depois que o doc
+    já existe entra pelo ramo de reenvio (`existing_snap.exists`), que nunca
+    volta a montar um evento novo. A janela de corrida check-then-act entre
+    essa verificação e a escrita (duas chamadas concorrentes para o mesmo
+    `suggestion_id` novo) é uma limitação PRÉ-EXISTENTE do próprio
+    `queue_and_maybe_send_suggestion` (já registrada como achado A05/pendência
+    em docs/autonomia/execucao.md, candidata a redesenho maior) — esta
+    sub-entrega não a fecha nem a agrava: na pior hipótese já documentada
+    (duplo toque, corrida web/Telegram), o pior caso novo é uma segunda
+    entrada de outbox para a mesma sugestão, mesma classe de duplicata que já
+    podia acontecer no doc principal.
+
+    `payload_identificador` carrega só `task_id`/`titulo_sinal` — determinístico
+    para a mesma ocorrência, sem nada derivado de IA ou contagem mutável
+    (diferente do `relevancia` do digest de WhatsApp, que por isso foi para
+    `metadata` — ver `_montar_evento_outbox_digest` para o porquê)."""
+    nome_categoria = _CANAL_PARA_CATEGORIA_EVENTO.get(canal)
+    if nome_categoria is None:
+        return None
+    from autonomy.events import CategoriaEvento, montar_evento
+
+    return montar_evento(
+        CategoriaEvento[nome_categoria],
+        "email_action_suggestions",
+        suggestion_id,
+        {"task_id": task["id"], "titulo_sinal": titulo_sinal},
+        occurred_at=agora,
+        ingested_at=agora,
+        metadata={"canal": canal, "origem_sinal": origem_sinal},
+    )
+
+
 def queue_and_maybe_send_suggestion(
     db,
     suggestion_id: str,
@@ -914,7 +984,8 @@ def queue_and_maybe_send_suggestion(
             doc_ref.update({"telegram_sent": True, "sent_at": sent_at})
         return existing_doc
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    agora = datetime.now(timezone.utc)
+    now_iso = agora.isoformat()
     base_doc = {
         "canal": canal,
         "titulo_sinal": titulo_sinal,
@@ -934,7 +1005,18 @@ def queue_and_maybe_send_suggestion(
     if extra:
         base_doc.update(extra)
 
-    doc_ref.set(base_doc)
+    evento_outbox = _montar_evento_outbox_sugestao(suggestion_id, canal, task, titulo_sinal, origem_sinal, agora)
+    if evento_outbox is not None:
+        from event_outbox import registrar_evento_outbox_transacional
+
+        registrar_evento_outbox_transacional(
+            db,
+            evento_outbox,
+            agora=agora,
+            escrever_efeito=lambda transaction: transaction.set(doc_ref, base_doc),
+        )
+    else:
+        doc_ref.set(base_doc)
 
     if chat_id:
         if send_fn is None:
