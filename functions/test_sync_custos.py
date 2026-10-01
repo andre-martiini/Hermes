@@ -368,6 +368,45 @@ class TestRunFullSyncEscopos(unittest.TestCase):
         self.assertIn("Calendar fora", sync_doc["last_calendar_error_message"])
         self.assertIsNotNone(sync_doc["last_calendar_error_at"])
 
+    def test_falha_sem_mensagem_tambem_grava_heartbeat_de_erro(self):
+        # Achado real de revisão adversarial independente: `str(exc)` é '' para
+        # uma exceção levantada sem argumento (`raise RuntimeError()`) -- usar
+        # só a truthiness dessa string faria este caso cair no ramo de SUCESSO
+        # do finally (last_calendar_success_at gravado, erro limpo) no exato
+        # momento em que a exceção está abortando o ciclo inteiro. O sinal
+        # correto vem de um booleano explícito (houve_excecao_no_passo_calendar
+        # em run_full_sync), não da mensagem.
+        db = _Db()
+        with _Patches(db) as m:
+            m["cal"].side_effect = RuntimeError()
+            self.assertFalse(main.run_full_sync("scheduled"))
+        sync_doc = db.store("system")["sync"]
+        self.assertNotIn("last_calendar_success_at", sync_doc)
+        self.assertIsNotNone(sync_doc["last_calendar_error_at"])
+        self.assertEqual(sync_doc["last_calendar_error_message"], "")
+
+    def test_titulo_de_tarefa_com_texto_de_erro_nao_e_falso_positivo(self):
+        # Achado real de revisão adversarial independente: várias linhas de
+        # SUCESSO das 3 funções do passo Calendar/Tasks interpolam o título da
+        # tarefa no FIM da mensagem (ex. "[+] ALOCADA CALENDAR: {title}") -- se
+        # o título contiver literalmente "ERRO CAL:"/"ERRO PUSH:"/"ERRO PULL:",
+        # um `in` sem âncora casaria com a linha inteira e marcaria um ciclo
+        # bem-sucedido como erro. O marcador só conta no INÍCIO da mensagem
+        # (depois do prefixo de timestamp), onde só as 3 linhas de erro
+        # engolido de verdade começam.
+        db = _Db()
+
+        def cal_com_titulo_enganoso(cs, sync_ref, logs, tarefas_docs=None):
+            main.log_to_firestore(sync_ref, logs, "[+] ALOCADA CALENDAR: ERRO CAL: pagar o boleto")
+            return {}
+
+        with _Patches(db) as m:
+            m["cal"].side_effect = cal_com_titulo_enganoso
+            self.assertTrue(main.run_full_sync("scheduled"))
+        sync_doc = db.store("system")["sync"]
+        self.assertIn("last_calendar_success_at", sync_doc)
+        self.assertIsNone(sync_doc.get("last_calendar_error_at"))
+
     def test_heartbeat_do_calendar_avanca_a_cada_passada_bem_sucedida(self):
         # Pedido de escopo completo chega no meio da 1ª passada (só agenda) --
         # a 2ª passada roda Calendar/Tasks de novo e o heartbeat avança junto.

@@ -217,19 +217,36 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     RESOLVIDA abaixo) fechou boa parte desta lacuna sem mudar nenhuma das 3
     funções: `run_full_sync` agora varre as linhas que elas escreveram em
     `logs` durante o passo e trata qualquer "ERRO CAL"/"ERRO PUSH"/"ERRO PULL"
-    encontrada como erro do passo, mesmo quando a função engoliu a exceção e
-    retornou normalmente -- esses casos hoje gravam `last_calendar_error_at`
-    (não mais um falso `last_calendar_success_at`). O que PERMANECE aberto:
-    um erro real que NÃO passe por `log_to_firestore` com uma dessas 3 strings
-    (bug futuro num `except` que loga com texto diferente, ou um retorno
-    silencioso sem log nenhum) continua indetectável por este mecanismo --
-    ainda não é prova formal de que a listagem/gravação de eventos funcionou,
-    só uma rede bem mais ampla do que "nenhuma exceção chegou até
-    `run_full_sync`". `test_falha_no_calendar_nao_grava_heartbeat_proprio`
-    (test_sync_custos.py) cobre o caso de exceção propagada (`GoogleAuthRevokedError`
-    ou qualquer outra, via mock); `test_erro_engolido_do_passo_calendar_grava_heartbeat_de_erro`
-    (test_sync_custos.py) cobre o caso antes invisível, de erro logado mas não
-    propagado.
+    encontrada no INÍCIO de uma linha (depois de remover o prefixo
+    "[HH:MM:SS] " de `log_to_firestore`) como erro do passo, mesmo quando a
+    função engoliu a exceção e retornou normalmente -- esses casos hoje gravam
+    `last_calendar_error_at` (não mais um falso `last_calendar_success_at`).
+    O que PERMANECE aberto, concretamente (achado real da mesma revisão, não
+    hipotético): dois `except` POR ITEM dentro de `sync_google_tasks_push` e
+    `sync_google_calendar` logam com um prefixo DIFERENTE e continuam o loop
+    sem propagar -- `"[CAL][!] Falha ao sincronizar evento da tarefa '{title}':
+    {ce}"` (uma tarefa específica) e `"[CAL][!] Falha ao listar agenda
+    '{calendar_id}': {cal_err}"` (um `calendar_id` específico, quando há mais
+    de um configurado). Nenhum dos dois começa com "ERRO CAL"/"ERRO PUSH"/
+    "ERRO PULL", então uma falha real e persistente em UM item (mas não todos)
+    ainda grava heartbeat de SUCESSO -- mesma limitação de fundo que a
+    LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 já documentava para `calendar_id`,
+    agora também presente para tarefa individual. Mais genericamente: um erro
+    que não comece a mensagem com uma dessas 3 strings (um destes dois
+    `except`, um `except` futuro com texto diferente, ou um retorno silencioso
+    sem log nenhum) continua indetectável por este mecanismo -- ainda não é
+    prova formal de que a listagem/gravação de eventos funcionou, só uma rede
+    bem mais ampla do que "nenhuma exceção chegou até `run_full_sync`".
+    `test_falha_no_calendar_nao_grava_heartbeat_proprio` (test_sync_custos.py)
+    cobre o caso de exceção propagada (`GoogleAuthRevokedError` ou qualquer
+    outra, via mock, inclusive com mensagem vazia);
+    `test_erro_engolido_do_passo_calendar_grava_heartbeat_de_erro`
+    (test_sync_custos.py) cobre o caso antes invisível, de erro logado no
+    INÍCIO da mensagem mas não propagado;
+    `test_titulo_de_tarefa_com_texto_de_erro_nao_e_falso_positivo`
+    (test_sync_custos.py) cobre o falso positivo descartado por exigir o
+    marcador no início (um título de tarefa contendo literalmente "ERRO CAL:"
+    no meio de uma linha de SUCESSO não deve gravar erro).
 
     LIMITAÇÃO RESOLVIDA (sub-entrega seguinte à anterior) -- `error_code`
     deixou de depender do `status`/`error_message` GLOBAIS ao ciclo inteiro de

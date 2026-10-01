@@ -3704,13 +3704,23 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
             # sub-entrega: uma GoogleAuthRevokedError vinda daqui continua abortando o ciclo inteiro
             # (propaga até o `except Exception` geral de run_full_sync, lá embaixo).
             calendar_step_error = None
+            houve_excecao_no_passo_calendar = False
             logs_antes_do_passo_calendar = len(logs)
             try:
                 tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
                 sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
                 sync_google_tasks_pull(ts, sync_ref, logs)
             except Exception as e_passo_calendar:
+                # `str(e_passo_calendar)` pode ser '' para uma exceção levantada sem
+                # mensagem (ex.: `raise AlgumErro()`) -- achado real de revisão
+                # adversarial independente: usar só a truthiness da string (`or`, mais
+                # abaixo) faria essa exceção cair no ramo de SUCESSO do finally,
+                # mascarando um ciclo que está, neste exato momento, abortando por
+                # causa dela. `houve_excecao_no_passo_calendar` é o sinal booleano
+                # explícito; `calendar_step_error` guarda só o texto (possivelmente
+                # vazio, resolvido por `_error_code_de_mensagem` do lado da leitura).
                 calendar_step_error = str(e_passo_calendar)
+                houve_excecao_no_passo_calendar = True
                 raise
             finally:
                 # Heartbeat PRÓPRIO do passo Calendar/Tasks, separado de `last_success`
@@ -3735,18 +3745,32 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
                 # a cada ciclo (erro OU None), um passo alheio e POSTERIOR (ex.: Allcare) que
                 # falhe no mesmo ciclo não marca mais o Calendar como indisponível -- ver
                 # saude_calendar (autonomy/integrations_sync.py) para como o sinal é consumido.
+                #
+                # O marcador só é reconhecido no INÍCIO da mensagem (depois de remover o
+                # prefixo "[HH:MM:SS] " que log_to_firestore sempre acrescenta) -- achado
+                # real de revisão adversarial independente: um `in` sem âncora casaria
+                # também com um log de SUCESSO cujo título de tarefa, interpolado no fim da
+                # mensagem (ex. "[+] ALOCADA CALENDAR: {title}"), contivesse literalmente o
+                # texto "ERRO CAL:" (ex. uma tarefa chamada "ERRO CAL: investigar ontem") --
+                # um falso positivo que marcaria um ciclo bem-sucedido como erro. Nenhuma das
+                # linhas de SUCESSO das 3 funções começa com um desses marcadores (sempre têm
+                # um prefixo próprio antes do título, como "[-] ATUALIZADA: "); só as 3 linhas
+                # de erro engolido (`ERRO CAL:`/`ERRO PUSH:`/`ERRO PULL:`, main.py) começam a
+                # mensagem exatamente com o marcador.
                 novos_logs_calendar = logs[logs_antes_do_passo_calendar:]
                 erro_engolido = next(
                     (
-                        entrada
-                        for entrada in novos_logs_calendar
-                        if "ERRO CAL:" in entrada or "ERRO PUSH:" in entrada or "ERRO PULL:" in entrada
+                        mensagem
+                        for mensagem in (
+                            re.sub(r"^\[\d{2}:\d{2}:\d{2}\] ", "", entrada) for entrada in novos_logs_calendar
+                        )
+                        if mensagem.startswith(("ERRO CAL:", "ERRO PUSH:", "ERRO PULL:"))
                     ),
                     None,
                 )
-                erro_calendar_final = calendar_step_error or erro_engolido
+                erro_calendar_final = calendar_step_error if houve_excecao_no_passo_calendar else erro_engolido
                 try:
-                    if erro_calendar_final:
+                    if houve_excecao_no_passo_calendar or erro_engolido is not None:
                         sync_ref.set(
                             {
                                 'last_calendar_error_at': datetime.now(timezone.utc).isoformat(),
@@ -3764,10 +3788,11 @@ def run_full_sync(trigger_reason='unspecified', scope=SYNC_SCOPE_FULL, forcar_co
                             merge=True,
                         )
                 except Exception as e_cal_heartbeat:
+                    houve_erro_no_ciclo = houve_excecao_no_passo_calendar or erro_engolido is not None
                     log_to_firestore(
                         sync_ref,
                         logs,
-                        f"[CAL][ERRO] Falha ao gravar heartbeat de {'erro' if erro_calendar_final else 'sucesso'} do Calendar/Tasks: {e_cal_heartbeat}",
+                        f"[CAL][ERRO] Falha ao gravar heartbeat de {'erro' if houve_erro_no_ciclo else 'sucesso'} do Calendar/Tasks: {e_cal_heartbeat}",
                         True,
                     )
 
