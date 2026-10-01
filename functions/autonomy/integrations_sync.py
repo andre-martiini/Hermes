@@ -227,16 +227,22 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     sem propagar -- `"[CAL][!] Falha ao sincronizar evento da tarefa '{title}':
     {ce}"` (uma tarefa específica) e `"[CAL][!] Falha ao listar agenda
     '{calendar_id}': {cal_err}"` (um `calendar_id` específico, quando há mais
-    de um configurado). Nenhum dos dois começa com "ERRO CAL"/"ERRO PUSH"/
-    "ERRO PULL", então uma falha real e persistente em UM item (mas não todos)
-    ainda grava heartbeat de SUCESSO -- mesma limitação de fundo que a
-    LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 já documentava para `calendar_id`,
-    agora também presente para tarefa individual. Mais genericamente: um erro
-    que não comece a mensagem com uma dessas 3 strings (um destes dois
-    `except`, um `except` futuro com texto diferente, ou um retorno silencioso
-    sem log nenhum) continua indetectável por este mecanismo -- ainda não é
-    prova formal de que a listagem/gravação de eventos funcionou, só uma rede
-    bem mais ampla do que "nenhuma exceção chegou até `run_full_sync`".
+    de um configurado). RESOLVIDO (P05 sub-entrega 15/N): `run_full_sync`
+    agora reconhece também o prefixo "[CAL][!]" na mesma varredura (além de
+    "ERRO CAL"/"ERRO PUSH"/"ERRO PULL") -- uma falha real e persistente em UM
+    item (calendário OU tarefa, mas não todos) já não grava mais heartbeat de
+    SUCESSO silenciosamente; grava `last_calendar_error_at` como qualquer
+    outro erro engolido do passo, mesma agregação "pior resultado vence" já
+    usada pelo resto deste mecanismo. O que PERMANECE aberto, sem mudança
+    desta sub-entrega (ver LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 abaixo): o
+    sinal continua agregado ao passo Calendar/Tasks INTEIRO, não por
+    `calendar_id`/tarefa individual -- decisão de produto própria, fora de
+    escopo. Mais genericamente: um erro que não comece a mensagem com uma
+    dessas 4 strings (um `except` futuro com texto diferente, ou um retorno
+    silencioso sem log nenhum) continua indetectável por este mecanismo --
+    ainda não é prova formal de que a listagem/gravação de eventos funcionou,
+    só uma rede bem mais ampla do que "nenhuma exceção chegou até
+    `run_full_sync`".
     `test_falha_no_calendar_nao_grava_heartbeat_proprio` (test_sync_custos.py)
     cobre o caso de exceção propagada (`GoogleAuthRevokedError` ou qualquer
     outra, via mock, inclusive com mensagem vazia);
@@ -246,7 +252,11 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     `test_titulo_de_tarefa_com_texto_de_erro_nao_e_falso_positivo`
     (test_sync_custos.py) cobre o falso positivo descartado por exigir o
     marcador no início (um título de tarefa contendo literalmente "ERRO CAL:"
-    no meio de uma linha de SUCESSO não deve gravar erro).
+    no meio de uma linha de SUCESSO não deve gravar erro);
+    `test_erro_por_item_de_tarefa_grava_heartbeat_de_erro`/
+    `test_erro_por_item_de_listar_agenda_grava_heartbeat_de_erro`
+    (test_sync_custos.py, P05 sub-entrega 15/N) cobrem os dois casos antes
+    invisíveis desta sub-entrega.
 
     LIMITAÇÃO RESOLVIDA (sub-entrega seguinte à anterior) -- `error_code`
     deixou de depender do `status`/`error_message` GLOBAIS ao ciclo inteiro de
@@ -274,16 +284,25 @@ def saude_calendar(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
 
     LIMITAÇÃO CONHECIDA, AINDA ABERTA #3 (achado real de revisão automática
     do Codex, comment_id=4125412121, P2, na PR da sub-entrega que introduziu
-    este módulo): o sinal também não é específico de cada `calendar_id` --
+    este módulo): o sinal não é específico de cada `calendar_id` --
     `sync_google_calendar` (`main.py`, por `calendar_id`) captura falhas
     comuns de listagem (qualquer erro exceto credencial revogada) e apenas
-    loga e CONTINUA para o próximo calendário (`continue`, sem propagar),
-    então uma falha persistente ao listar um ou mais calendários (mas não
-    todos) não impede o heartbeat de avançar. Correção de verdade exige um
-    sinal POR `calendar_id`, decisão de produto própria (como agregar vários
-    calendários num único `IntegrationHealth`) -- fora do escopo desta
-    sub-entrega; ver `pendencias` do bloco desta sub-entrega em
-    docs/autonomia/execucao.md."""
+    loga e CONTINUA para o próximo calendário (`continue`, sem propagar).
+    PARCIALMENTE RESOLVIDA (P05 sub-entrega 15/N): essa falha já não fica
+    mais invisível -- desde que `run_full_sync` passou a reconhecer também o
+    prefixo "[CAL][!]" (ver LIMITAÇÃO PARCIALMENTE RESOLVIDA acima), uma
+    falha persistente ao listar um ou mais calendários (ou ao sincronizar
+    uma tarefa específica) já marca `last_calendar_error_at` e, por
+    extensão, o `status` agregado deste `IntegrationHealth` -- deixou de
+    "não impedir o heartbeat de avançar". O que PERMANECE aberto: o sinal
+    continua agregado (pior resultado entre TODOS os calendários/tarefas do
+    ciclo vence, igual ao resto deste mecanismo), não um sinal POR
+    `calendar_id`/tarefa -- correção de verdade nesse sentido mais fino
+    exige decidir como agregar vários calendários num único
+    `IntegrationHealth` com granularidade própria (ex.: expor QUAL
+    `calendar_id` falhou, não só que algum falhou), decisão de produto
+    própria, fora do escopo desta sub-entrega; ver `pendencias` do bloco
+    desta sub-entrega em docs/autonomia/execucao.md."""
     doc = doc or {}
     status = doc.get("status")
     if "last_calendar_error_at" in doc:
