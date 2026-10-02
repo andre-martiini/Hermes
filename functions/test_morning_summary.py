@@ -12,6 +12,7 @@ Uso: functions/venv/Scripts/python.exe functions/test_morning_summary.py
 """
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, '.')
 
@@ -20,6 +21,7 @@ from morning_summary import (
     _rotina_verificavel,
     _calcular_janelas_livres,
     _coletar_acoes,
+    _coletar_respostas_pendentes_seguro,
     _escolher_foco,
     _js_weekday,
     _coletar_estrategia,
@@ -971,6 +973,30 @@ class TestGranularidadeDeSubtarefa(unittest.TestCase):
         foco = _escolher_foco(acoes, _SEM_ESTRATEGIA, HOJE)
         critico = next(f for f in foco if f["regra"] == "degradacao_critica")
         self.assertIn("Adiada automaticamente 7x", critico["motivo"])
+
+
+class TestColetaDeRespostasPendentesSegura(unittest.TestCase):
+    """Achado real de revisão automática do Codex (PR #404, P05 sub-entrega
+    15/N): antes desta função, uma falha de `inbox_pendentes.coletar()`
+    propagava para FORA de `build_morning_summary` inteiro, derrubando todo
+    o resumo (ações, agenda, saúde, ...) por causa de um único índice.
+    `_coletar_respostas_pendentes_seguro` isola essa falha, mesmo padrão já
+    usado por `_coletar_perfil` para o próprio `ai_profile`."""
+
+    @patch("inbox_pendentes.coletar")
+    def test_sucesso_repassa_o_resultado_sem_alteracao(self, mock_coletar):
+        mock_coletar.return_value = {"itens": [{"id": "wa:1"}], "filtrados": {}}
+        resultado = _coletar_respostas_pendentes_seguro(None)
+        self.assertEqual(resultado, {"itens": [{"id": "wa:1"}], "filtrados": {}})
+        self.assertNotIn("erro", resultado)
+
+    @patch("inbox_pendentes.coletar")
+    def test_falha_nao_propaga_e_carrega_o_sinal_de_erro(self, mock_coletar):
+        mock_coletar.side_effect = RuntimeError("firestore fora do ar")
+        resultado = _coletar_respostas_pendentes_seguro(None)
+        self.assertEqual(resultado["itens"], [])
+        self.assertEqual(resultado["filtrados"], {})
+        self.assertEqual(resultado["erro"], "firestore fora do ar")
 
 
 if __name__ == "__main__":

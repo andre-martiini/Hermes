@@ -1141,6 +1141,34 @@ def _coletar_perfil(db) -> dict | None:
         return None
 
 
+def _coletar_respostas_pendentes_seguro(db) -> dict:
+    """Índice materializado pelo mesmo ciclo que recebe mensagens de
+    WhatsApp. A leitura é pequena e não faz RPC ao WhatsApp/Gmail durante a
+    abertura de uma sessão MCP.
+
+    Isolada em try/except (mesmo padrão já usado acima por `_coletar_perfil`
+    para o próprio `ai_profile`) -- achado real de revisão automática do
+    Codex (PR #404, hermes_tools.py::obter_estado_atual sub-entrega 15/N):
+    antes desta função, uma falha em `inbox_pendentes.coletar` propagava
+    para FORA de `build_morning_summary` inteiro, perdendo toda a montagem
+    já feita (ações, agenda, saúde, estratégia, ...) só porque este índice
+    específico falhou -- o chamador (`obter_estado_atual`) nunca chegava
+    nem a rodar seus próprios blocos de resiliência (`fontes_indisponiveis`),
+    caindo direto no `except` mais externo, que descarta tudo e devolve só
+    `{"erro": ...}`. `erro` no retorno (chave nova, ausente no caminho
+    feliz) é o sinal que `obter_estado_atual` usa para marcar
+    `fontes_indisponiveis["respostas_pendentes"]` em vez de reportar
+    silêncio como \"zero pendências\"; `itens`/`filtrados` vazios preservam
+    a MESMA forma de fallback que já existia quando a chave simplesmente
+    não aparecia no dict."""
+    from inbox_pendentes import coletar as coletar_respostas_pendentes
+    try:
+        return coletar_respostas_pendentes(db)
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao coletar respostas pendentes: {exc}")
+        return {"itens": [], "filtrados": {}, "erro": str(exc)}
+
+
 # --------------------------------------------------------------------------- #
 # Regra de foco                                                                #
 # --------------------------------------------------------------------------- #
@@ -1248,11 +1276,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     ontem_data = _coletar_ontem(db, ontem)
     perfil = _coletar_perfil(db)
     foco = _escolher_foco(acoes, estrategia, hoje)
-    # Índice materializado pelo mesmo ciclo que recebe mensagens de WhatsApp.
-    # A leitura é pequena e não faz RPC ao WhatsApp/Gmail durante a abertura de
-    # uma sessão MCP.
-    from inbox_pendentes import coletar as coletar_respostas_pendentes
-    respostas_pendentes = coletar_respostas_pendentes(db)
+    respostas_pendentes = _coletar_respostas_pendentes_seguro(db)
 
     dia_semana = _DIAS_SEMANA[datetime.strptime(hoje, "%Y-%m-%d").weekday()]
     pendencias = sum(f.get("total", 0) for f in filas.values() if isinstance(f, dict))

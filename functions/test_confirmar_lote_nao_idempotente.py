@@ -175,11 +175,16 @@ class TestConfirmarReagendamentoEmLoteNaoIdempotente(unittest.TestCase):
         import inspect
         import main
 
+        from datetime import date, timedelta
+
         fn = inspect.unwrap(main.confirmarReagendamentoEmLote)
+        # Data sempre futura: a callable troca data passada por hoje, e uma data
+        # fixa fez este teste quebrar sozinho na virada para 02/10/2026.
+        futura = (date.today() + timedelta(days=30)).isoformat()
 
         db = _FakeDB()
         with patch("main.get_db", return_value=db):
-            items = [{"task_id": "t1", "nova_data_limite": "2026-10-01"}]
+            items = [{"task_id": "t1", "nova_data_limite": futura}]
             req = _fake_request({"items": items, "justificativa": "teste"})
 
             fn(req)
@@ -187,8 +192,8 @@ class TestConfirmarReagendamentoEmLoteNaoIdempotente(unittest.TestCase):
             fn(req)  # MESMA chamada, de novo
             batch2 = db.last_batch
 
-        self.assertEqual(batch1.updates[0][1]["data_limite"], "2026-10-01")
-        self.assertEqual(batch2.updates[0][1]["data_limite"], "2026-10-01")
+        self.assertEqual(batch1.updates[0][1]["data_limite"], futura)
+        self.assertEqual(batch2.updates[0][1]["data_limite"], futura)
 
         nota1 = batch1.updates[0][1]["acompanhamento"]
         nota2 = batch2.updates[0][1]["acompanhamento"]

@@ -1,0 +1,35 @@
+{
+  "name": "registrar_observacao_externa",
+  "description": "Registra um fato relatado por OUTRO conector do cliente Claude (ex.: um conector de e-mail, calendário ou documento que não é do Hermes), com fonte, horário e nível de verificação declarados por quem chama. Grava numa coleção isolada e relê o documento para confirmar. NÃO cria nem altera preferência, memória global, política ou autorização — para isso use salvar_memoria_global ou as tools de política. Use só para preservar um fato com proveniência que, de outra forma, se perderia.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "fonte": {
+        "type": "string",
+        "description": "De onde veio o fato (nome do conector/sistema que relatou, não \"Hermes\"). Ex.: \"Google Drive\", \"conector de e-mail do cliente\". Obrigatório"
+      },
+      "assunto": {
+        "type": "string",
+        "description": "O que a observação diz, em texto livre. Obrigatório"
+      },
+      "horario": {
+        "type": "string",
+        "description": "Quando o fato ocorreu ou foi observado (texto livre, ex. data/hora ISO). Distinto do momento em que esta tool é chamada. Obrigatório"
+      },
+      "id_ou_url": {
+        "type": "string",
+        "description": "Identificador ou URL do artefato de origem, se houver (opcional)"
+      },
+      "artefato_hash": {
+        "type": "string",
+        "description": "Hash do conteúdo do artefato de origem, se houver (opcional)"
+      },
+      "nivel_verificacao": {
+        "type": "string",
+        "enum": ["nao_verificado", "verificado_pelo_cliente"],
+        "description": "`nao_verificado` (padrão): o cliente só relatou, sem conferência própria. `verificado_pelo_cliente`: o cliente afirma ter conferido o fato contra uma fonte confiável antes de relatar — o Hermes continua sem verificação própria, isto só registra uma alegação mais forte de quem relatou"
+      }
+    },
+    "required": ["fonte", "assunto", "horario"]
+  }
+}
