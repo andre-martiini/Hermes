@@ -165,6 +165,15 @@ class TestSalvarMemoriaGlobalPorCanal(unittest.TestCase):
         doc = self._chamar("web", usuario_afirmou_diretamente=False)
         self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
 
+    def test_canal_web_com_string_falsy_nao_vira_declaracao_humana(self):
+        """Achado da 2a rodada de revisão adversarial sobre o fix do Codex:
+        `bool("false")` é `True` em Python -- um cliente cru que mandasse a
+        STRING "false" em vez do booleano JSON `false` não pode ser promovido
+        por engano a DECLARACAO_HUMANA. Nada no dispatch MCP hoje valida o
+        tipo do argumento contra o schema antes de chegar aqui."""
+        doc = self._chamar("web", usuario_afirmou_diretamente="false")
+        self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
+
     def test_canal_desconhecido_tambem_grava_inferencia_agente(self):
         """Um canal futuro, não auditado, nunca deve herdar silenciosamente a
         afirmação mais forte (DECLARACAO_HUMANA) -- ver docstring de
