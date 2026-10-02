@@ -159,9 +159,23 @@ def registrar(ctx, args: dict) -> dict:
         # antes de afirmar "nada foi gravado".
         try:
             snap_apos_falha = ref.get()
-        except Exception:
-            snap_apos_falha = None
-        if snap_apos_falha is not None and snap_apos_falha.exists:
+        except Exception as exc_get_verificacao:
+            # A releitura de verificação TAMBÉM falhou -- isto é diferente de
+            # "confirmei que o documento não existe". Não afirmar nenhum dos
+            # dois lados (nem aplicado=True, nem aplicado=False): o chamador
+            # precisa checar antes de repetir, já que a tool não é idempotente.
+            return {
+                "erro": (
+                    f"falha ao gravar ({exc_set}) e a releitura de verificação "
+                    f"também falhou ({exc_get_verificacao}) -- não dá para "
+                    "confirmar se a observação foi gravada ou não. NÃO repita a "
+                    "mesma chamada sem checar antes: o documento pode já existir "
+                    f"em {COL_OBSERVACOES}/{ref.id}."
+                ),
+                "resultado": "desconhecido",
+                "observacao_id": ref.id,
+            }
+        if snap_apos_falha.exists:
             relido_apos_falha = snap_apos_falha.to_dict() or {}
             return {
                 "status": "completed",
@@ -176,8 +190,8 @@ def registrar(ctx, args: dict) -> dict:
             }
         return {
             "erro": (
-                f"falha ao gravar ({exc_set}); a releitura pela mesma referência "
-                "também não encontra o documento -- nada parece ter sido gravado."
+                f"falha ao gravar ({exc_set}); a releitura confirma que o "
+                "documento NÃO existe -- nada foi gravado."
             ),
             "aplicado": False,
         }

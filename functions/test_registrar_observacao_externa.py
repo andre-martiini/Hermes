@@ -209,9 +209,23 @@ class TestFalhaAoGravar(unittest.TestCase):
         with mock.patch.object(_Doc, "set", side_effect=RuntimeError("conexao recusada")):
             r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
         self.assertFalse(r["aplicado"])
-        self.assertIn("nada parece ter sido gravado", r["erro"])
+        self.assertIn("nada foi gravado", r["erro"])
         self.assertEqual(ctx.db.cols[roe.COL_OBSERVACOES].dados, {},
                           "nao deveria ter persistido nenhum documento")
+
+    def test_excecao_ao_gravar_e_na_verificacao_fica_desconhecido_nao_recusado(self):
+        """Achado da 3a rodada de revisao adversarial interna: quando a
+        releitura de verificacao DENTRO do except TAMBEM falha, isso nao e
+        o mesmo que confirmar que o documento nao existe -- o codigo nao
+        pode afirmar nenhum dos dois lados."""
+        ctx = _Ctx()
+        with mock.patch.object(_Doc, "set", side_effect=RuntimeError("timeout no set")):
+            with mock.patch.object(_Doc, "get", side_effect=RuntimeError("timeout no get")):
+                r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
+        self.assertEqual(r.get("resultado"), "desconhecido")
+        self.assertNotIn("aplicado", r)
+        self.assertIn("observacao_id", r)
+        self.assertIn("NÃO repita", r["erro"])
 
 
 class TestFalhaNaReleitura(unittest.TestCase):
