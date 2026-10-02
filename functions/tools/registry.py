@@ -85,6 +85,7 @@ _CATALOG: dict[str, str] = {
     "consultar_saude": "Consulta dados de saude: peso, cintura, caminhada, calorias, qualidade do sono e dor",
     "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono",
     "consultar_saude_integracoes": "Reporta a saude (healthy/degraded/unavailable/unknown) de cada integracao: calendar, contacts, gmail, whatsapp, sipac, financas, repositorio",
+    "registrar_observacao_externa": "Registra um fato relatado por OUTRO conector do cliente (nao o Hermes), com fonte, horario e nivel de verificacao; nao cria nem altera preferencia, memoria ou autorizacao",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
     "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
     "consultar_atividades_mes": "O que as acoes registraram em cada dia de um mes (diario e conclusoes), com dias uteis sem atividade e feriados nacionais; base da execucao do PGD",
@@ -204,6 +205,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "preparar_atualizacao_contato",
     # Gravam direto, sem card de confirmacao intermediario.
     "registrar_no_diario",
+    "registrar_observacao_externa",
     "criar_objetivo_estrategico",
     "editar_objetivo_estrategico",
     "gerenciar_item_estrategico",
