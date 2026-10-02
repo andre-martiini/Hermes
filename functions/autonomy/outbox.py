@@ -69,7 +69,7 @@ entrada já identificada como presa, dado um relógio.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 from .events import EventEnvelope
@@ -80,6 +80,7 @@ from .requests import (
     _exigir_tz_aware,
     calcular_backoff_segundos,
     lease_expirada,
+    lease_valida_para_acao,
     nova_lease,
 )
 
@@ -121,6 +122,38 @@ class EstadoOutboxTerminal(Exception):
             f"entrada de outbox '{entry_id}' já está em estado terminal "
             f"'{estado_atual.value}' -- não pode transicionar de novo."
         )
+
+
+class LeaseInvalidaOutbox(Exception):
+    """Fencing falhou -- achado real de revisão automática do Codex (P1) na
+    PR desta sub-entrega: `registrar_sucesso`/`registrar_falha`, quando
+    chamadas sobre uma entrada `EM_PROCESSAMENTO`, não validavam que quem
+    chama ainda é o detentor da lease ATUAL antes de produzir uma transição
+    -- um executor A que perdeu a lease (sweep já reatribuiu a entrada a um
+    executor B, geração 2) podia reportar sucesso/falha usando sua própria
+    geração antiga (1), sobrescrevendo o progresso de B. Mesmo papel de
+    `autonomy.execution.LeaseInvalida` -- motivo é o texto devolvido por
+    `autonomy.requests.lease_valida_para_acao`, já pensado para ser
+    apresentável (não vaza detalhe interno, só "lease expirada", "geração
+    não confere" etc.). Só se aplica ao caminho `EM_PROCESSAMENTO` (que usa
+    lease) -- o caminho `PENDENTE` direto (dispatcher simples, sem
+    `iniciar_despacho`) nunca levanta esta exceção, porque nenhuma lease
+    está em jogo nele (ver docstring de `registrar_sucesso`)."""
+
+    def __init__(self, motivo: str) -> None:
+        self.motivo = motivo
+        super().__init__(f"lease inválida: {motivo}")
+
+
+def _validar_fencing_outbox(
+    entrada: OutboxEntry,
+    lease_token: str | None,
+    generation: int | None,
+    agora: datetime,
+) -> None:
+    ok, motivo = lease_valida_para_acao(entrada.lease, lease_token, generation, agora=agora)
+    if not ok:
+        raise LeaseInvalidaOutbox(motivo)
 
 
 @dataclass(frozen=True)
@@ -232,7 +265,13 @@ def pronta_para_despachar(entrada: OutboxEntry, agora: datetime) -> bool:
     return entrada.estado == EstadoOutbox.PENDENTE and agora >= entrada.disponivel_em
 
 
-def registrar_sucesso(entrada: OutboxEntry, agora: datetime) -> OutboxEntry:
+def registrar_sucesso(
+    entrada: OutboxEntry,
+    agora: datetime,
+    *,
+    lease_token: str | None = None,
+    generation: int | None = None,
+) -> OutboxEntry:
     """Despacho confirmado -- transiciona para `ENVIADO` (terminal).
     `disponivel_em` congela no valor anterior (não há mais próxima
     tentativa a agendar). Aceita a entrada tanto em `PENDENTE` quanto em
@@ -241,10 +280,28 @@ def registrar_sucesso(entrada: OutboxEntry, agora: datetime) -> OutboxEntry:
     nenhuma lease envolvida (ver docstring de `EstadoOutbox.EM_PROCESSAMENTO`).
     `entrada.lease`, se presente, é preservada sem alteração (ver docstring
     de `OutboxEntry.lease` -- não há mais próxima reivindicação a fencing
-    depois de um estado terminal)."""
+    depois de um estado terminal).
+
+    Fencing (achado real de revisão automática do Codex, P1, nesta mesma
+    PR): quando `entrada.estado == EM_PROCESSAMENTO`, `lease_token`/
+    `generation` são OBRIGATÓRIOS e precisam bater com `entrada.lease`
+    (validado via `autonomy.requests.lease_valida_para_acao`) -- levanta
+    `LeaseInvalidaOutbox` caso contrário. Protege contra um executor que
+    perdeu a lease (reatribuída a outro pelo sweep, geração mais nova)
+    ainda assim conseguir reportar sucesso usando sua própria geração
+    antiga -- mesmo padrão de `autonomy.execution._validar_fencing`, usado
+    pela wiring real (futura) que deve SEMPRE reler a entrada atual do
+    Firestore antes de chamar esta função, passando como `entrada` essa
+    leitura fresca e como `lease_token`/`generation` a credencial que o
+    PRÓPRIO executor ainda guarda de quando iniciou o despacho -- a
+    validação então compara as duas. O caminho `PENDENTE` direto (ver
+    acima) NÃO exige nem valida `lease_token`/`generation` -- nenhuma lease
+    está em jogo nele, mesma razão de não exigir em `iniciar_despacho`."""
     if entrada.estado in _ESTADOS_TERMINAIS:
         raise EstadoOutboxTerminal(entrada.entry_id, entrada.estado)
     _exigir_tz_aware(agora, "agora")
+    if entrada.estado == EstadoOutbox.EM_PROCESSAMENTO:
+        _validar_fencing_outbox(entrada, lease_token, generation, agora)
     return replace(
         entrada,
         estado=EstadoOutbox.ENVIADO,
@@ -258,6 +315,9 @@ def registrar_falha(
     erro: str,
     max_tentativas: int = DEFAULT_MAX_TENTATIVAS,
     rng: object | None = None,
+    *,
+    lease_token: str | None = None,
+    generation: int | None = None,
 ) -> OutboxEntry:
     """Tentativa de despacho falhou. Incrementa `tentativas`; se o total
     ULTRAPASSAR `max_tentativas`, transiciona para `FALHA_FINAL` (terminal --
@@ -293,10 +353,18 @@ def registrar_falha(
     se presente, é preservada sem alteração mesmo que o resultado seja
     `PENDENTE` de novo (ver docstring de `OutboxEntry.lease`): a próxima
     chamada a `iniciar_despacho()` lê `lease.generation` dali para emitir a
-    geração seguinte."""
+    geração seguinte.
+
+    Fencing: mesma exigência de `registrar_sucesso` (ver sua docstring) --
+    quando `entrada.estado == EM_PROCESSAMENTO`, `lease_token`/`generation`
+    são obrigatórios e validados contra `entrada.lease`; levanta
+    `LeaseInvalidaOutbox` caso não batam. O caminho `PENDENTE` direto não
+    exige nem valida nenhum dos dois."""
     if entrada.estado in _ESTADOS_TERMINAIS:
         raise EstadoOutboxTerminal(entrada.entry_id, entrada.estado)
     _exigir_tz_aware(agora, "agora")
+    if entrada.estado == EstadoOutbox.EM_PROCESSAMENTO:
+        _validar_fencing_outbox(entrada, lease_token, generation, agora)
     if max_tentativas < 1:
         raise ValueError("max_tentativas deve ser >= 1.")
 
@@ -310,12 +378,21 @@ def registrar_falha(
             ultimo_erro=erro,
         )
 
+    # Normaliza para UTC ANTES de somar o backoff (achado real de revisão
+    # automática do Codex, P2, nesta mesma PR -- mesmo raciocínio já
+    # aplicado em `autonomy.requests.nova_lease`, PR #326: `datetime +
+    # timedelta` num fuso com DST faz aritmética de "relógio de parede", não
+    # de tempo decorrido -- perto de uma transição de DST, um backoff de 5
+    # minutos podia efetivamente ficar bem maior ou menor que o pretendido.
+    # UTC não observa DST, então a soma é sempre aritmética de tempo
+    # decorrido de verdade, qualquer que seja o fuso de `agora` recebido.
+    agora_utc = agora.astimezone(timezone.utc)
     backoff_segundos = calcular_backoff_segundos(novas_tentativas, rng=rng)
     return replace(
         entrada,
         estado=EstadoOutbox.PENDENTE,
         tentativas=novas_tentativas,
-        disponivel_em=agora + timedelta(seconds=backoff_segundos),
+        disponivel_em=agora_utc + timedelta(seconds=backoff_segundos),
         ultima_tentativa_em=agora,
         ultimo_erro=erro,
     )
@@ -511,12 +588,16 @@ def varrer_lease_vencida_outbox(
         )
         return ResultadoSweepOutbox(entrada=entrada_nova, diagnostico=diagnostico)
 
+    # Normaliza para UTC antes de somar o backoff -- mesmo achado/correção
+    # de `registrar_falha` nesta mesma PR (Codex, P2); ver o comentário lá
+    # para o raciocínio completo sobre aritmética de DST.
+    agora_utc = agora.astimezone(timezone.utc)
     backoff_segundos = calcular_backoff_segundos(tentativas_novas, rng=rng)
     entrada_nova = replace(
         entrada,
         estado=EstadoOutbox.PENDENTE,
         tentativas=tentativas_novas,
-        disponivel_em=agora + timedelta(seconds=backoff_segundos),
+        disponivel_em=agora_utc + timedelta(seconds=backoff_segundos),
         ultima_tentativa_em=agora,
         ultimo_erro=(
             f"lease vencida em 'em_processamento' ({tentativas_novas}a tentativa) -- "

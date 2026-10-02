@@ -21,6 +21,7 @@ from autonomy.outbox import (
     DiagnosticoOutbox,
     EstadoOutbox,
     EstadoOutboxTerminal,
+    LeaseInvalidaOutbox,
     OutboxEntry,
     ResultadoSweepOutbox,
     criar_entrada,
@@ -422,7 +423,14 @@ class TestIniciarDespacho(unittest.TestCase):
         # "válida" (expires_at no futuro).
         entrada = criar_entrada(_evento(), _AGORA)
         em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
-        falhou = registrar_falha(em_processamento, _AGORA, "timeout", rng=_RngFixo(0.0))
+        falhou = registrar_falha(
+            em_processamento,
+            _AGORA,
+            "timeout",
+            rng=_RngFixo(0.0),
+            lease_token=em_processamento.lease.lease_token,
+            generation=em_processamento.lease.generation,
+        )
         self.assertEqual(falhou.estado, EstadoOutbox.PENDENTE)
         # A lease antiga ainda não expirou (duração padrão >> backoff do
         # 1o patamar) -- prova que o cenário do achado é real.
@@ -533,27 +541,119 @@ class TestVarrerLeaseVencidaOutbox(unittest.TestCase):
 class TestRegistrarSucessoFalhaAPartirDeEmProcessamento(unittest.TestCase):
     """`registrar_sucesso`/`registrar_falha` continuam aceitando a entrada
     tanto a partir de PENDENTE (dispatcher simples, comportamento já coberto
-    acima) quanto a partir de EM_PROCESSAMENTO (dispatcher que usou
-    `iniciar_despacho`) -- nenhuma das duas funções foi alterada por esta
-    sub-entrega, mas o caminho EM_PROCESSAMENTO nunca tinha sido exercido
-    nos testes antes de `iniciar_despacho` existir."""
+    acima, sem nenhuma credencial) quanto a partir de EM_PROCESSAMENTO
+    (dispatcher que usou `iniciar_despacho`, agora EXIGINDO `lease_token`/
+    `generation` corretos -- achado real de revisão automática do Codex,
+    P1, nesta mesma PR: ver `LeaseInvalidaOutbox`)."""
 
-    def test_registrar_sucesso_a_partir_de_em_processamento(self):
+    def test_registrar_sucesso_a_partir_de_em_processamento_com_credencial_correta(self):
         entrada = criar_entrada(_evento(), _AGORA)
         em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
-        enviada = registrar_sucesso(em_processamento, _AGORA + timedelta(seconds=1))
+        enviada = registrar_sucesso(
+            em_processamento,
+            _AGORA + timedelta(seconds=1),
+            lease_token=em_processamento.lease.lease_token,
+            generation=em_processamento.lease.generation,
+        )
         self.assertEqual(enviada.estado, EstadoOutbox.ENVIADO)
         # Lease preservada mesmo em estado terminal (histórico, sem uso
         # futuro -- ver docstring de OutboxEntry.lease).
         self.assertIsNotNone(enviada.lease)
 
-    def test_registrar_falha_a_partir_de_em_processamento(self):
+    def test_registrar_falha_a_partir_de_em_processamento_com_credencial_correta(self):
         entrada = criar_entrada(_evento(), _AGORA)
         em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
-        depois = registrar_falha(em_processamento, _AGORA + timedelta(seconds=1), "erro-x", rng=_RngFixo(0.0))
+        depois = registrar_falha(
+            em_processamento,
+            _AGORA + timedelta(seconds=1),
+            "erro-x",
+            rng=_RngFixo(0.0),
+            lease_token=em_processamento.lease.lease_token,
+            generation=em_processamento.lease.generation,
+        )
         self.assertEqual(depois.estado, EstadoOutbox.PENDENTE)
         self.assertEqual(depois.tentativas, 1)
         self.assertIsNotNone(depois.lease)
+
+    def test_registrar_sucesso_sem_credencial_e_erro(self):
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        with self.assertRaises(LeaseInvalidaOutbox):
+            registrar_sucesso(em_processamento, _AGORA + timedelta(seconds=1))
+
+    def test_registrar_falha_sem_credencial_e_erro(self):
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        with self.assertRaises(LeaseInvalidaOutbox):
+            registrar_falha(em_processamento, _AGORA + timedelta(seconds=1), "erro-x")
+
+    def test_registrar_sucesso_com_token_errado_e_erro(self):
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        with self.assertRaises(LeaseInvalidaOutbox):
+            registrar_sucesso(
+                em_processamento,
+                _AGORA + timedelta(seconds=1),
+                lease_token="token-errado",
+                generation=em_processamento.lease.generation,
+            )
+
+    def test_registrar_sucesso_com_geracao_errada_e_erro(self):
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        with self.assertRaises(LeaseInvalidaOutbox):
+            registrar_sucesso(
+                em_processamento,
+                _AGORA + timedelta(seconds=1),
+                lease_token=em_processamento.lease.lease_token,
+                generation=99,
+            )
+
+    def test_executor_zumbi_com_geracao_antiga_nao_consegue_concluir_apos_reatribuicao(self):
+        # Cenario do achado do Codex: executor A perde a lease (sweep
+        # reatribui a entrada ao executor B, geracao 2); A, atrasado, tenta
+        # reportar sucesso com sua propria geracao antiga (1) -- deve ser
+        # recusado, mesmo que A ainda tenha uma copia da entrada em memoria.
+        entrada = criar_entrada(_evento(), _AGORA)
+        presa_do_executor_a = iniciar_despacho(entrada, "executor-a", _AGORA)
+        venceu = _AGORA + timedelta(seconds=DEFAULT_LEASE_SEGUNDOS + 1)
+        sweep = varrer_lease_vencida_outbox(presa_do_executor_a, venceu, rng=_RngFixo(0.0))
+        entrada_reatribuivel = sweep.entrada
+        assumida_pelo_executor_b = iniciar_despacho(
+            entrada_reatribuivel, "executor-b", entrada_reatribuivel.disponivel_em
+        )
+        self.assertEqual(assumida_pelo_executor_b.lease.generation, 2)
+
+        # executor A, zumbi, ainda tenta concluir com a geracao 1 antiga --
+        # mesmo apresentando o token certo da SUA propria lease (que ja nao
+        # e mais a atual), a geracao nao bate com a entrada atual (gen 2).
+        with self.assertRaises(LeaseInvalidaOutbox):
+            registrar_sucesso(
+                assumida_pelo_executor_b,
+                entrada_reatribuivel.disponivel_em,
+                lease_token=presa_do_executor_a.lease.lease_token,
+                generation=presa_do_executor_a.lease.generation,
+            )
+
+    def test_estado_pendente_nao_exige_nem_valida_credencial(self):
+        # Caminho do dispatcher simples (sem iniciar_despacho) -- nenhuma
+        # lease em jogo, nenhuma credencial exigida, mesmo com uma lease
+        # ANTIGA presa na entrada (preservada por registrar_falha).
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        pendente_com_lease_antiga = registrar_falha(
+            em_processamento,
+            _AGORA,
+            "e1",
+            rng=_RngFixo(0.0),
+            lease_token=em_processamento.lease.lease_token,
+            generation=em_processamento.lease.generation,
+        )
+        self.assertEqual(pendente_com_lease_antiga.estado, EstadoOutbox.PENDENTE)
+        self.assertIsNotNone(pendente_com_lease_antiga.lease)
+        # Sem passar lease_token/generation nenhum -- nao deveria levantar.
+        enviada = registrar_sucesso(pendente_com_lease_antiga, pendente_com_lease_antiga.disponivel_em)
+        self.assertEqual(enviada.estado, EstadoOutbox.ENVIADO)
 
 
 if __name__ == "__main__":
