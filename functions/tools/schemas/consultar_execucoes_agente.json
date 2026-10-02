@@ -1,6 +1,6 @@
 {
   "name": "consultar_execucoes_agente",
-  "description": "Consulta o histórico de execuções recentes de rotinas agendadas do agente registradas em agent_runs.",
+  "description": "Consulta o que o Gaspar e o agente fizeram (agent_runs): rotinas agendadas, escritas e tarefas externas, mais recentes primeiro. Responde 'o que você fez ontem?' com desde.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -11,6 +11,34 @@
       "limite": {
         "type": "integer",
         "description": "Número máximo de registros a retornar (padrão: 20, máx: 50)."
+      },
+      "desde": {
+        "type": "string",
+        "description": "Só execuções a partir desta data/hora ISO (ex.: '2026-10-01T19:00:00-03:00')."
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sucesso",
+          "erro",
+          "parcial"
+        ],
+        "description": "Filtrar pelo desfecho."
+      },
+      "origem": {
+        "type": "string",
+        "enum": [
+          "agendada",
+          "telegram",
+          "mcp",
+          "autonoma",
+          "manual"
+        ],
+        "description": "Filtrar pela origem da execução."
+      },
+      "aguarda_usuario": {
+        "type": "boolean",
+        "description": "true: só o que está esperando decisão do usuário."
       }
     },
     "required": []

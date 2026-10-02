@@ -2469,31 +2469,42 @@ def concluir_pedido_agente(ctx: ToolContext, args: dict):
 def registrar_execucao_agente(ctx: ToolContext, args: dict):
     from agent_runs import registrar
 
-    rotina = args.get("rotina")
-    resumo = args.get("resumo")
-    contadores = args.get("contadores")
-    status = args.get("status")
-    erro = args.get("erro")
-    iniciado_em = args.get("iniciado_em")
-    finalizado_em = args.get("finalizado_em")
     return registrar(
         ctx.db,
-        rotina=rotina,
-        resumo=resumo,
-        contadores=contadores,
-        status=status or "sucesso",
-        erro=erro,
-        iniciado_em=iniciado_em,
-        finalizado_em=finalizado_em,
+        run_id=args.get("run_id"),
+        rotina=args.get("rotina"),
+        resumo=args.get("resumo"),
+        contadores=args.get("contadores"),
+        status=args.get("status") or "sucesso",
+        erro=args.get("erro"),
+        iniciado_em=args.get("iniciado_em"),
+        finalizado_em=args.get("finalizado_em"),
+        origem=args.get("origem") or "mcp",
+        estado_verificado=args.get("estado_verificado"),
+        acoes_afetadas=args.get("acoes_afetadas"),
+        aguarda_usuario=args.get("aguarda_usuario"),
+        motivo_espera=args.get("motivo_espera"),
+        reversivel=args.get("reversivel"),
+        como_desfazer=args.get("como_desfazer"),
+        evidencias=args.get("evidencias"),
     )
 
 
 def consultar_execucoes_agente(ctx: ToolContext, args: dict):
+    """A resposta tem outputSchema publicado: erro de argumento sobe como exceção
+    (o servidor devolve isError sem structuredContent), nunca como {"erro": ...}."""
     from agent_runs import listar_recentes
 
-    rotina = args.get("rotina")
-    limite = int(args.get("limite") or 20)
-    return listar_recentes(ctx.db, rotina=rotina, limite=limite)
+    aguarda = args.get("aguarda_usuario")
+    return listar_recentes(
+        ctx.db,
+        rotina=args.get("rotina"),
+        limite=int(args.get("limite") or 20),
+        desde=args.get("desde"),
+        status=args.get("status"),
+        origem=args.get("origem"),
+        aguarda_usuario=None if aguarda is None else bool(aguarda),
+    )
 
 
 def _preparar_contato_prioritario_secretario(ctx: ToolContext, args: dict):

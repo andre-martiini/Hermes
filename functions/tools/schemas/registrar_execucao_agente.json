@@ -1,6 +1,6 @@
 {
   "name": "registrar_execucao_agente",
-  "description": "Registra uma execução de rotina agendada do agente na coleção agent_runs para observabilidade e métricas de proatividade.",
+  "description": "Registra uma execução do agente (rotina agendada, tarefa externa do Claude, ação autônoma) na coleção agent_runs, que alimenta o briefing das 05:00 e a consulta 'o que você fez'. O resumo é UMA linha com contagens e IDs, nunca o texto de mensagens, e-mails ou documentos.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -36,6 +36,60 @@
       "finalizado_em": {
         "type": "string",
         "description": "Carimbo ISO do término da execução (opcional)."
+      },
+      "run_id": {
+        "type": "string",
+        "description": "ID determinístico da execução (ex.: 'pgd_execucao:2026-09'). Repetir com o mesmo run_id substitui o registro em vez de duplicar."
+      },
+      "origem": {
+        "type": "string",
+        "enum": [
+          "agendada",
+          "telegram",
+          "mcp",
+          "autonoma",
+          "manual"
+        ],
+        "description": "De onde veio a execução. Padrão: 'mcp'. Tarefas agendadas do Claude usam 'agendada'."
+      },
+      "estado_verificado": {
+        "type": "string",
+        "enum": [
+          "verificado",
+          "falhou",
+          "pendente"
+        ],
+        "description": "Resultado conferido do que foi gravado ou entregue (mesmo contrato da confirmação verificada)."
+      },
+      "acoes_afetadas": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "IDs das ações do Gaspar tocadas pela execução."
+      },
+      "aguarda_usuario": {
+        "type": "boolean",
+        "description": "Verdadeiro quando a execução deixou uma decisão ou aprovação pendente com o usuário (aparece em 'O que espera você' no briefing)."
+      },
+      "motivo_espera": {
+        "type": "string",
+        "description": "O que o usuário precisa decidir ou aprovar (uma linha)."
+      },
+      "reversivel": {
+        "type": "boolean",
+        "description": "Verdadeiro quando o que foi feito ainda pode ser desfeito (exige como_desfazer)."
+      },
+      "como_desfazer": {
+        "type": "string",
+        "description": "Como desfazer, em uma linha (ex.: 'cancelar_envio_whatsapp(job_id) enquanto pending')."
+      },
+      "evidencias": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Referências de evidência: links do Drive, IDs de documento."
       }
     },
     "required": [
