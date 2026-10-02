@@ -86,6 +86,7 @@ const COLECOES_DE_CONTROLE = [
   'promocoes_autonomia_sugeridas',
   'telegram_sessions',
   'whitelist',
+  'trava_confirmacao',
 ];
 
 let testEnv: RulesTestEnvironment;

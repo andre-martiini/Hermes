@@ -63,6 +63,7 @@ from tools import registry
 from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
 from tools.tool_context import ToolContext, principal_de
 from copilot_context import build_mcp_voice_context
+from trava_confirmacao import verificar_e_anotar_mcp as _trava_mcp
 from autonomy import policy as autonomy_policy
 from autonomy.contracts import (
     Decisao,
@@ -872,6 +873,7 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esp
     ctx.mcp_confirmed_arguments = argumentos
     try:
         result = execute_tool(nome, argumentos, ctx)
+        result = _trava_mcp(ctx, nome, argumentos, result)
     except Exception as exc:  # não deixar uma confirmação reivindicada sem resultado
         result = {"erro": f"Falha ao executar a confirmação: {exc}"}
         # Achado da revisão adversarial desta sub-entrega (fatia `envelope`):
@@ -1301,6 +1303,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     estruturado = None  # ver comentario de `outputSchema`/`structuredContent` abaixo
     try:
         result = execute_tool(name, arguments, ctx)
+        result = _trava_mcp(ctx, name, arguments, result)
         is_error = bool(result.get("erro")) if isinstance(result, dict) else _looks_like_error(result)
         text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
         if isinstance(result, dict) and registry.output_schema(name):

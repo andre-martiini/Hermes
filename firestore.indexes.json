@@ -178,6 +178,12 @@
       "fieldPath": "expires_at",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "trava_confirmacao",
+      "fieldPath": "expira_em",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

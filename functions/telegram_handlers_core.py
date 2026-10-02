@@ -620,6 +620,8 @@ def _process_telegram_message(db, data: dict):
             resultados_verificados, response_text,
             [c.get("name") for c in perf_state.get("tool_calls", []) if c.get("name")],
         )
+    from trava_confirmacao import aplicar_trava
+    response_text = aplicar_trava(db, response_text, perf_state.get("tool_calls", []), canal="telegram")
 
     # --- Persist history — write to isolated buffer when action-locked ---
     user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}

@@ -66,6 +66,13 @@ from allcare_portal import (
     parse_portal_date,
 )
 from firestore_resilience import stream_collection_resilient
+from trava_confirmacao import (
+    REGRA_PROMPT as _TRAVA_REGRA_PROMPT,
+    anotar_chamada as _trava_anotar_chamada,
+    anotar_resultado as _trava_anotar,
+    aplicar_trava as _trava_aplicar,
+    verificar_ferramenta as _trava_verificar,
+)
 from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
@@ -11303,6 +11310,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             + (protocolo_formularios if _gate_formularios else "")
             + (protocolo_diagramas if _gate_diagramas else "")
             + system_instruction_governanca
+            + _TRAVA_REGRA_PROMPT
         )
 
         strategy_context = ""
@@ -12208,10 +12216,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     except Exception as _fe:
                         res = f"Erro ao executar {fc.name}: {_fe}"
                 
-                perf_state.setdefault("tool_calls", []).append({
+                _verif = _trava_verificar(db, fc.name, fc.args, res)
+                res = _trava_anotar(res, _verif)
+                _chamada = {
                     "name": fc.name,
                     "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
-                })
+                }
+                _trava_anotar_chamada(_chamada, _verif)
+                perf_state.setdefault("tool_calls", []).append(_chamada)
                 return (res, tool_invocation_data_local)
 
             _executor = _ThreadPoolExecutor(max_workers=min(len(fcs), 8))
@@ -12422,6 +12434,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     )
                 else:
                     result_text = "Desculpe, ocorreu uma instabilidade ao processar a resposta. Por favor, tente novamente."
+        result_text = _trava_aplicar(
+            db, result_text, perf_state.get("tool_calls", []),
+            canal="telegram" if str(session_id or "").startswith("telegram_") else "web",
+        )
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
         proposal_data = None
         clean_text = result_text
