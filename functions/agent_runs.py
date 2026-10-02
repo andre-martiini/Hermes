@@ -295,8 +295,14 @@ class Execucao:
         self._resumo = texto
 
     def parcial(self, motivo: str) -> None:
-        self.status = STATUS_PARCIAL
-        self.erro = motivo
+        if self.status != STATUS_ERRO:
+            self.status = STATUS_PARCIAL
+        self.erro = f"{self.erro}; {motivo}" if self.erro else motivo
+
+    def falhou(self, motivo: str) -> None:
+        """Falha tratada pela própria rotina, sem exceção: status=erro."""
+        self.status = STATUS_ERRO
+        self.erro = f"{self.erro}; {motivo}" if self.erro else motivo
 
     def aguardando(self, motivo: str) -> None:
         self._extras.update(aguarda_usuario=True, motivo_espera=motivo)
