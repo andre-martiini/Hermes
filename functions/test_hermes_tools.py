@@ -1536,6 +1536,109 @@ class TestEscritaDireta(unittest.TestCase):
         res = hermes_tools.obter_estado_atual(ctx, {})
         self.assertIn("erro", res["saude_integracoes"])
         self.assertNotIn("integracoes", res["saude_integracoes"])
+        self.assertEqual(
+            res["fontes_indisponiveis"]["saude_integracoes"], "firestore fora do ar"
+        )
+
+    @patch("tools.hermes_tools._coletar_saudes_integracoes")
+    @patch("outbox_aprovacao.contar_pendentes")
+    @patch("agent_requests.contar_pendentes")
+    @patch("atencao.coletar_fila_atencao")
+    @patch("main._pops_sempre_ativos")
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_sem_falhas_nao_tem_fontes_indisponiveis(
+        self, mock_build, mock_pops, mock_fila, mock_agent_req, mock_outbox, mock_saude
+    ):
+        """Caso comum (nenhum bloco falhou): `fontes_indisponiveis` nem
+        aparece -- não é `{}`, para não acrescentar ruído a uma chamada que
+        não teve problema nenhum (ver `_marcar_fonte_indisponivel`)."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_pops.return_value = []
+        mock_fila.return_value = {"itens": [], "total": 0}
+        mock_agent_req.return_value = 0
+        mock_outbox.return_value = 0
+        from datetime import datetime, timezone
+        mock_saude.return_value = (datetime(2026, 1, 1, tzinfo=timezone.utc), [])
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertNotIn("fontes_indisponiveis", res)
+
+    @patch("main._pops_sempre_ativos")
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_pops_ativos_falha_fica_explicita(self, mock_build, mock_pops):
+        """Achado A09: falha ao montar `pops_ativos` não pode virar lista
+        vazia sem rastro -- pareceria "nenhum POP sempre ativo", em vez de
+        "não consegui checar"."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_pops.side_effect = RuntimeError("firestore fora do ar")
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["pops_ativos"], [])
+        self.assertEqual(res["fontes_indisponiveis"]["pops_ativos"], "firestore fora do ar")
+
+    @patch("atencao.coletar_fila_atencao")
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_fila_atencao_falha_fica_explicita(self, mock_build, mock_coletar):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_coletar.side_effect = RuntimeError("firestore fora do ar")
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["fila_atencao"], [])
+        self.assertEqual(res["fila_atencao_total"], 0)
+        self.assertEqual(res["fontes_indisponiveis"]["fila_atencao"], "firestore fora do ar")
+
+    @patch("agent_requests.contar_pendentes")
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_agent_requests_pendentes_falha_fica_explicita(self, mock_build, mock_contar):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_contar.side_effect = RuntimeError("firestore fora do ar")
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["agent_requests_pendentes"], 0)
+        self.assertEqual(
+            res["fontes_indisponiveis"]["agent_requests_pendentes"], "firestore fora do ar"
+        )
+
+    @patch("outbox_aprovacao.contar_pendentes")
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_outbox_pendentes_falha_fica_explicita(self, mock_build, mock_contar):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_contar.side_effect = RuntimeError("firestore fora do ar")
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["outbox_pendentes"], 0)
+        self.assertEqual(res["fontes_indisponiveis"]["outbox_pendentes"], "firestore fora do ar")
+
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_duas_fontes_falham_ambas_aparecem(self, mock_build):
+        """`fontes_indisponiveis` acumula mais de uma falha no mesmo ciclo --
+        não é sobrescrito pelo último bloco que falhou."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+
+        def _build_quebrado(*args, **kwargs):
+            raise RuntimeError("morning_summary fora do ar")
+
+        mock_build.side_effect = _build_quebrado
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        # build_morning_summary falha ANTES de `estado` existir -- o `except`
+        # externo (linha final da função) captura e devolve só `erro`, sem
+        # chegar aos blocos internos. Cobre o caminho já existente (não um
+        # caso novo desta sub-entrega), para documentar onde
+        # `fontes_indisponiveis` NÃO se aplica.
+        self.assertIn("erro", res)
+        self.assertNotIn("fontes_indisponiveis", res)
 
 
 class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):
