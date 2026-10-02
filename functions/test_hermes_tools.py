@@ -1498,6 +1498,43 @@ class TestEscritaDireta(unittest.TestCase):
         self.assertEqual(res["respostas_pendentes_filtrados"], {})
 
     @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_respostas_pendentes_com_erro_isolado_fica_explicita(self, mock_build):
+        """Achado real do Codex (PR #404): quando `inbox_pendentes.coletar()`
+        falha, `_coletar_respostas_pendentes_seguro` (morning_summary.py) já
+        isola a falha ANTES de devolver `estado` -- ela chega aqui como
+        `respostas_pendentes[\"erro\"]`, não como uma exceção. Sem este
+        caminho, essa falha ficaria indistinguível de \"nenhuma pendência\"
+        mesmo com o resto de `obter_estado_atual` rodando normalmente."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {
+            "acoes": [],
+            "respostas_pendentes": {"itens": [], "filtrados": {}, "erro": "firestore fora do ar"},
+        }
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["respostas_pendentes_total"], 0)
+        self.assertEqual(res["respostas_pendentes_filtrados"], {})
+        self.assertEqual(res["fontes_indisponiveis"]["respostas_pendentes"], "firestore fora do ar")
+
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_respostas_pendentes_erro_com_mensagem_vazia_ainda_aparece(self, mock_build):
+        """Achado real de uma 2a rodada de revisão adversarial interna sobre o
+        fix do Codex acima: uma exceção cujo `str()` é vazio (ex.:
+        `RuntimeError()` sem argumento) não pode passar batido só porque
+        `rp.get(\"erro\")` trataria string vazia como falsy -- o sinal
+        correto é a PRESENÇA da chave `erro`, não seu conteúdo."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {
+            "acoes": [],
+            "respostas_pendentes": {"itens": [], "filtrados": {}, "erro": ""},
+        }
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertIn("respostas_pendentes", res["fontes_indisponiveis"])
+
+    @patch("morning_summary.build_morning_summary")
     def test_obter_estado_atual_inclui_saude_integracoes(self, mock_build):
         """P05 passo 8 (achado A09 do plano): `obter_estado_atual` passa a
         expor a mesma saúde por integração que a tool
