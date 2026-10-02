@@ -581,28 +581,42 @@ def relatorio_diario_custos(event: scheduler_fn.ScheduledEvent = None) -> None:
     from main import get_db, _resolve_default_telegram_chat_id
     from telegram_utils import _get_telegram_token, _send_telegram_message, _send_telegram_message_with_keyboard
 
+    from agent_runs import registrar_execucao
+
     db = get_db()
-    try:
-        textos = gerar_relatorios_custos(db)
-    except Exception as exc:
-        print(f"[CustosHermes] Falha ao montar relatório: {exc}")
-        return
-    print(f"[CustosHermes] {textos['detalhe']}")
+    hoje = datetime.now(TZ).strftime("%Y-%m-%d")
+    with registrar_execucao(db, "relatorio_diario_custos", run_id=f"relatorio_diario_custos:{hoje}") as run:
+        try:
+            textos = gerar_relatorios_custos(db)
+        except Exception as exc:
+            print(f"[CustosHermes] Falha ao montar relatório: {exc}")
+            run.falhou(f"falha ao montar o relatório: {exc}")
+            return
+        print(f"[CustosHermes] {textos['detalhe']}")
 
-    salvo = True
-    try:
-        salvar_relatorio(db, textos)
-    except Exception as exc:
-        salvo = False
-        print(f"[CustosHermes] Falha ao gravar relatório em {REPORTS_COLLECTION}: {exc}")
+        salvo = True
+        try:
+            salvar_relatorio(db, textos)
+        except Exception as exc:
+            salvo = False
+            print(f"[CustosHermes] Falha ao gravar relatório em {REPORTS_COLLECTION}: {exc}")
+            run.parcial(f"relatório não gravado em {REPORTS_COLLECTION}")
 
-    chat_id = _resolve_default_telegram_chat_id(db)
-    if not chat_id:
-        print("[CustosHermes] Nenhum chat_id do Telegram configurado; relatório apenas nos logs.")
-        return
-    token = _get_telegram_token(db)
-    if salvo:
-        _send_telegram_message_with_keyboard(token, chat_id, textos["resumo"], summary_keyboard(textos["dia"]))
-    else:
-        # Sem o documento gravado o botão não teria o que mostrar: manda o detalhe direto.
-        _send_telegram_message(token, chat_id, textos["detalhe"])  # parse_mode HTML
+        chat_id = _resolve_default_telegram_chat_id(db)
+        if not chat_id:
+            print("[CustosHermes] Nenhum chat_id do Telegram configurado; relatório apenas nos logs.")
+            run.falhou("nenhum chat do Telegram configurado")
+            return
+        token = _get_telegram_token(db)
+        if salvo:
+            enviado = _send_telegram_message_with_keyboard(token, chat_id, textos["resumo"], summary_keyboard(textos["dia"]))
+        else:
+            # Sem o documento gravado o botão não teria o que mostrar: manda o detalhe direto.
+            enviado = _send_telegram_message(token, chat_id, textos["detalhe"])  # parse_mode HTML
+        run.contar(salvo=1 if salvo else 0, enviado=1 if enviado else 0)
+        if enviado:
+            run.verificado("verificado")
+            run.resumo(f"Relatório de custos de {textos['dia']} enviado")
+        else:
+            run.verificado("falhou")
+            run.falhou("o Telegram não confirmou o envio do relatório de custos")
