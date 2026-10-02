@@ -2067,6 +2067,28 @@ def _perfil_pessoal_compacto(perfil: dict | None) -> dict | None:
     return compacto
 
 
+def _marcar_fonte_indisponivel(estado: dict, chave: str, exc: Exception | str) -> None:
+    """P05 passo 8 (achado A09 do plano): expõe que uma fonte de
+    `obter_estado_atual` falhou nesta chamada, sem que o valor-fallback
+    (lista/contador vazio, mantido abaixo por compatibilidade com quem só lê
+    esse campo) seja confundido com "genuinamente não há nada" -- exatamente
+    o anti-padrão que A09 descreve ("falha de fonte vira lista vazia/contador
+    zero, indistinguível de ausência real"). `saude_integracoes` já sinaliza
+    falha DENTRO do próprio campo (`{"erro": ...}`, sub-entrega anterior)
+    porque seu valor de sucesso já é um dict; os demais blocos abaixo têm
+    valor de sucesso mais simples (lista/int/dict raso) e por isso ganham o
+    sinal num campo IRMÃO, `fontes_indisponiveis` (dict chave->mensagem),
+    presente só quando pelo menos uma fonte falhou neste ciclo -- ausente
+    (não `{}`) quando tudo correu bem, para não acrescentar ruído ao caso
+    comum. `exc` aceita tanto uma exceção (capturada no próprio `except`
+    local) quanto uma mensagem já pronta como `str` -- caso de
+    `respostas_pendentes`, cuja falha é isolada ANTES de chegar aqui, em
+    `morning_summary.py::_coletar_respostas_pendentes_seguro`, e chega até
+    este bloco só como `rp[\"erro\"]`, sem exceção nenhuma para capturar
+    neste nível."""
+    estado.setdefault("fontes_indisponiveis", {})[chave] = str(exc)
+
+
 def obter_estado_atual(ctx: ToolContext, args: dict):
     """Panorama do dia numa chamada: acoes, agenda, pendencias, heranca.
 
@@ -2093,16 +2115,18 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             ]
             if len(ativos) > 5:
                 estado["pops_ativos_total_omitido"] = len(ativos) - 5
-        except Exception:
+        except Exception as exc:
             estado["pops_ativos"] = []
+            _marcar_fonte_indisponivel(estado, "pops_ativos", exc)
         try:
             from atencao import coletar_fila_atencao
             res_atencao = coletar_fila_atencao(ctx.db, estado="aberto", limite=10)
             estado["fila_atencao"] = res_atencao.get("itens", [])
             estado["fila_atencao_total"] = res_atencao.get("total", 0)
-        except Exception:
+        except Exception as exc:
             estado["fila_atencao"] = []
             estado["fila_atencao_total"] = 0
+            _marcar_fonte_indisponivel(estado, "fila_atencao", exc)
         # DEV-2026-0004 sub-entrega 9/9, proposta (e): `respostas_pendentes` já
         # vem embutido em `estado` (herdado de `build_morning_summary`, que
         # chama `inbox_pendentes.coletar()`) só com itens "pergunta"/"pedido"
@@ -2122,24 +2146,45 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             rp_itens = rp.get("itens") or []
             estado["respostas_pendentes_total"] = len(rp_itens) + int(rp.get("total_omitido") or 0)
             estado["respostas_pendentes_filtrados"] = rp.get("filtrados") or {}
-        except Exception:
+            # Achado real de revisão automática do Codex (PR #404): uma falha de
+            # `inbox_pendentes.coletar()` já não propaga mais até aqui (isolada por
+            # `morning_summary.py::_coletar_respostas_pendentes_seguro`, mesma
+            # sub-entrega) -- em vez disso, `rp["erro"]` carrega o sinal. Sem este
+            # `if`, essa falha ficaria indistinguível de "nenhuma pendência".
+            # `"erro" in rp` (checagem de PRESENÇA da chave, não de truthiness do
+            # valor) -- achado real de uma 2a rodada de revisão adversarial interna
+            # sobre o fix acima: `rp.get("erro")` sozinho deixaria passar em
+            # silêncio uma exceção cujo `str()` é vazio (ex.: `RuntimeError()` sem
+            # argumento), porque string vazia é falsy -- exatamente o cenário que
+            # este `if` existe para capturar.
+            if "erro" in rp:
+                _marcar_fonte_indisponivel(estado, "respostas_pendentes", rp["erro"])
+        except Exception as exc:
             estado["respostas_pendentes_total"] = 0
             estado["respostas_pendentes_filtrados"] = {}
+            _marcar_fonte_indisponivel(estado, "respostas_pendentes", exc)
         try:
             from agent_requests import contar_pendentes
             estado["agent_requests_pendentes"] = contar_pendentes(ctx.db)
-        except Exception:
+        except Exception as exc:
             estado["agent_requests_pendentes"] = 0
+            _marcar_fonte_indisponivel(estado, "agent_requests_pendentes", exc)
         try:
             from outbox_aprovacao import contar_pendentes as contar_outbox_pendentes
             estado["outbox_pendentes"] = contar_outbox_pendentes(ctx.db)
-        except Exception:
+        except Exception as exc:
             estado["outbox_pendentes"] = 0
-        # P05 passo 8 (achado A09 do plano): ao contrário dos blocos acima,
-        # uma falha aqui NÃO vira lista/contador zero -- zero pareceria
-        # "todas as integrações saudáveis", exatamente o oposto de uma
-        # checagem que não pôde rodar. `saude_integracoes["integracoes"]`
-        # ausente/com `erro` é o sinal de que a checagem falhou; cada
+            _marcar_fonte_indisponivel(estado, "outbox_pendentes", exc)
+        # P05 passo 8 (achado A09 do plano): uma falha aqui NÃO vira
+        # lista/contador zero -- zero pareceria "todas as integrações
+        # saudáveis", exatamente o oposto de uma checagem que não pôde
+        # rodar. `saude_integracoes["integracoes"]` ausente/com `erro` é o
+        # sinal de que a checagem falhou (shape própria, já existia antes
+        # dos blocos acima ganharem `fontes_indisponiveis` -- mantida como
+        # está para não quebrar quem já lê `saude_integracoes.erro`
+        # diretamente; `_marcar_fonte_indisponivel` abaixo só acrescenta a
+        # MESMA falha também ao sinal unificado, para quem prefere checar só
+        # `fontes_indisponiveis` sem conhecer a forma de cada bloco). Cada
         # integração dentro da lista já carrega seu próprio "unknown"
         # quando NELA faltam dados (ver `autonomy/integrations_sync.py`).
         try:
@@ -2147,6 +2192,7 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             estado["saude_integracoes"] = _serializar_saudes_integracoes(heartbeat_at, saudes)
         except Exception as exc:
             estado["saude_integracoes"] = {"erro": f"Falha ao consultar saude das integracoes: {exc}"}
+            _marcar_fonte_indisponivel(estado, "saude_integracoes", exc)
         # Perfil pessoal (ai_profile.personalidade, consolidado todo domingo):
         # substitui o `perfil` cru do resumo matinal pela versão compacta e
         # rotulada. Só aparece quando o perfil existe.
