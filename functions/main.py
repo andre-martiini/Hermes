@@ -66,6 +66,7 @@ from allcare_portal import (
     parse_portal_date,
 )
 from firestore_resilience import stream_collection_resilient
+from autonomy.context import DECLARACAO_HUMANA
 from trava_confirmacao import (
     REGRA_PROMPT as _TRAVA_REGRA_PROMPT,
     anotar_chamada as _trava_anotar_chamada,
@@ -7437,6 +7438,7 @@ def _save_memory_node(
             "embedding": FsVector(embedding),
             "data_atualizacao": now,
             "origem_memoria": "copiloto",
+            "origem_fato": DECLARACAO_HUMANA,
             "ultima_sessao_id": session_id,
             "ultimo_usuario_id": user_uid,
             "memoria_status": "ativa",
@@ -7494,6 +7496,7 @@ def _save_memory_node(
         "data_criacao": now,
         "data_atualizacao": now,
         "origem_memoria": "copiloto",
+        "origem_fato": DECLARACAO_HUMANA,
         "ultima_sessao_id": session_id,
         "ultimo_usuario_id": user_uid,
         "memoria_status": "ativa",
