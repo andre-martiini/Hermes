@@ -181,6 +181,39 @@ class TestNaoIdempotente(unittest.TestCase):
         self.assertNotEqual(r1["observacao_id"], r2["observacao_id"])
 
 
+class TestFalhaAoGravar(unittest.TestCase):
+    """Achado da revisão adversarial externa (Codex, P2, PR #405): uma
+    exceção de `ref.set()` não prova que nada foi gravado -- o Firestore
+    pode ter confirmado a escrita no servidor mesmo que o cliente receba um
+    timeout/deadline. Repetir a chamada depois de um falso "nada foi
+    gravado" duplicaria a observação (a tool não é idempotente)."""
+
+    def test_excecao_apos_escrita_real_e_tratada_como_sucesso_confirmado(self):
+        ctx = _Ctx()
+        original_set = _Doc.set
+
+        def set_que_escreve_e_depois_falha(self, valores, merge=False):
+            original_set(self, valores, merge=merge)
+            raise TimeoutError("deadline exceeded")
+
+        with mock.patch.object(_Doc, "set", set_que_escreve_e_depois_falha):
+            r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
+        self.assertEqual(r["status"], "completed")
+        self.assertEqual(r["fonte"], _ARGS_VALIDOS["fonte"])
+        self.assertIn("FOI", r["nota"])
+        self.assertEqual(len(ctx.db.cols[roe.COL_OBSERVACOES].dados), 1,
+                          "a escrita real deveria ter persistido exatamente 1 documento")
+
+    def test_excecao_sem_escrita_real_continua_recusando(self):
+        ctx = _Ctx()
+        with mock.patch.object(_Doc, "set", side_effect=RuntimeError("conexao recusada")):
+            r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
+        self.assertFalse(r["aplicado"])
+        self.assertIn("nada parece ter sido gravado", r["erro"])
+        self.assertEqual(ctx.db.cols[roe.COL_OBSERVACOES].dados, {},
+                          "nao deveria ter persistido nenhum documento")
+
+
 class TestFalhaNaReleitura(unittest.TestCase):
     """Achado da revisão adversarial: a escrita pode ter funcionado mesmo
     quando a releitura falha ou não enxerga o documento ainda -- o erro

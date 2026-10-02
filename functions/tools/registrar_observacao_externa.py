@@ -151,8 +151,36 @@ def registrar(ctx, args: dict) -> dict:
     ref = ctx.db.collection(COL_OBSERVACOES).document()
     try:
         ref.set(documento)
-    except Exception as exc:
-        return {"erro": f"falha ao gravar ({exc}). Nada foi gravado.", "aplicado": False}
+    except Exception as exc_set:
+        # A excecao do SDK NAO prova que nada foi gravado: um timeout/deadline
+        # pode ter ocorrido depois que o Firestore ja confirmou a escrita no
+        # servidor, so sem o cliente receber a resposta (achado da revisao
+        # adversarial externa, Codex, P2). Tenta reler pela mesma referencia
+        # antes de afirmar "nada foi gravado".
+        try:
+            snap_apos_falha = ref.get()
+        except Exception:
+            snap_apos_falha = None
+        if snap_apos_falha is not None and snap_apos_falha.exists:
+            relido_apos_falha = snap_apos_falha.to_dict() or {}
+            return {
+                "status": "completed",
+                "observacao_id": ref.id,
+                **{campo: relido_apos_falha.get(campo) for campo in _CAMPOS_RELIDOS},
+                "nota": (
+                    "A chamada de gravação reportou uma falha "
+                    f"({exc_set}), mas a releitura confirma que a observação FOI "
+                    f"gravada ({COL_OBSERVACOES}/{ref.id}). Isolada, não cria nem "
+                    "altera preferência, memória ou autorização."
+                ),
+            }
+        return {
+            "erro": (
+                f"falha ao gravar ({exc_set}); a releitura pela mesma referência "
+                "também não encontra o documento -- nada parece ter sido gravado."
+            ),
+            "aplicado": False,
+        }
 
     try:
         relido_snap = ref.get()
