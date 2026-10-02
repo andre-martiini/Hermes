@@ -19,11 +19,15 @@ import main
 from autonomy.context import (
     DECLARACAO_HUMANA,
     FONTE_EXTERNA,
+    INFERENCIA_AGENTE,
     LEGADO_DESCONHECIDO,
     ORIGENS_FATO_NOVO,
     ORIGENS_FATO_VALIDAS,
     origem_fato_de_leitura,
+    origem_fato_para_canal_de_salvar_memoria,
 )
+from tools import hermes_tools
+from tools.tool_context import ToolContext
 
 
 def _patch_embedding_e_similares(candidatos=None):
@@ -108,6 +112,61 @@ class TestSaveMemoryNodeGravaOrigemFato(unittest.TestCase):
         self.assertEqual(doc["origem_fato"], FONTE_EXTERNA)
 
 
+class TestSalvarMemoriaGlobalPorCanal(unittest.TestCase):
+    """`salvar_memoria_global` (tools/hermes_tools.py::_salvar_memoria_global)
+    é o MESMO código para o servidor MCP (canal="mcp") e para o copiloto web
+    (canal="web") -- mas os dois têm um contrato de texto DIFERENTE para
+    quando acionar a tool (ver autonomy/context.py). Achado real da 1a
+    rodada de revisão adversarial: a 1a versão desta sub-entrega gravava
+    `DECLARACAO_HUMANA` para os dois canais, ignorando essa diferença."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def _chamar(self, canal):
+        ctx = ToolContext(canal=canal, _db=self.db, _gemini_key="fake-key")
+        with mock.patch.object(
+            main, "_classify_memory_candidate",
+            return_value={"should_save": True, "reason": "ok", "confidence": 0.9,
+                          "normalized_category": "fato_isolado"},
+        ), _patch_embedding_e_similares() as mocks:
+            mocks["get_embedding"].return_value = [0.1, 0.2, 0.3]
+            mocks["_find_similar_memory_nodes"].return_value = []
+            resultado_json = hermes_tools._salvar_memoria_global(
+                ctx, {"fato": "um fato qualquer", "categoria": "fato_isolado"}
+            )
+        import json as _json
+        resultado = _json.loads(resultado_json)
+        doc = self.db.collection("knowledge_nodes")._docs[resultado["memory_id"]]
+        return doc
+
+    def test_canal_mcp_grava_declaracao_humana(self):
+        doc = self._chamar("mcp")
+        self.assertEqual(doc["origem_fato"], DECLARACAO_HUMANA)
+
+    def test_canal_web_grava_inferencia_agente(self):
+        doc = self._chamar("web")
+        self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
+
+    def test_canal_desconhecido_tambem_grava_inferencia_agente(self):
+        """Um canal futuro, não auditado, nunca deve herdar silenciosamente a
+        afirmação mais forte (DECLARACAO_HUMANA) -- ver docstring de
+        `origem_fato_para_canal_de_salvar_memoria`."""
+        doc = self._chamar("algum_canal_novo_do_futuro")
+        self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
+
+
+class TestOrigemFatoParaCanalDeSalvarMemoria(unittest.TestCase):
+    def test_mcp_e_declaracao_humana(self):
+        self.assertEqual(origem_fato_para_canal_de_salvar_memoria("mcp"), DECLARACAO_HUMANA)
+
+    def test_web_e_inferencia_agente(self):
+        self.assertEqual(origem_fato_para_canal_de_salvar_memoria("web"), INFERENCIA_AGENTE)
+
+    def test_none_e_inferencia_agente(self):
+        self.assertEqual(origem_fato_para_canal_de_salvar_memoria(None), INFERENCIA_AGENTE)
+
+
 class TestOrigemFatoDeLeitura(unittest.TestCase):
     def test_documento_sem_campo_e_legado(self):
         self.assertEqual(origem_fato_de_leitura({"texto_memoria": "x"}), LEGADO_DESCONHECIDO)
@@ -135,6 +194,26 @@ class TestOrigemFatoDeLeitura(unittest.TestCase):
         self.assertIn(LEGADO_DESCONHECIDO, ORIGENS_FATO_VALIDAS)
         for origem in ORIGENS_FATO_NOVO:
             self.assertIn(origem, ORIGENS_FATO_VALIDAS)
+
+    def test_valor_tipo_lista_nao_lanca_e_e_legado(self):
+        """Achado real da 1a rodada de revisão adversarial: `valor in
+        ORIGENS_FATO_VALIDAS` sozinho lança `TypeError: unhashable type`
+        para uma lista -- Firestore aceita qualquer tipo em `origem_fato`,
+        então um documento corrompido/malformado não pode derrubar a
+        leitura."""
+        self.assertEqual(
+            origem_fato_de_leitura({"origem_fato": ["x"]}), LEGADO_DESCONHECIDO
+        )
+
+    def test_valor_tipo_dict_nao_lanca_e_e_legado(self):
+        self.assertEqual(
+            origem_fato_de_leitura({"origem_fato": {"a": 1}}), LEGADO_DESCONHECIDO
+        )
+
+    def test_valor_tipo_numero_nao_lanca_e_e_legado(self):
+        self.assertEqual(
+            origem_fato_de_leitura({"origem_fato": 123}), LEGADO_DESCONHECIDO
+        )
 
 
 if __name__ == "__main__":

@@ -7412,6 +7412,7 @@ def _save_memory_node(
     session_id: str | None = None,
     user_uid: str | None = None,
     force_update_id: str | None = None,
+    origem_fato: str = DECLARACAO_HUMANA,
 ):
     fato = (fato or "").strip()
     if not fato:
@@ -7438,7 +7439,7 @@ def _save_memory_node(
             "embedding": FsVector(embedding),
             "data_atualizacao": now,
             "origem_memoria": "copiloto",
-            "origem_fato": DECLARACAO_HUMANA,
+            "origem_fato": origem_fato,
             "ultima_sessao_id": session_id,
             "ultimo_usuario_id": user_uid,
             "memoria_status": "ativa",
@@ -7496,7 +7497,7 @@ def _save_memory_node(
         "data_criacao": now,
         "data_atualizacao": now,
         "origem_memoria": "copiloto",
-        "origem_fato": DECLARACAO_HUMANA,
+        "origem_fato": origem_fato,
         "ultima_sessao_id": session_id,
         "ultimo_usuario_id": user_uid,
         "memoria_status": "ativa",

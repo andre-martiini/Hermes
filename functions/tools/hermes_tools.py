@@ -854,6 +854,7 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
         _normalize_memory_category,
         _save_memory_node,
     )
+    from autonomy.context import origem_fato_para_canal_de_salvar_memoria
 
     fato = args.get("fato")
     categoria = args.get("categoria")
@@ -878,6 +879,7 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
             categoria=retention.get("normalized_category", categoria),
             session_id=ctx.session_id,
             user_uid=ctx.user_uid,
+            origem_fato=origem_fato_para_canal_de_salvar_memoria(ctx.canal),
         )
         result["retention_reason"] = retention.get("reason")
         result["retention_confidence"] = retention.get("confidence")
