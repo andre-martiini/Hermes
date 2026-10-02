@@ -119,10 +119,13 @@ def registrar(ctx, args: dict) -> dict:
             "aplicado": False,
         }
 
-    id_ou_url = args.get("id_ou_url")
-    id_ou_url = str(id_ou_url).strip() if id_ou_url else None
-    artefato_hash = args.get("artefato_hash")
-    artefato_hash = str(artefato_hash).strip() if artefato_hash else None
+    def _texto_opcional(campo: str) -> str | None:
+        bruto = args.get(campo)
+        valor = str(bruto).strip() if bruto is not None else ""
+        return valor or None
+
+    id_ou_url = _texto_opcional("id_ou_url")
+    artefato_hash = _texto_opcional("artefato_hash")
 
     from firebase_admin import firestore
 
@@ -151,12 +154,26 @@ def registrar(ctx, args: dict) -> dict:
     except Exception as exc:
         return {"erro": f"falha ao gravar ({exc}). Nada foi gravado.", "aplicado": False}
 
-    relido_snap = ref.get()
+    try:
+        relido_snap = ref.get()
+    except Exception as exc:
+        return {
+            "erro": (
+                f"a observação FOI gravada ({COL_OBSERVACOES}/{ref.id}), mas não consegui "
+                f"reler para confirmar ({exc})."
+            ),
+            "aplicado": True,
+            "observacao_id": ref.id,
+        }
     relido = (relido_snap.to_dict() or {}) if relido_snap.exists else {}
     if not relido_snap.exists:
         return {
-            "erro": "a observação não aparece ao reler o banco imediatamente após gravar.",
-            "aplicado": False,
+            "erro": (
+                f"a observação FOI gravada ({COL_OBSERVACOES}/{ref.id}), mas não aparece ao "
+                "reler o banco imediatamente após gravar."
+            ),
+            "aplicado": True,
+            "observacao_id": ref.id,
         }
 
     return {

@@ -13,6 +13,7 @@ Três propriedades justificam estes testes acima das outras:
 """
 
 import unittest
+from unittest import mock
 
 from tools import registrar_observacao_externa as roe
 
@@ -89,6 +90,13 @@ class TestGravaERele(unittest.TestCase):
         r = roe.registrar(_Ctx(), args)
         self.assertEqual(r["id_ou_url"], "https://exemplo/doc/1")
         self.assertEqual(r["artefato_hash"], "sha256:abc")
+
+    def test_opcional_so_com_espacos_vira_none_igual_ao_ausente(self):
+        """Achado da revisão adversarial: antes da correção, `"   "` virava
+        string vazia gravada, divergindo do tratamento dos obrigatórios."""
+        r = roe.registrar(_Ctx(), {**_ARGS_VALIDOS, "id_ou_url": "   ", "artefato_hash": "\t"})
+        self.assertIsNone(r["id_ou_url"])
+        self.assertIsNone(r["artefato_hash"])
 
     def test_nivel_verificacao_padrao_e_nao_verificado(self):
         r = roe.registrar(_Ctx(), dict(_ARGS_VALIDOS))
@@ -171,6 +179,30 @@ class TestNaoIdempotente(unittest.TestCase):
         r1 = roe.registrar(ctx, dict(_ARGS_VALIDOS))
         r2 = roe.registrar(ctx, dict(_ARGS_VALIDOS))
         self.assertNotEqual(r1["observacao_id"], r2["observacao_id"])
+
+
+class TestFalhaNaReleitura(unittest.TestCase):
+    """Achado da revisão adversarial: a escrita pode ter funcionado mesmo
+    quando a releitura falha ou não enxerga o documento ainda -- o erro
+    devolvido precisa deixar isso claro, nunca sugerir que nada foi gravado."""
+
+    def test_excecao_ao_reler_preserva_aplicado_true_e_cita_o_id(self):
+        ctx = _Ctx()
+        with mock.patch.object(_Doc, "get", side_effect=RuntimeError("timeout")):
+            r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
+        self.assertTrue(r["aplicado"])
+        self.assertIn("FOI gravada", r["erro"])
+        gravados = ctx.db.cols[roe.COL_OBSERVACOES].dados
+        self.assertEqual(len(gravados), 1, "o documento deveria ter sido escrito mesmo com a releitura falhando")
+        self.assertEqual(r["observacao_id"], next(iter(gravados)))
+
+    def test_documento_nao_aparece_ao_reler_preserva_aplicado_true(self):
+        ctx = _Ctx()
+        with mock.patch.object(_Doc, "get", lambda self: _Doc(self._col, self.id, None)):
+            r = roe.registrar(ctx, dict(_ARGS_VALIDOS))
+        self.assertTrue(r["aplicado"])
+        self.assertIn("FOI gravada", r["erro"])
+        self.assertEqual(len(ctx.db.cols[roe.COL_OBSERVACOES].dados), 1)
 
 
 class TestIsolamento(unittest.TestCase):
