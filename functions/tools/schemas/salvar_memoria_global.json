@@ -11,6 +11,10 @@
       "categoria": {
         "type": "string",
         "description": "Categoria do fato (ex: PREFERÊNCIA, REGRA, CONTATO, PROCESSO)"
+      },
+      "usuario_afirmou_diretamente": {
+        "type": "boolean",
+        "description": "true somente quando o PRÓPRIO USUÁRIO afirmou este fato literalmente nesta conversa (ex: \"prefiro reuniões de manhã\"). false (padrão) quando você identificou/inferiu o fato por conta própria, sem o usuário ter dito aquilo explicitamente."
       }
     },
     "required": ["fato", "categoria"]

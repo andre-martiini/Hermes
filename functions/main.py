@@ -66,6 +66,7 @@ from allcare_portal import (
     parse_portal_date,
 )
 from firestore_resilience import stream_collection_resilient
+from autonomy.context import DECLARACAO_HUMANA
 from trava_confirmacao import (
     REGRA_PROMPT as _TRAVA_REGRA_PROMPT,
     anotar_chamada as _trava_anotar_chamada,
@@ -7411,6 +7412,7 @@ def _save_memory_node(
     session_id: str | None = None,
     user_uid: str | None = None,
     force_update_id: str | None = None,
+    origem_fato: str = DECLARACAO_HUMANA,
 ):
     fato = (fato or "").strip()
     if not fato:
@@ -7437,6 +7439,7 @@ def _save_memory_node(
             "embedding": FsVector(embedding),
             "data_atualizacao": now,
             "origem_memoria": "copiloto",
+            "origem_fato": origem_fato,
             "ultima_sessao_id": session_id,
             "ultimo_usuario_id": user_uid,
             "memoria_status": "ativa",
@@ -7494,6 +7497,7 @@ def _save_memory_node(
         "data_criacao": now,
         "data_atualizacao": now,
         "origem_memoria": "copiloto",
+        "origem_fato": origem_fato,
         "ultima_sessao_id": session_id,
         "ultimo_usuario_id": user_uid,
         "memoria_status": "ativa",
@@ -9920,14 +9924,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "justificativa": justificativa,
             }, _ctx())
 
-        def salvar_memoria_global(fato: str, categoria: str):
+        def salvar_memoria_global(fato: str, categoria: str, usuario_afirmou_diretamente: bool = False):
             """
             Ferramenta de retenção de memória global do Copiloto Gaspar.
             Use apenas para fatos duráveis, preferências estáveis do ambiente ou regras de negócio
             que possam ser úteis em conversas futuras. Nunca use para ruído transitório.
+            usuario_afirmou_diretamente: true SOMENTE quando o próprio usuário afirmou este fato
+            literalmente nesta conversa (ex: "prefiro reuniões de manhã"). false quando você
+            identificou/inferiu o fato por conta própria, sem o usuário ter dito aquilo
+            explicitamente -- isso afeta a proveniência gravada com o fato, nunca adivinhe.
             """
             return _hermes_tools.execute(
-                "salvar_memoria_global", {"fato": fato, "categoria": categoria}, _ctx())
+                "salvar_memoria_global",
+                {
+                    "fato": fato,
+                    "categoria": categoria,
+                    "usuario_afirmou_diretamente": usuario_afirmou_diretamente,
+                },
+                _ctx(),
+            )
 
         def salvar_pop_global(
             titulo: str,
@@ -11108,8 +11123,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Se houver ambiguidade, apresente as opções ao usuário antes de prosseguir.\n\n"
             "## MEMÓRIA E COGNIÇÃO AUTÔNOMA\n"
             "Quando identificar uma regra de negócio durável, uma preferência operacional estável ou um fato global útil em conversas futuras, "
-            "acione salvar_memoria_global(fato, categoria) silenciosamente.\n"
+            "acione salvar_memoria_global(fato, categoria, usuario_afirmou_diretamente) silenciosamente.\n"
             "Categorias válidas: 'regra_global' e 'fato_isolado'.\n"
+            "usuario_afirmou_diretamente: true SOMENTE quando o próprio usuário disse aquele fato literalmente nesta conversa; "
+            "false quando VOCÊ identificou/inferiu o padrão por conta própria, sem o usuário ter afirmado aquilo explicitamente. "
+            "Nunca marque true por padrão nem para parecer mais confiante -- isso vira o registro de proveniência do fato.\n"
             "Nunca grave memória para ruído passageiro, opiniões momentâneas, mensagens genéricas ou detalhes descartáveis.\n"
             "Também NÃO grave saudações, confirmações simples, contexto efêmero desta conversa, anexos transitórios ou decisões ainda não estabilizadas.\n"
             "Prefira gravar apenas convenções permanentes, preferências recorrentes, regras operacionais, fontes de verdade e fatos reutilizáveis.\n"

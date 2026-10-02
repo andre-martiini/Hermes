@@ -854,9 +854,20 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
         _normalize_memory_category,
         _save_memory_node,
     )
+    from autonomy.context import origem_fato_para_salvar_memoria
 
     fato = args.get("fato")
     categoria = args.get("categoria")
+    # `is True`, não `bool(...)`: nada neste codebase valida/coage o JSON de
+    # entrada contra o schema MCP antes de chegar aqui (achado da 2a rodada
+    # de revisao adversarial sobre o fix do Codex) -- bool("false") e True em
+    # Python, entao um cliente cru que mandasse a STRING "false" em vez do
+    # booleano JSON `false` seria promovido por engano a DECLARACAO_HUMANA.
+    # Hoje nenhum canal real explora essa lacuna (mcp ja e DECLARACAO_HUMANA
+    # de qualquer forma; web chega via function-calling tipado do Gemini, que
+    # so entrega bool de verdade) -- mas e gratis fechar antes que um canal
+    # futuro sem essa garantia exista.
+    usuario_afirmou_diretamente = args.get("usuario_afirmou_diretamente") is True
     try:
         retention = _classify_memory_candidate(
             api_key=ctx.gemini_key, fato=fato, categoria=categoria
@@ -878,6 +889,9 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
             categoria=retention.get("normalized_category", categoria),
             session_id=ctx.session_id,
             user_uid=ctx.user_uid,
+            origem_fato=origem_fato_para_salvar_memoria(
+                ctx.canal, usuario_afirmou_diretamente
+            ),
         )
         result["retention_reason"] = retention.get("reason")
         result["retention_confidence"] = retention.get("confidence")
