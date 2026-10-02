@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import event_outbox
 from autonomy.events import CategoriaEvento, montar_evento
-from autonomy.outbox import EstadoOutbox, criar_entrada, registrar_falha
+from autonomy.outbox import EstadoOutbox, criar_entrada, iniciar_despacho, registrar_falha
 
 _AGORA = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -142,6 +142,43 @@ class TestEntradaDocRoundTrip(unittest.TestCase):
         self.assertEqual(reconstruida.estado, EstadoOutbox.PENDENTE)
         self.assertEqual(reconstruida.tentativas, 1)
         self.assertEqual(reconstruida.ultimo_erro, "timeout")
+
+    def test_sem_lease_doc_tem_campo_lease_none(self):
+        # Achado real de revisão automática do Codex (P2) na PR da
+        # sub-entrega 17/N: antes da correção, `_entrada_para_doc` nem
+        # sequer tinha a chave "lease" -- documentos antigos (gravados antes
+        # da sub-entrega 17/N) também não têm essa chave, e `_entrada_de_doc`
+        # precisa tratar "ausente" e "None" da mesma forma (ver próximo
+        # teste).
+        entrada = criar_entrada(_evento(), _AGORA)
+        doc = event_outbox._entrada_para_doc(entrada)
+        self.assertIn("lease", doc)
+        self.assertIsNone(doc["lease"])
+
+    def test_doc_sem_chave_lease_e_lido_como_lease_none(self):
+        # Simula um documento gravado ANTES desta sub-entrega (sem a chave
+        # "lease" de jeito nenhum, não só None).
+        entrada = criar_entrada(_evento(), _AGORA)
+        doc = event_outbox._entrada_para_doc(entrada)
+        del doc["lease"]
+        reconstruida = event_outbox._entrada_de_doc(entrada.entry_id, doc)
+        self.assertIsNone(reconstruida.lease)
+
+    def test_em_processamento_com_lease_sobrevive_ao_round_trip(self):
+        # Achado real de revisão automática do Codex (P2): antes da
+        # correção, uma entrada EM_PROCESSAMENTO perdia a lease ao gravar
+        # (campo omitido) e _entrada_de_doc levantava o erro de
+        # OutboxEntry.__post_init__ ao reler (esse estado exige lease).
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        doc = event_outbox._entrada_para_doc(em_processamento)
+        self.assertIsNotNone(doc["lease"])
+        reconstruida = event_outbox._entrada_de_doc(em_processamento.entry_id, doc)
+        self.assertEqual(reconstruida, em_processamento)
+        self.assertEqual(reconstruida.lease.lease_token, em_processamento.lease.lease_token)
+        self.assertEqual(reconstruida.lease.generation, em_processamento.lease.generation)
+        self.assertEqual(reconstruida.lease.executor_id, "executor-1")
+        self.assertEqual(reconstruida.lease.expires_at, em_processamento.lease.expires_at)
 
 
 class _RngFixo:

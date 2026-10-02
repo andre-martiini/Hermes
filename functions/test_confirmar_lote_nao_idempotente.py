@@ -178,6 +178,7 @@ class TestConfirmarReagendamentoEmLoteNaoIdempotente(unittest.TestCase):
         from datetime import date, timedelta
 
         fn = inspect.unwrap(main.confirmarReagendamentoEmLote)
+
         # Data sempre futura: a callable troca data passada por hoje, e uma data
         # fixa fez este teste quebrar sozinho na virada para 02/10/2026.
         futura = (date.today() + timedelta(days=30)).isoformat()

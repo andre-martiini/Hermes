@@ -101,6 +101,7 @@ from autonomy.outbox import (
     registrar_falha,
     registrar_sucesso,
 )
+from autonomy.requests import Lease
 
 COLECAO = "outbox_eventos"
 
@@ -129,6 +130,36 @@ def _descongelar(valor: Any) -> Any:
     return valor
 
 
+def _lease_para_doc(lease: Lease | None) -> dict | None:
+    """`Lease` (P05 sub-entrega 17/N, `OutboxEntry.lease`) -> dict aninhado,
+    ou `None` quando a entrada nunca passou por `iniciar_despacho()` --
+    achado real de revisão automática do Codex (P2) na PR desta sub-entrega:
+    antes desta função, `_entrada_para_doc` simplesmente omitia `lease`, o
+    que perderia a lease de uma entrada `EM_PROCESSAMENTO` ao gravar (e
+    `_entrada_de_doc` levantaria o erro de `OutboxEntry.__post_init__` ao
+    reler, já que esse estado exige lease)."""
+    if lease is None:
+        return None
+    return {
+        "lease_token": lease.lease_token,
+        "generation": lease.generation,
+        "executor_id": lease.executor_id,
+        "expires_at": lease.expires_at,
+    }
+
+
+def _lease_de_doc(dados: dict | None) -> Lease | None:
+    """Inverso de `_lease_para_doc`."""
+    if not dados:
+        return None
+    return Lease(
+        lease_token=dados["lease_token"],
+        generation=int(dados["generation"]),
+        executor_id=dados["executor_id"],
+        expires_at=dados["expires_at"],
+    )
+
+
 def _entrada_para_doc(entrada: OutboxEntry) -> dict:
     """`OutboxEntry` (mais o `EventEnvelope` embutido) -> dict pronto para
     `doc_ref.set()`. Datas ficam como `datetime` nativo (não `.isoformat()`)
@@ -150,6 +181,7 @@ def _entrada_para_doc(entrada: OutboxEntry) -> dict:
         "disponivel_em": entrada.disponivel_em,
         "ultima_tentativa_em": entrada.ultima_tentativa_em,
         "ultimo_erro": entrada.ultimo_erro,
+        "lease": _lease_para_doc(entrada.lease),
     }
 
 
@@ -159,7 +191,10 @@ def _entrada_de_doc(entry_id: str, dados: dict) -> OutboxEntry:
     `snapshot.to_dict()`. `EventEnvelope.__post_init__`/`OutboxEntry.__post_init__`
     recalculam e conferem `event_id`/`entry_id` normalmente -- um documento
     corrompido (campo trocado por escrita manual, migração malfeita) falha
-    fechado aqui, mesma garantia que já vale para quem constrói em memória."""
+    fechado aqui, mesma garantia que já vale para quem constrói em memória.
+    `dados.get("lease")` cobre documentos gravados ANTES da P05 sub-entrega
+    17/N (sem o campo) -- lidos como `lease=None`, igual a uma entrada que
+    nunca passou por `iniciar_despacho()`."""
     evento = EventEnvelope(
         event_id=entry_id,
         categoria=CategoriaEvento(dados["categoria"]),
@@ -179,6 +214,7 @@ def _entrada_de_doc(entry_id: str, dados: dict) -> OutboxEntry:
         disponivel_em=dados["disponivel_em"],
         ultima_tentativa_em=dados.get("ultima_tentativa_em"),
         ultimo_erro=dados.get("ultimo_erro"),
+        lease=_lease_de_doc(dados.get("lease")),
     )
 
 
