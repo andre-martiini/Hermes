@@ -30,7 +30,7 @@ from autonomy.outbox import (
     registrar_sucesso,
     varrer_lease_vencida_outbox,
 )
-from autonomy.requests import BACKOFF_BASE_SEGUNDOS, DEFAULT_LEASE_SEGUNDOS
+from autonomy.requests import BACKOFF_BASE_SEGUNDOS, DEFAULT_LEASE_SEGUNDOS, lease_expirada
 
 _AGORA = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -395,11 +395,11 @@ class TestIniciarDespacho(unittest.TestCase):
         with self.assertRaises(ValueError):
             iniciar_despacho(com_backoff, "executor-1", _AGORA)
 
-    def test_ja_em_processamento_com_lease_valida_e_erro(self):
+    def test_ja_em_processamento_e_erro(self):
         entrada = criar_entrada(_evento(), _AGORA)
         em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
-        # estado não é PENDENTE -> pronta_para_despachar já recusa antes de
-        # chegar na checagem de lease, mas o teste cobre o caminho completo.
+        # estado não é PENDENTE -> pronta_para_despachar recusa, mesmo que a
+        # lease já emitida ainda esteja bem dentro do prazo.
         with self.assertRaises(ValueError):
             iniciar_despacho(em_processamento, "executor-2", _AGORA)
 
@@ -407,6 +407,30 @@ class TestIniciarDespacho(unittest.TestCase):
         entrada = criar_entrada(_evento(), _AGORA)
         with self.assertRaises(ValueError):
             iniciar_despacho(entrada, "executor-1", datetime(2026, 9, 29, 12, 0, 0))
+
+    def test_reassumir_depois_de_registrar_falha_nao_espera_lease_antiga_vencer(self):
+        # Achado real de revisão adversarial independente (1a rodada): uma
+        # versão anterior de iniciar_despacho recusava reassumir uma entrada
+        # PENDENTE sempre que `entrada.lease` ainda não tinha expirado --
+        # mas registrar_falha() devolve EM_PROCESSAMENTO para PENDENTE sem
+        # jamais invalidar a lease anterior (ela só vence sozinha depois de
+        # DEFAULT_LEASE_SEGUNDOS, bem mais que o backoff curto do 1o
+        # patamar). Isso bloqueava a retentativa até a lease antiga vencer
+        # por conta própria, ignorando o backoff calculado. Este teste prova
+        # que iniciar_despacho aceita a retentativa assim que
+        # disponivel_em chega, mesmo com a lease antiga tecnicamente ainda
+        # "válida" (expires_at no futuro).
+        entrada = criar_entrada(_evento(), _AGORA)
+        em_processamento = iniciar_despacho(entrada, "executor-1", _AGORA)
+        falhou = registrar_falha(em_processamento, _AGORA, "timeout", rng=_RngFixo(0.0))
+        self.assertEqual(falhou.estado, EstadoOutbox.PENDENTE)
+        # A lease antiga ainda não expirou (duração padrão >> backoff do
+        # 1o patamar) -- prova que o cenário do achado é real.
+        self.assertFalse(lease_expirada(falhou.lease, agora=falhou.disponivel_em))
+
+        retentativa = iniciar_despacho(falhou, "executor-1", falhou.disponivel_em)
+        self.assertEqual(retentativa.estado, EstadoOutbox.EM_PROCESSAMENTO)
+        self.assertEqual(retentativa.lease.generation, 2)
 
 
 class TestVarrerLeaseVencidaOutbox(unittest.TestCase):

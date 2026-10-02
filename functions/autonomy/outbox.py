@@ -352,28 +352,41 @@ def iniciar_despacho(
     chegou a hora" ou "já está em processamento por outro dispatcher", que
     não são a mesma coisa.
 
-    Defesa extra, mesmo padrão de `autonomy.execution.assumir_pedido`: se
-    `entrada.lease` já existir (reassumindo depois de uma geração anterior)
-    e ainda não tiver expirado, recusa -- um dispatcher não deveria estar
-    livre para despachar uma entrada cuja lease anterior pode ainda estar
-    sendo honrada por outro executor (isso só pode acontecer se o estado
-    foi manipulado fora de `iniciar_despacho`/`varrer_lease_vencida_outbox`,
-    já que estas duas funções são as únicas que escrevem `lease`, mas a
-    checagem fica aqui por segurança em profundidade, mesmo raciocínio de
-    `assumir_pedido`)."""
+    NÃO recusa com base em `entrada.lease` ainda não expirada -- achado real
+    de revisão adversarial independente (P05 sub-entrega 17/N, 1a rodada):
+    uma versão anterior desta função copiava a defesa extra de
+    `autonomy.execution.assumir_pedido` ("se já existe lease e ainda não
+    expirou, recusa"), mas essa defesa só é segura em `autonomy.execution`
+    porque LÁ a única forma de um pedido voltar de `RESERVADO`/`EM_ANDAMENTO`
+    para `PENDENTE` é via `autonomy.sweep.varrer_lease_vencida`, que já exige
+    lease confirmada vencida antes de fazer a transição -- ou seja,
+    `pedido.status == PENDENTE` em `autonomy.execution` já GARANTE lease
+    nula ou vencida por construção. Em `autonomy.outbox`, isso é FALSO:
+    `registrar_falha()` aceita uma entrada `EM_PROCESSAMENTO` e a devolve
+    para `PENDENTE` (com backoff) SEM checar/exigir que a lease tenha
+    vencido -- é o caminho normal de "tentativa falhou, mas o dispatcher
+    não caiu, só relatou o erro", distinto de "dispatcher caiu e a lease
+    vai vencer sozinha" (esse segundo caso é `varrer_lease_vencida_outbox`).
+    Com a defesa copiada, uma entrada que falhou dessa forma ficava
+    bloqueada para nova tentativa até a lease ANTIGA (de até
+    `DEFAULT_LEASE_SEGUNDOS`, por padrão 5 minutos) vencer sozinha, mesmo
+    já estando `PENDENTE` com `disponivel_em` no passado -- o backoff curto
+    calculado por `registrar_falha` (patamares de ~1/5/20 min) virava
+    inútil, sobrescrito por uma espera maior e não-intencional.
+    `pronta_para_despachar` (acima) já é a única garantia que esta função
+    precisa: `entrada.estado == PENDENTE` significa, por definição da
+    máquina de estados deste módulo, que nenhum dispatcher está
+    processando a entrada agora -- `EM_PROCESSAMENTO` é o único estado que
+    representa posse ativa, e esta função já recusa despachar fora dele.
+    `entrada.lease`, quando presente numa entrada `PENDENTE`, é só histórico
+    para a próxima geração (ver docstring de `OutboxEntry.lease`), nunca uma
+    posse ainda em vigor."""
     if not pronta_para_despachar(entrada, agora):
         raise ValueError(
             f"entrada de outbox '{entrada.entry_id}' não está pronta para despacho "
             f"(estado atual: '{entrada.estado.value}', disponível em "
             f"{entrada.disponivel_em.isoformat()}) -- iniciar_despacho() exige "
             "pronta_para_despachar(entrada, agora) == True."
-        )
-    if entrada.lease is not None and not lease_expirada(entrada.lease, agora=agora):
-        raise ValueError(
-            f"entrada de outbox '{entrada.entry_id}' já tem lease de "
-            f"'{entrada.lease.executor_id}' ainda válida (expira em "
-            f"{entrada.lease.expires_at.isoformat()}) -- não é possível iniciar um "
-            "despacho novo."
         )
     generation_anterior = entrada.lease.generation if entrada.lease is not None else 0
     lease_nova = nova_lease(
