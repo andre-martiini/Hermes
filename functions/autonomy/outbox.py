@@ -33,20 +33,37 @@ retentativa própria para o outbox -- o plano não pede uma política
 diferente para eventos, e duas políticas de backoff divergentes no mesmo
 código seriam uma inconsistência sem motivo.
 
-Passos 4-10 do pacote (dedup por watermark/cursor de webhook, distinguir
-occurred_at de ingested_at para suprimir alerta em replay antigo -- já
-coberto por `autonomy.events` --, supressão de loop por atualização do
-próprio agente, heartbeat/cobertura por integração -- já coberto por
-`autonomy.integrations`/`integrations_sync` --, `registrar_observacao_externa`,
-reconciliação periódica) ficam fora deste módulo. Em particular, a
-RECONCILIAÇÃO (passo 10 -- encontrar entradas presas porque um dispatcher
+Passos 4, 6 e 9 do pacote (dedup por watermark/cursor de webhook, supressão
+de loop por atualização do próprio agente, `registrar_observacao_externa`)
+ficam fora deste módulo -- o passo 9 já foi implementado em módulo próprio
+(`tools/registrar_observacao_externa.py`, P05 sub-entrega 16/N), sem relação
+com o outbox. Passos 1-2 (envelope) e 5/7/8 (occurred_at vs ingested_at,
+heartbeat/cobertura) também são de `autonomy.events`/`autonomy.integrations`,
+não deste módulo.
+
+A RECONCILIAÇÃO (passo 10 -- encontrar entradas presas porque um dispatcher
 caiu no meio de uma tentativa, sem nunca chamar `registrar_sucesso` nem
-`registrar_falha`) não é modelada aqui: este módulo só tem os estados
-"pendente" e terminal, sem um estado intermediário "em processamento" com
-lease própria -- adicionar isso é decisão de uma sub-entrega futura dedicada
-à wiring real (que também decide se reusa `autonomy.requests.Lease` para o
-dispatcher tomar posse de um lote de entradas, ou modela um mecanismo
-próprio mais simples para o outbox).
+`registrar_falha`) É modelada aqui desde a P05 sub-entrega 17/N: um terceiro
+estado não-terminal, `EM_PROCESSAMENTO`, junto de uma `autonomy.requests.Lease`
+própria da entrada (`OutboxEntry.lease`) -- mesma reutilização de `Lease`
+que `autonomy.execution.PedidoDuravel` já faz para pedidos duráveis (P04),
+em vez de inventar um segundo mecanismo de posse só para o outbox. Um
+dispatcher que queira proteção contra crash no meio de uma tentativa chama
+`iniciar_despacho()` antes de agir (em vez de ir direto para
+`registrar_sucesso`/`registrar_falha`, que continuam aceitando uma entrada
+ainda `PENDENTE` diretamente -- ver suas docstrings) e, se cair sem concluir,
+uma varredura periódica futura (wiring real, fora deste módulo -- mesmo
+padrão de `autonomy.sweep.varrer_lease_vencida` para pedidos) chama
+`varrer_lease_vencida_outbox()` sobre as entradas `EM_PROCESSAMENTO` com
+lease vencida para devolvê-las a `PENDENTE` (com backoff) ou desistir em
+`FALHA_FINAL` com uma `DiagnosticoOutbox`, reaproveitando os mesmos
+`DEFAULT_MAX_TENTATIVAS`/`calcular_backoff_segundos` de `registrar_falha`
+para não ter dois limites de tentativas divergentes para a mesma entrada.
+A função que varre o armazenamento de verdade em busca de entradas
+`EM_PROCESSAMENTO` com lease vencida (consulta Firestore por
+`estado`+`lease.expires_at`, mesmo padrão de `autonomy.sweep`) fica para a
+sub-entrega de wiring real -- este módulo só decide o desfecho de UMA
+entrada já identificada como presa, dado um relógio.
 """
 
 from __future__ import annotations
@@ -56,14 +73,29 @@ from datetime import datetime, timedelta
 from enum import Enum
 
 from .events import EventEnvelope
-from .requests import DEFAULT_MAX_TENTATIVAS, _exigir_tz_aware, calcular_backoff_segundos
+from .requests import (
+    DEFAULT_LEASE_SEGUNDOS,
+    DEFAULT_MAX_TENTATIVAS,
+    Lease,
+    _exigir_tz_aware,
+    calcular_backoff_segundos,
+    lease_expirada,
+    nova_lease,
+)
 
 
 class EstadoOutbox(str, Enum):
     """Estados de uma entrada de outbox. Só dois são terminais
-    (`ENVIADO`/`FALHA_FINAL`) -- ver `_ESTADOS_TERMINAIS`."""
+    (`ENVIADO`/`FALHA_FINAL`) -- ver `_ESTADOS_TERMINAIS`. `EM_PROCESSAMENTO`
+    é opcional e intermediário (P05 sub-entrega 17/N, passo 10 do pacote):
+    um dispatcher que queira proteção contra crash no meio de uma tentativa
+    passa por ele via `iniciar_despacho()`; um dispatcher simples pode
+    continuar indo direto de `PENDENTE` para `registrar_sucesso`/
+    `registrar_falha`, sem usar este estado -- ambos os caminhos continuam
+    válidos."""
 
     PENDENTE = "pendente"
+    EM_PROCESSAMENTO = "em_processamento"
     ENVIADO = "enviado"
     FALHA_FINAL = "falha_final"
 
@@ -113,7 +145,18 @@ class OutboxEntry:
     uma entrada nova (`criar_entrada`) é igual a `criado_em` (elegível
     imediatamente); depois de uma falha (`registrar_falha`), avança pelo
     backoff calculado. `pronta_para_despachar` é quem interpreta este campo
-    junto do estado."""
+    junto do estado.
+
+    `lease` (P05 sub-entrega 17/N, passo 10 do pacote) só é preenchida por
+    `iniciar_despacho()`, ao transicionar para `EM_PROCESSAMENTO`. Não é
+    limpa ao sair desse estado (nem por `registrar_sucesso`/
+    `registrar_falha`, nem por `varrer_lease_vencida_outbox` ao devolver a
+    entrada para `PENDENTE`) -- mesmo padrão de
+    `autonomy.execution.PedidoDuravel.lease`, que também retém a última
+    lease emitida depois que ela expira ou a entrada volta a um estado
+    reivindicável, para que a PRÓXIMA chamada a `iniciar_despacho()` leia
+    `lease.generation` e emita a geração seguinte (fencing contra um
+    dispatcher antigo que ainda tente concluir com a geração anterior)."""
 
     entry_id: str
     evento: EventEnvelope
@@ -123,6 +166,7 @@ class OutboxEntry:
     disponivel_em: datetime
     ultima_tentativa_em: datetime | None = None
     ultimo_erro: str | None = None
+    lease: Lease | None = None
 
     def __post_init__(self) -> None:
         if self.entry_id != self.evento.event_id:
@@ -156,6 +200,11 @@ class OutboxEntry:
             )
         if self.ultima_tentativa_em is not None:
             _exigir_tz_aware(self.ultima_tentativa_em, "ultima_tentativa_em")
+        if self.estado == EstadoOutbox.EM_PROCESSAMENTO and self.lease is None:
+            raise ValueError(
+                "estado 'em_processamento' exige lease -- use iniciar_despacho() em vez "
+                "de construir OutboxEntry diretamente."
+            )
 
 
 def criar_entrada(evento: EventEnvelope, agora: datetime) -> OutboxEntry:
@@ -186,7 +235,13 @@ def pronta_para_despachar(entrada: OutboxEntry, agora: datetime) -> bool:
 def registrar_sucesso(entrada: OutboxEntry, agora: datetime) -> OutboxEntry:
     """Despacho confirmado -- transiciona para `ENVIADO` (terminal).
     `disponivel_em` congela no valor anterior (não há mais próxima
-    tentativa a agendar)."""
+    tentativa a agendar). Aceita a entrada tanto em `PENDENTE` quanto em
+    `EM_PROCESSAMENTO` -- um dispatcher que não usa `iniciar_despacho()`
+    continua podendo chamar esta função direto a partir de `PENDENTE`, sem
+    nenhuma lease envolvida (ver docstring de `EstadoOutbox.EM_PROCESSAMENTO`).
+    `entrada.lease`, se presente, é preservada sem alteração (ver docstring
+    de `OutboxEntry.lease` -- não há mais próxima reivindicação a fencing
+    depois de um estado terminal)."""
     if entrada.estado in _ESTADOS_TERMINAIS:
         raise EstadoOutboxTerminal(entrada.entry_id, entrada.estado)
     _exigir_tz_aware(agora, "agora")
@@ -231,7 +286,14 @@ def registrar_falha(
     fixa) e um limite configurável sem editar este módulo -- o padrão reusa
     `DEFAULT_MAX_TENTATIVAS` de `autonomy.requests` (seção 4.5) para não
     introduzir uma segunda política de "quantas tentativas automáticas" só
-    para o outbox."""
+    para o outbox.
+
+    Aceita a entrada tanto em `PENDENTE` quanto em `EM_PROCESSAMENTO` --
+    mesmo motivo de `registrar_sucesso` (ver sua docstring). `entrada.lease`,
+    se presente, é preservada sem alteração mesmo que o resultado seja
+    `PENDENTE` de novo (ver docstring de `OutboxEntry.lease`): a próxima
+    chamada a `iniciar_despacho()` lê `lease.generation` dali para emitir a
+    geração seguinte."""
     if entrada.estado in _ESTADOS_TERMINAIS:
         raise EstadoOutboxTerminal(entrada.entry_id, entrada.estado)
     _exigir_tz_aware(agora, "agora")
@@ -257,4 +319,196 @@ def registrar_falha(
         ultima_tentativa_em=agora,
         ultimo_erro=erro,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reconciliação (passo 10 do pacote) -- P05 sub-entrega 17/N
+# ---------------------------------------------------------------------------
+
+
+def iniciar_despacho(
+    entrada: OutboxEntry,
+    executor_id: str,
+    agora: datetime,
+    duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
+) -> OutboxEntry:
+    """Um dispatcher que quer proteção contra crash no meio de uma tentativa
+    chama isto ANTES de agir, em vez de ir direto para
+    `registrar_sucesso`/`registrar_falha` -- transiciona `PENDENTE ->
+    EM_PROCESSAMENTO` e emite uma `Lease` nova (`autonomy.requests.nova_lease`,
+    mesma reutilização que `autonomy.execution.assumir_pedido` já faz para
+    pedidos duráveis, em vez de um segundo mecanismo de posse só para o
+    outbox). Se o dispatcher cair sem chamar `registrar_sucesso`/
+    `registrar_falha`, a entrada fica presa em `EM_PROCESSAMENTO` até uma
+    varredura futura (`varrer_lease_vencida_outbox`) encontrar a lease
+    vencida.
+
+    Exige `pronta_para_despachar(entrada, agora)` -- mesma checagem de
+    "está `PENDENTE` e já chegou a hora" que qualquer dispatcher precisa
+    fazer antes de tentar despachar, só que aqui é reforçada em vez de
+    deixada implícita. Levanta `ValueError` (não `EstadoOutboxTerminal`) se
+    a entrada não estiver pronta -- `EstadoOutboxTerminal` é especificamente
+    para "já terminal", e aqui o motivo de recusa também inclui "ainda não
+    chegou a hora" ou "já está em processamento por outro dispatcher", que
+    não são a mesma coisa.
+
+    Defesa extra, mesmo padrão de `autonomy.execution.assumir_pedido`: se
+    `entrada.lease` já existir (reassumindo depois de uma geração anterior)
+    e ainda não tiver expirado, recusa -- um dispatcher não deveria estar
+    livre para despachar uma entrada cuja lease anterior pode ainda estar
+    sendo honrada por outro executor (isso só pode acontecer se o estado
+    foi manipulado fora de `iniciar_despacho`/`varrer_lease_vencida_outbox`,
+    já que estas duas funções são as únicas que escrevem `lease`, mas a
+    checagem fica aqui por segurança em profundidade, mesmo raciocínio de
+    `assumir_pedido`)."""
+    if not pronta_para_despachar(entrada, agora):
+        raise ValueError(
+            f"entrada de outbox '{entrada.entry_id}' não está pronta para despacho "
+            f"(estado atual: '{entrada.estado.value}', disponível em "
+            f"{entrada.disponivel_em.isoformat()}) -- iniciar_despacho() exige "
+            "pronta_para_despachar(entrada, agora) == True."
+        )
+    if entrada.lease is not None and not lease_expirada(entrada.lease, agora=agora):
+        raise ValueError(
+            f"entrada de outbox '{entrada.entry_id}' já tem lease de "
+            f"'{entrada.lease.executor_id}' ainda válida (expira em "
+            f"{entrada.lease.expires_at.isoformat()}) -- não é possível iniciar um "
+            "despacho novo."
+        )
+    generation_anterior = entrada.lease.generation if entrada.lease is not None else 0
+    lease_nova = nova_lease(
+        executor_id, generation_anterior, agora=agora, duracao_segundos=duracao_segundos
+    )
+    return replace(entrada, estado=EstadoOutbox.EM_PROCESSAMENTO, lease=lease_nova)
+
+
+@dataclass(frozen=True)
+class DiagnosticoOutbox:
+    """Uma entrada da "fila de diagnóstico" do outbox -- entrada que esgotou
+    tentativas automáticas (lease vencida repetidamente em
+    `EM_PROCESSAMENTO`) e precisa de atenção não-automática. Lógica pura:
+    só o registro; persistência/alerta reais ficam para o wiring. Mesmo
+    papel de `autonomy.sweep.DiagnosticoPedido`, mas para entradas de
+    outbox em vez de pedidos duráveis -- os dois tipos não são unificados
+    porque representam entidades de domínio diferentes (evento despachado
+    vs. pedido executado), sem campo em comum além do padrão de forma."""
+
+    entry_id: str
+    motivo: str
+    estado_anterior: EstadoOutbox
+    tentativas: int
+    registrado_em: datetime
+
+    def __post_init__(self) -> None:
+        _exigir_tz_aware(self.registrado_em, "registrado_em")
+        if self.tentativas < 0:
+            raise ValueError("tentativas não pode ser negativa.")
+
+
+@dataclass(frozen=True)
+class ResultadoSweepOutbox:
+    """Devolvido por `varrer_lease_vencida_outbox`: a `OutboxEntry`
+    atualizada e, quando a entrada esgotou as tentativas automáticas, o
+    `DiagnosticoOutbox` correspondente (`None` quando uma nova tentativa foi
+    agendada em vez de desistir) -- mesma forma de
+    `autonomy.sweep.ResultadoSweepLeaseVencida`."""
+
+    entrada: OutboxEntry
+    diagnostico: DiagnosticoOutbox | None
+
+
+def varrer_lease_vencida_outbox(
+    entrada: OutboxEntry,
+    agora: datetime,
+    max_tentativas: int = DEFAULT_MAX_TENTATIVAS,
+    rng: object | None = None,
+) -> ResultadoSweepOutbox:
+    """Decide o desfecho de UMA entrada de outbox cuja lease já venceu sem
+    o dispatcher ter chamado `registrar_sucesso`/`registrar_falha` --
+    "dispatcher morto" (mesmo cenário de `autonomy.sweep.varrer_lease_vencida`
+    para pedidos duráveis, passo 10 do pacote P05 em vez do passo 7 do
+    pacote P04).
+
+    Só aceita `entrada.estado == EM_PROCESSAMENTO` e exige `entrada.lease`
+    presente e de fato vencida (`autonomy.requests.lease_expirada`) --
+    levanta `ValueError` fora disso, mesmo estilo defensivo do resto do
+    módulo (nunca assume, sempre confere antes de agir). A função que
+    encontra entradas assim no armazenamento de verdade (consulta Firestore
+    por `estado`+`lease.expires_at`) fica para o wiring real -- esta função
+    só decide UMA entrada já identificada.
+
+    `tentativas_novas = entrada.tentativas + 1` (reusa o mesmo contador de
+    `registrar_falha` -- "lease venceu em processamento" conta como uma
+    tentativa falha, mesmo raciocínio de `autonomy.sweep.varrer_lease_vencida`
+    contar uma lease vencida de pedido como tentativa). Se
+    `tentativas_novas > max_tentativas` (estritamente maior, NÃO `>=` --
+    mesma correção de off-by-one de `registrar_falha`/`autonomy.sweep`,
+    para conceder todos os `max_tentativas` patamares de backoff antes de
+    desistir): transiciona para `FALHA_FINAL` e devolve um
+    `DiagnosticoOutbox`. Caso contrário: volta para `PENDENTE` com
+    `disponivel_em` avançado pelo mesmo
+    `autonomy.requests.calcular_backoff_segundos` de `registrar_falha` (não
+    duas políticas de backoff divergentes para a mesma entrada, dependendo
+    de ter sido uma falha reportada ou uma lease vencida).
+
+    `entrada.lease` É PRESERVADA sem alteração em ambos os desfechos (ver
+    docstring de `OutboxEntry.lease`) -- mesmo quando o resultado é
+    `PENDENTE`, para que a geração monotônica continue protegendo contra um
+    dispatcher antigo que ainda tente concluir com a lease vencida (fencing
+    -- `iniciar_despacho()` da próxima vez lê `lease.generation` dali)."""
+    if entrada.estado != EstadoOutbox.EM_PROCESSAMENTO:
+        raise ValueError(
+            f"entrada de outbox '{entrada.entry_id}' está em '{entrada.estado.value}', "
+            "não 'em_processamento' -- nada para varrer."
+        )
+    if entrada.lease is None:
+        raise ValueError(f"entrada de outbox '{entrada.entry_id}' não tem lease -- nada para varrer.")
+    _exigir_tz_aware(agora, "agora")
+    if not lease_expirada(entrada.lease, agora=agora):
+        raise ValueError(
+            f"entrada de outbox '{entrada.entry_id}' tem lease ainda válida (expira em "
+            f"{entrada.lease.expires_at.isoformat()}) -- não é um caso de sweep."
+        )
+    if max_tentativas < 1:
+        raise ValueError("max_tentativas deve ser >= 1.")
+
+    tentativas_novas = entrada.tentativas + 1
+    if tentativas_novas > max_tentativas:
+        entrada_nova = replace(
+            entrada,
+            estado=EstadoOutbox.FALHA_FINAL,
+            tentativas=tentativas_novas,
+            ultima_tentativa_em=agora,
+            ultimo_erro=(
+                f"lease vencida em 'em_processamento' após {tentativas_novas} "
+                f"tentativa(s) (limite {max_tentativas}) -- sem nova retentativa, "
+                "requer atenção manual."
+            ),
+        )
+        diagnostico = DiagnosticoOutbox(
+            entry_id=entrada.entry_id,
+            motivo=(
+                f"lease vencida em 'em_processamento' por {tentativas_novas} vez(es) "
+                f"(limite {max_tentativas}) -- possível dispatcher que trava/cai no "
+                "meio da tentativa; entrada marcada falha_final, requer atenção manual."
+            ),
+            estado_anterior=entrada.estado,
+            tentativas=tentativas_novas,
+            registrado_em=agora,
+        )
+        return ResultadoSweepOutbox(entrada=entrada_nova, diagnostico=diagnostico)
+
+    backoff_segundos = calcular_backoff_segundos(tentativas_novas, rng=rng)
+    entrada_nova = replace(
+        entrada,
+        estado=EstadoOutbox.PENDENTE,
+        tentativas=tentativas_novas,
+        disponivel_em=agora + timedelta(seconds=backoff_segundos),
+        ultima_tentativa_em=agora,
+        ultimo_erro=(
+            f"lease vencida em 'em_processamento' ({tentativas_novas}a tentativa) -- "
+            "devolvida para nova tentativa."
+        ),
+    )
+    return ResultadoSweepOutbox(entrada=entrada_nova, diagnostico=None)
 
