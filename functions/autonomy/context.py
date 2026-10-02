@@ -56,6 +56,23 @@ perguntas diferentes (se há um humano supervisionando a sessão agora vs.
 quem originou ESTE fato especificamente) e não devem ser confundidos, mesmo
 quando a mesma sessão é `origem_humana=True` nos dois canais.
 
+Achado real do Codex (revisão automática desta PR, comentário no commit
+`0ab24ff`): no canal `"web"`, o USUÁRIO também pode afirmar um fato
+literalmente (ex.: "prefiro reuniões de manhã") e o modelo só reage
+chamando `salvar_memoria_global` -- isso é `DECLARACAO_HUMANA`, não
+`INFERENCIA_AGENTE`, mesmo que o canal seja `"web"`. O canal sozinho não
+distingue, DENTRO do mesmo canal, "o usuário disse isto" de "eu percebi
+isto" -- só o modelo, no momento da chamada, sabe qual dos dois aconteceu.
+`origem_fato_para_salvar_memoria` (abaixo) resolve isso pedindo ao PRÓPRIO
+CHAMADOR (o parâmetro novo `usuario_afirmou_diretamente` da tool, preenchido
+pelo modelo a cada chamada, não pelo código) em vez de adivinhar só pelo
+canal -- `origem_fato_para_canal_de_salvar_memoria` continua existindo como
+o FALLBACK quando esse parâmetro vem ausente/falso (comportamento anterior,
+preservado para não quebrar um cliente MCP que ainda não manda o parâmetro
+-- o contrato do servidor MCP já garante afirmação do usuário de qualquer
+forma, então o fallback para canal="mcp" continua correto mesmo sem o
+parâmetro).
+
 NÃO tocado por esta sub-entrega, registrado como pendência:
 - `knowledge_graph.py` (`_crystallize_task` e o fluxo de nós conceituais de
   procedimento): escreve em `knowledge_nodes` com uma FORMA DIFERENTE de
@@ -143,3 +160,32 @@ def origem_fato_para_canal_de_salvar_memoria(canal: str | None) -> str:
     a afirmação mais forte das duas (fato literalmente dito pelo usuário).
     """
     return DECLARACAO_HUMANA if canal == "mcp" else INFERENCIA_AGENTE
+
+
+def origem_fato_para_salvar_memoria(
+    canal: str | None, usuario_afirmou_diretamente: bool = False
+) -> str:
+    """Proveniência de um fato NOVO criado via `salvar_memoria_global`,
+    combinando o `canal` da chamada com `usuario_afirmou_diretamente` -- um
+    parâmetro NOVO da própria tool (ver `tools/schemas/salvar_memoria_global.json`
+    e as closures em `main.py`/`tools/hermes_tools.py`), que o MODELO que fez
+    a chamada preenche a cada vez, declarando se FOI o usuário quem afirmou
+    aquele fato literalmente nesta conversa.
+
+    `usuario_afirmou_diretamente=True` -> `DECLARACAO_HUMANA`, em QUALQUER
+    canal -- é a fonte mais confiável que existe (o próprio chamador, que viu
+    a conversa, afirma que o usuário disse aquilo). Caso contrário (`False`
+    ou parâmetro ausente, ex.: um cliente MCP mais antigo que ainda não
+    manda esse campo), cai no fallback de `origem_fato_para_canal_de_salvar_memoria`
+    -- que já trata canal="mcp" como declaração humana por contrato, e
+    qualquer outro canal como inferência do agente.
+
+    Nunca o inverso (um canal "mcp" com `usuario_afirmou_diretamente=False`
+    virar `INFERENCIA_AGENTE`): o contrato do servidor MCP já exige afirmação
+    do usuário para esta tool ser chamada, então um cliente que simplesmente
+    ainda não envia o parâmetro não deve perder a classificação correta que
+    o canal sozinho já garantia antes deste parâmetro existir.
+    """
+    if usuario_afirmou_diretamente:
+        return DECLARACAO_HUMANA
+    return origem_fato_para_canal_de_salvar_memoria(canal)

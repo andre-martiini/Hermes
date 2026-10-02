@@ -25,6 +25,7 @@ from autonomy.context import (
     ORIGENS_FATO_VALIDAS,
     origem_fato_de_leitura,
     origem_fato_para_canal_de_salvar_memoria,
+    origem_fato_para_salvar_memoria,
 )
 from tools import hermes_tools
 from tools.tool_context import ToolContext
@@ -118,13 +119,21 @@ class TestSalvarMemoriaGlobalPorCanal(unittest.TestCase):
     (canal="web") -- mas os dois têm um contrato de texto DIFERENTE para
     quando acionar a tool (ver autonomy/context.py). Achado real da 1a
     rodada de revisão adversarial: a 1a versão desta sub-entrega gravava
-    `DECLARACAO_HUMANA` para os dois canais, ignorando essa diferença."""
+    `DECLARACAO_HUMANA` para os dois canais, ignorando essa diferença.
+
+    Achado real do Codex (revisão automática da PR): mesmo no canal "web", o
+    USUÁRIO pode afirmar um fato literalmente -- o canal sozinho não
+    distingue isso de uma inferência do próprio modelo. `usuario_afirmou_diretamente`
+    é o parâmetro novo que resolve isso (ver `origem_fato_para_salvar_memoria`)."""
 
     def setUp(self):
         self.db = _MockDb()
 
-    def _chamar(self, canal):
+    def _chamar(self, canal, usuario_afirmou_diretamente=None):
         ctx = ToolContext(canal=canal, _db=self.db, _gemini_key="fake-key")
+        args = {"fato": "um fato qualquer", "categoria": "fato_isolado"}
+        if usuario_afirmou_diretamente is not None:
+            args["usuario_afirmou_diretamente"] = usuario_afirmou_diretamente
         with mock.patch.object(
             main, "_classify_memory_candidate",
             return_value={"should_save": True, "reason": "ok", "confidence": 0.9,
@@ -132,9 +141,7 @@ class TestSalvarMemoriaGlobalPorCanal(unittest.TestCase):
         ), _patch_embedding_e_similares() as mocks:
             mocks["get_embedding"].return_value = [0.1, 0.2, 0.3]
             mocks["_find_similar_memory_nodes"].return_value = []
-            resultado_json = hermes_tools._salvar_memoria_global(
-                ctx, {"fato": "um fato qualquer", "categoria": "fato_isolado"}
-            )
+            resultado_json = hermes_tools._salvar_memoria_global(ctx, args)
         import json as _json
         resultado = _json.loads(resultado_json)
         doc = self.db.collection("knowledge_nodes")._docs[resultado["memory_id"]]
@@ -144,8 +151,18 @@ class TestSalvarMemoriaGlobalPorCanal(unittest.TestCase):
         doc = self._chamar("mcp")
         self.assertEqual(doc["origem_fato"], DECLARACAO_HUMANA)
 
-    def test_canal_web_grava_inferencia_agente(self):
+    def test_canal_web_sem_afirmacao_grava_inferencia_agente(self):
         doc = self._chamar("web")
+        self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
+
+    def test_canal_web_com_usuario_afirmou_diretamente_grava_declaracao_humana(self):
+        """Cenário exato do achado do Codex: usuário diz 'prefiro reuniões de
+        manhã' no copiloto web; o modelo passa usuario_afirmou_diretamente=True."""
+        doc = self._chamar("web", usuario_afirmou_diretamente=True)
+        self.assertEqual(doc["origem_fato"], DECLARACAO_HUMANA)
+
+    def test_canal_web_com_usuario_afirmou_diretamente_false_explicito_grava_inferencia_agente(self):
+        doc = self._chamar("web", usuario_afirmou_diretamente=False)
         self.assertEqual(doc["origem_fato"], INFERENCIA_AGENTE)
 
     def test_canal_desconhecido_tambem_grava_inferencia_agente(self):
@@ -165,6 +182,31 @@ class TestOrigemFatoParaCanalDeSalvarMemoria(unittest.TestCase):
 
     def test_none_e_inferencia_agente(self):
         self.assertEqual(origem_fato_para_canal_de_salvar_memoria(None), INFERENCIA_AGENTE)
+
+
+class TestOrigemFatoParaSalvarMemoria(unittest.TestCase):
+    """`origem_fato_para_salvar_memoria` combina canal + o parâmetro
+    `usuario_afirmou_diretamente` que o modelo preenche a cada chamada --
+    adicionado em resposta ao achado real do Codex (ver docstring do módulo)."""
+
+    def test_usuario_afirmou_diretamente_vence_qualquer_canal(self):
+        for canal in ("web", "mcp", None, "algum_canal_futuro"):
+            with self.subTest(canal=canal):
+                self.assertEqual(
+                    origem_fato_para_salvar_memoria(canal, True), DECLARACAO_HUMANA
+                )
+
+    def test_sem_afirmacao_cai_no_fallback_por_canal(self):
+        self.assertEqual(
+            origem_fato_para_salvar_memoria("mcp", False), DECLARACAO_HUMANA
+        )
+        self.assertEqual(
+            origem_fato_para_salvar_memoria("web", False), INFERENCIA_AGENTE
+        )
+
+    def test_parametro_omitido_usa_default_false(self):
+        self.assertEqual(origem_fato_para_salvar_memoria("web"), INFERENCIA_AGENTE)
+        self.assertEqual(origem_fato_para_salvar_memoria("mcp"), DECLARACAO_HUMANA)
 
 
 class TestOrigemFatoDeLeitura(unittest.TestCase):

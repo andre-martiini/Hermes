@@ -854,10 +854,11 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
         _normalize_memory_category,
         _save_memory_node,
     )
-    from autonomy.context import origem_fato_para_canal_de_salvar_memoria
+    from autonomy.context import origem_fato_para_salvar_memoria
 
     fato = args.get("fato")
     categoria = args.get("categoria")
+    usuario_afirmou_diretamente = bool(args.get("usuario_afirmou_diretamente"))
     try:
         retention = _classify_memory_candidate(
             api_key=ctx.gemini_key, fato=fato, categoria=categoria
@@ -879,7 +880,9 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
             categoria=retention.get("normalized_category", categoria),
             session_id=ctx.session_id,
             user_uid=ctx.user_uid,
-            origem_fato=origem_fato_para_canal_de_salvar_memoria(ctx.canal),
+            origem_fato=origem_fato_para_salvar_memoria(
+                ctx.canal, usuario_afirmou_diretamente
+            ),
         )
         result["retention_reason"] = retention.get("reason")
         result["retention_confidence"] = retention.get("confidence")
