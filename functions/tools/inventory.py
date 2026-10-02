@@ -759,6 +759,21 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "chamada monta `entry` com `datetime.now(timezone.utc)` novo e faz `ArrayUnion([entry])` -- "
         "repetir com a mesma nota acrescenta uma segunda linha ao diário, nunca substitui a primeira",
     ),
+    "registrar_observacao_externa": ToolInventoryEntry(
+        "integracoes", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o documento recém-gravado antes de responder (grava-e-relê, "
+        "D07 do plano); nenhum verificador externo confere o relato em si",
+        dados_sensiveis_categoria="conteúdo livre declarado pelo cliente MCP (`assunto`, `fonte`); "
+        "pode conter dados pessoais ou sensíveis de terceiros, dependendo do que o conector "
+        "relatou -- marcado sensível por precaução, não por um caso conhecido",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="P05 sub-entrega 16/N. `_R.IRREVERSIVEL` pela mesma razão de `registrar_no_diario`: "
+        "não há tool para apagar um documento de `observacoes_externas`. Não idempotente: cada "
+        "chamada cria um documento novo (ID automático), mesmo com argumentos idênticos -- "
+        "nenhuma deduplicação por desenho (ver docstring do módulo: a garantia de 'não virar "
+        "preferência/autorização' é por ISOLAMENTO da coleção, não por um campo que bloqueie "
+        "promoção; nenhum outro módulo lê `observacoes_externas` hoje).",
+    ),
     "gerar_imagem": ToolInventoryEntry(
         "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "nenhum automático — a prévia volta anexada ao resultado para quem pediu conferir a imagem",

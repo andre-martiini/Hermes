@@ -2306,6 +2306,12 @@ def _registrar_saude(ctx: ToolContext, args: dict):
     return registrar(ctx, args)
 
 
+def _registrar_observacao_externa(ctx: ToolContext, args: dict):
+    from tools.registrar_observacao_externa import registrar
+
+    return registrar(ctx, args)
+
+
 # ---------------------------------------------------------------------------
 # Investimentos (servico externo `decisao-investimentos`)
 # ---------------------------------------------------------------------------
@@ -2822,6 +2828,7 @@ _HANDLERS: dict = {
     "encontrar_slot_livre": _encontrar_slot_livre,
     "consultar_saude": _consultar_saude,
     "registrar_saude": _registrar_saude,
+    "registrar_observacao_externa": _registrar_observacao_externa,
     "consultar_atividades_mes": _consultar_atividades_mes,
     "consultar_saude_integracoes": _consultar_saude_integracoes,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
