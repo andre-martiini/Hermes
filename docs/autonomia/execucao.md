@@ -513,6 +513,7 @@ testes:
 evidencias:
   - "1 rodada de revisao adversarial interna (Agent general-purpose, sem contexto da implementacao). Nao achou bug real -- ver decisoes para o relato completo, incluindo a verificacao extra (reverter e confirmar falha dos testes novos)."
   - "O mesmo codigo, na PR #399 original, ja tinha passado pela revisao automatica do Codex (chatgpt-codex-connector) sem nenhum comentario de achado -- so o comentario-resumo de status."
+  - "PR #419 aberta por esta execucao (https://github.com/andre-martiini/Hermes/pull/419), referenciando o commit original 8362537 da PR #399 (fechada por esta execucao com comentario apontando para a #419)."
 migracao:
   dry_run: null
   executada: false
