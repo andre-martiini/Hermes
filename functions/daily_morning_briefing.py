@@ -6,6 +6,8 @@ except ImportError:
 
 from firebase_functions import scheduler_fn, options
 
+_LIMITE_TELEGRAM = 4096
+
 _DIAS_SEMANA = [
     "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
     "sexta-feira", "sábado", "domingo",
@@ -19,9 +21,22 @@ _DIAS_SEMANA = [
     timeout_sec=120,
 )
 def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
-    """Envia via Telegram, todo dia às 5h, um resumo das ações e compromissos do dia."""
+    """Envia via Telegram, todo dia às 5h, um resumo das ações e compromissos do
+    dia e do que o Gaspar fez desde as 19h de ontem. A própria execução fica em
+    agent_runs, com a confirmação (ou não) do envio."""
+    from main import get_db
+    from agent_runs import registrar_execucao
+
+    db = get_db()
+    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    now_sp = datetime.datetime.now(sp_tz)
+    today_str = now_sp.strftime("%Y-%m-%d")
+    with registrar_execucao(db, "briefing_matinal_acoes", run_id=f"briefing_matinal_acoes:{today_str}") as run:
+        _briefing(db, now_sp, run)
+
+
+def _briefing(db, now_sp, run):
     from main import (
-        get_db,
         get_calendar_service,
         get_target_calendar_id,
         _resolve_default_telegram_chat_id,
@@ -29,10 +44,8 @@ def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
         _send_telegram_message,
     )
     from hermes_calendar_tools import consultar_eventos
+    from visao_atividade import secao_atividade
 
-    db = get_db()
-    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    now_sp = datetime.datetime.now(sp_tz)
     today_str = now_sp.strftime("%Y-%m-%d")
     dia_semana = _DIAS_SEMANA[now_sp.weekday()]
     data_fmt = now_sp.strftime("%d/%m/%Y")
@@ -88,16 +101,32 @@ def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
                 fim = f"–{ev['fim']}" if ev.get("fim") else ""
                 lines.append(f"• {inicio}{fim} — {ev.get('titulo')}")
 
-        lines.append("\nBom trabalho! 💪")
-
-    message = "\n".join(lines)
+    fechamento = "\nBom trabalho! 💪" if (tarefas_hoje or eventos_hoje) else ""
+    base = "\n".join(lines)
+    try:
+        secao = secao_atividade(db, now_sp, limite=_LIMITE_TELEGRAM - len(base) - len(fechamento) - 3)
+    except Exception as exc:
+        print(f"[BriefingMatinal] Seção de atividade indisponível: {exc}")
+        run.parcial(f"seção de atividade indisponível: {exc}")
+        secao = ""
+    message = base + (f"\n\n{secao}" if secao else "") + (f"\n{fechamento}" if fechamento else "")
+    run.contar(tarefas=len(tarefas_hoje), eventos=len(eventos_hoje))
 
     chat_id = _resolve_default_telegram_chat_id(db)
     if not chat_id:
         print("[BriefingMatinal] Nenhum chat_id do Telegram configurado.")
+        run.falhou("nenhum chat do Telegram configurado")
         return
 
     try:
-        _send_telegram_message(_get_telegram_token(db), chat_id, message)
+        enviado = _send_telegram_message(_get_telegram_token(db), chat_id, message)
     except Exception as exc:
         print(f"[BriefingMatinal] Falha ao enviar Telegram: {exc}")
+        enviado = None
+    run.contar(enviado=1 if enviado else 0)
+    if enviado:
+        run.verificado("verificado")
+        run.resumo(f"Briefing enviado: {len(tarefas_hoje)} ações, {len(eventos_hoje)} compromissos")
+    else:
+        run.verificado("falhou")
+        run.falhou("o Telegram não confirmou o envio do briefing")

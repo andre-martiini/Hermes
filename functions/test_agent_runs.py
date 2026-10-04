@@ -345,6 +345,15 @@ class TestRegistrarExecucao(unittest.TestCase):
         self.assertEqual(d["estado_verificado"], "pendente")
 
 
+    def test_parcial_depois_de_falha_continua_erro_e_soma_os_motivos(self):
+        with runs_mod.registrar_execucao(self.db, "r") as run:
+            run.falhou("sem chat")
+            run.parcial("seção fora")
+        [d] = self._docs().values()
+        self.assertEqual(d["status"], "erro")
+        self.assertEqual(d["erro"], "sem chat; seção fora")
+
+
 class TestFerramentasMcp(unittest.TestCase):
     def test_registrar_execucao_agente_aceita_campos_novos_e_origem_mcp(self):
         from tools.hermes_tools import registrar_execucao_agente
