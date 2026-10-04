@@ -61,6 +61,31 @@ class TestAcoes(unittest.TestCase):
         ficou = {"removidas": ["e3"]}
         self.assertEqual(_v("editar_plano_acao", db, {"task_id": "t1"}, "OK|" + json.dumps(ficou)).estado, "falhou")
 
+    def test_texto_longo_resumido_no_diff_confere_pelo_resumo(self):
+        # Caso real (04/10/2026): o diff de editar_plano_acao corta texto > 80 caracteres e o
+        # verificador comparava o texto inteiro relido com a prévia cortada → falso "falhou".
+        import subtarefas
+
+        longo = ("Opcionais D, F e G — FEITO 04/10: texto cinético (rotulo_tela, preso ao destaque), "
+                 "trilha fixa do Lyria com ducking relativo à voz e versão vertical 9:16")
+        db = _db(tarefas={"t1": {"plano_acao": [{"id": "e1", "estado": "feito", "text": longo}]}})
+        diff = subtarefas.diferencas([{"id": "e1", "estado": "pendente", "text": "Opcionais"}],
+                                     [{"id": "e1", "estado": "feito", "text": longo}])
+        self.assertTrue(diff["alteradas"]["e1"]["text"][1].endswith("..."))
+        for nome in ("editar_plano_acao", "editar_etapa"):
+            with self.subTest(nome=nome):
+                res = _v(nome, db, {"task_id": "t1", "etapa_id": "e1"}, "OK|" + json.dumps(diff))
+                self.assertEqual(res.estado, "verificado", res.motivo)
+
+    def test_texto_longo_diferente_continua_falhando(self):
+        pedido = "Etapa com um texto bem comprido que passa dos oitenta caracteres para o diff cortar no fim"
+        gravado = "Outra etapa, com texto diferente mas também comprido o bastante para ser resumido no diff"
+        db = _db(tarefas={"t1": {"plano_acao": [{"id": "e1", "text": gravado}]}})
+        diff = {"alteradas": {"e1": {"text": ["antes", pedido[:77] + "..."]}}}
+        res = _v("editar_plano_acao", db, {"task_id": "t1"}, "OK|" + json.dumps(diff))
+        self.assertEqual(res.estado, "falhou")
+        self.assertIn("e1", res.motivo)
+
     def test_apagar_campo_da_etapa_conta_como_verificado(self):
         db = _db(tarefas={"t1": {"plano_acao": [{"id": "e1", "text": "A"}]}})
         diff = {"alteradas": {"e1": {"data_prevista": ["2026-09-25", None]}}}
