@@ -14,6 +14,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
+from subtarefas import resumo_valor
 from verificacao import ResultadoOperacao
 
 PROPOSTAS = frozenset({
@@ -185,6 +186,9 @@ def editar_plano(db, args, resultado, nome="editar_plano_acao"):
             depois = par[1] if isinstance(par, (list, tuple)) and len(par) == 2 else par
             atual = etapa.get(campo)
             if (atual in (None, "") and depois in (None, "")) or _norm(atual) == _norm(depois):
+                continue
+            # O diff resume texto longo (77 caracteres + "..."): compara resumo com resumo.
+            if _norm(resumo_valor(atual)) == _norm(depois):
                 continue
             return _falhou(nome, alvo, f"a etapa {etapa_id} ficou com {campo}={atual!r}, esperado {depois!r}.")
     for etapa_id in diff.get("adicionadas") or []:

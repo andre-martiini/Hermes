@@ -635,7 +635,10 @@ def atualizar_lixeira(etapas_removidas, edicao: EdicaoPlano, agora_iso: str) -> 
     return saida[-LIMITE_ETAPAS_REMOVIDAS:]
 
 
-def _resumo_valor(valor):
+def resumo_valor(valor):
+    """Como um valor aparece no diff de `diferencas`: texto longo vira os 77 primeiros
+    caracteres + "...". Publica porque o verificador de escrita precisa aplicar o mesmo
+    resumo ao valor relido antes de comparar (senao todo texto longo "falha")."""
     if isinstance(valor, str) and len(valor) > 80:
         return valor[:77] + "..."
     return valor
@@ -666,7 +669,7 @@ def diferencas(plano_antes, plano_depois) -> dict:
             else:
                 a, b = velho.get(chave), novo.get(chave)
             if a != b:
-                campos[chave] = [_resumo_valor(a), _resumo_valor(b)]
+                campos[chave] = [resumo_valor(a), resumo_valor(b)]
         if campos:
             alteradas[eid] = campos
 
