@@ -3,6 +3,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -319,6 +320,15 @@ def _partes_texto_busca(data: dict) -> list[tuple[str, str, list[str], float]]:
     return partes
 
 
+@lru_cache(maxsize=100_000)
+def _razao(a: str, b: str) -> float:
+    """Semelhanca entre duas palavras (SequenceMatcher). Memorizada porque uma
+    busca comparava a mesma dupla variante x palavra milhoes de vezes (2,3 mi
+    chamadas em uma busca de 04/10/2026, ~85% do tempo): as palavras dos
+    diarios se repetem muito entre as acoes."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
 def _score_variante_em_texto(variante: str, texto: str, tokens: list[str], peso: float) -> float:
     if not variante:
         return 0.0
@@ -351,7 +361,7 @@ def _score_variante_em_texto(variante: str, texto: str, tokens: list[str], peso:
                 continue
             if abs(len(token) - len(variante)) > max(3, int(len(variante) * 0.45)):
                 continue
-            ratio = SequenceMatcher(None, variante, token).ratio()
+            ratio = _razao(variante, token)
             if ratio > best_ratio:
                 best_ratio = ratio
                 if best_ratio >= 0.95:
@@ -425,7 +435,7 @@ def _calcular_match_busca(data: dict, termos: list[str], query: str = "") -> tup
         if any(
             variante in title_tokens
             or (len(variante) >= 4 and variante in titulo)
-            or any(len(variante) >= 5 and SequenceMatcher(None, variante, token).ratio() >= 0.88 for token in title_tokens)
+            or any(len(variante) >= 5 and _razao(variante, token) >= 0.88 for token in title_tokens)
             for variante in variantes
         ):
             title_hits += 1
