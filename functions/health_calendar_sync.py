@@ -16,6 +16,7 @@ nenhuma palavra-chave) nao precise varrer o historico inteiro.
 from datetime import datetime, timedelta, timezone
 
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 SYNC_WINDOW_PAST_DAYS = 14
 SYNC_WINDOW_FUTURE_DAYS = 60
@@ -47,6 +48,7 @@ def _classify(titulo: str):
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
 )
+@instrumentada("sincronizar_eventos_saude_agenda")
 def sincronizar_eventos_saude_agenda(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada diariamente 6h BRT — espelha eventos de saude da Google Agenda para health_events."""
     from main import get_db, get_calendar_service, get_sync_calendar_ids

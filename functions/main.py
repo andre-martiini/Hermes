@@ -12234,7 +12234,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     except Exception as _fe:
                         res = f"Erro ao executar {fc.name}: {_fe}"
                 
-                _verif = _trava_verificar(db, fc.name, fc.args, res)
+                _verif = _trava_verificar(db, fc.name, fc.args, res,
+                                          canal="telegram" if str(session_id or "").startswith("telegram_") else "web")
                 res = _trava_anotar(res, _verif)
                 _chamada = {
                     "name": fc.name,

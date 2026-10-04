@@ -53,6 +53,7 @@ from datetime import datetime, timedelta, timezone
 
 from firebase_admin import firestore
 from firebase_functions import firestore_fn, https_fn, scheduler_fn, options
+from agent_runs import instrumentada
 
 import os
 
@@ -1342,6 +1343,7 @@ def _persistir(db, resumo: dict) -> None:
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
+@instrumentada("gerar_resumo_matinal")
 def gerar_resumo_matinal(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada 04:30 BRT. Precisa rodar DEPOIS de `daily_wip_reset_and_degradation`
     (00:00), que é quem produz a herança do dia — rodar antes mostraria o dia de

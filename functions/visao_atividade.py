@@ -30,6 +30,9 @@ _ROTULOS = {
     "relatorio_diario_custos": "Relatório de custos",
     "briefing_matinal_acoes": "Briefing das 5h",
     ROTINA_WHATSAPP: "WhatsApp",
+    "escritas_mcp": "Ações editadas pelo Claude (MCP)",
+    "escritas_telegram": "Ações editadas pelo Telegram",
+    "escritas_web": "Ações editadas pelo app",
 }
 
 # status do outbox -> (contador, rótulo, estado_verificado)
@@ -99,6 +102,10 @@ def _linhas_fez(runs: list[dict]) -> list[str]:
     for rotina, lista in sorted(por_rotina.items(), key=lambda kv: -len(kv[1])):
         if rotina == ROTINA_WHATSAPP:
             linhas.append(_e(_linha_whatsapp(lista)))
+        elif rotina.startswith("escritas_"):
+            acoes = {a for r in lista for a in (r.get("acoes_afetadas") or [])}
+            edicoes = f"{len(lista)} edição" if len(lista) == 1 else f"{len(lista)} edições"
+            linhas.append(_e(f"{_rotulo(rotina)}: {edicoes}" + (f" em {len(acoes)} ações" if len(acoes) > 1 else "")))
         elif len(lista) == 1:
             linhas.append(_e(lista[0].get("resumo") or _rotulo(rotina)))
         else:

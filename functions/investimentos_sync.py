@@ -16,6 +16,7 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 from firebase_functions import options, scheduler_fn
+from agent_runs import instrumentada
 
 import subtarefas
 
@@ -176,6 +177,7 @@ def sincronizar_decisao_investimentos(db) -> dict:
     memory=options.MemoryOption.MB_256,
     timeout_sec=120,
 )
+@instrumentada("sincronizar_investimentos_pos_decisao")
 def sincronizar_investimentos_pos_decisao(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Rodada do dia 1 depois da decisao mensal.
 

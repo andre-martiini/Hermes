@@ -8,6 +8,7 @@ Telegram. Sem LLM — e uma agregacao deterministica, nao uma narrativa.
 from datetime import datetime, timedelta, timezone
 
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 
 def _week_dates(end_date_str: str, days: int = 7) -> list[str]:
@@ -131,6 +132,7 @@ def format_weekly_summary_message(summary: dict) -> str:
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
 )
+@instrumentada("gerar_resumo_semanal_saude")
 def gerar_resumo_semanal_saude(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada sexta-feira 19h BRT — agrega a semana de saude e envia no Telegram."""
     from main import get_db, _get_telegram_token
@@ -166,6 +168,7 @@ def gerar_resumo_semanal_saude(event: scheduler_fn.ScheduledEvent = None) -> Non
     memory=options.MemoryOption.MB_512,
     timeout_sec=60,
 )
+@instrumentada("verificar_reavaliacoes_saude")
 def verificar_reavaliacoes_saude(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada diariamente 8h BRT — avisa no Telegram quando a proximaReavaliacao
     de um registro do arquivo medico chega a exatamente 14 dias."""

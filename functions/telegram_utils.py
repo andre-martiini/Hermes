@@ -2894,7 +2894,7 @@ def _run_gemini_turn(
                 result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
             except Exception as tool_err:
                 result_text = f"Erro ao executar {fc.name}: {tool_err}"
-        verificacao = verificar_ferramenta(db, fc.name, kwargs, result_text)
+        verificacao = verificar_ferramenta(db, fc.name, kwargs, result_text, canal="telegram")
         result_text = anotar_resultado(result_text, verificacao)
         if perf_state is not None:
             chamada = {

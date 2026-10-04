@@ -6,6 +6,7 @@ except ImportError:
 
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 
 def _last_day_of_month(ref: datetime.datetime) -> int:
@@ -80,6 +81,7 @@ def _deve_gerar_hoje(recorrencia: dict, now_sp: datetime.datetime) -> tuple[bool
     memory=options.MemoryOption.MB_256,
     timeout_sec=120,
 )
+@instrumentada("gerar_acoes_recorrentes_mensais")
 def gerar_acoes_recorrentes_mensais(event: scheduler_fn.ScheduledEvent):
     # Apesar do nome (mantido para não recriar a função agendada no deploy),
     # este job processa recorrências semanais E mensais.

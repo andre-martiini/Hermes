@@ -19,6 +19,7 @@ Persiste em health_weekly_reports/{YYYY-Www}.
 from datetime import datetime, timedelta, timezone
 
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 _RADICULAR_ORDER = ["gluteo", "quadril", "coxa", "joelho", "panturrilha", "tornozelo", "pe"]
 
@@ -515,6 +516,7 @@ Responda só o texto corrido, sem JSON, sem "Bloco 1" etc. — só os parágrafo
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
 )
+@instrumentada("gerar_relatorio_semanal_saude")
 def gerar_relatorio_semanal_saude(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada domingo 19h BRT -- monta a placa (Fase 1), decide o ajuste
     (Fase 2), audita o ajuste da semana passada e gera a narrativa (Fase 3), e

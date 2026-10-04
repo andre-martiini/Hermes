@@ -364,3 +364,34 @@ def registrar_execucao(db, rotina: str, origem: str = "agendada", run_id: str | 
         _gravar_execucao(db, run, inicio, STATUS_ERRO, f"{type(exc).__name__}: {exc}")
         raise
     _gravar_execucao(db, run, inicio, run.status, run.erro)
+
+
+def instrumentada(rotina: str, origem: str = "agendada"):
+    """Decorador para rotinas agendadas: cada execução vira um registro em
+    agent_runs (`run_id` por dia em Brasília), com erro se a rotina estourar.
+    Sem banco disponível (ex.: teste com `main` falso), a rotina roda igual.
+
+        @scheduler_fn.on_schedule(schedule="0 6 * * *", ...)
+        @instrumentada("sincronizar_eventos_saude_agenda")
+        def sincronizar_eventos_saude_agenda(event=None): ...
+    """
+    import functools
+    from zoneinfo import ZoneInfo
+
+    def decorar(fn):
+        @functools.wraps(fn)
+        def rodar(*args, **kwargs):
+            try:
+                from main import get_db
+
+                db = get_db()
+            except Exception as exc:
+                print(f"[agent_runs] {rotina} sem registro (banco indisponível): {exc}")
+                return fn(*args, **kwargs)
+            dia = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+            with registrar_execucao(db, rotina, origem=origem, run_id=f"{rotina}:{dia}"):
+                return fn(*args, **kwargs)
+
+        return rodar
+
+    return decorar
