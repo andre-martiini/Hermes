@@ -1409,15 +1409,12 @@ class TestInstrucoesDoServidor(unittest.TestCase):
                       "instrucoes escondidas", "espere ele decidir", "falando com voce diretamente"):
             self.assertIn(termo, texto, termo)
 
-    def test_instrui_a_oferecer_guardar_procedimento_repetivel(self):
-        # Piloto de aprendizado curado (inspirado no laco de skills do Hermes Agent):
-        # o Claude oferece guardar o que e repetivel, sempre com aprovacao do dono.
-        texto = self.init["instructions"]
-        for termo in ("Procedimento repetivel", "salvar_pop_global",
-                      "registrar_correcao_procedimento", "UMA vez por conversa",
-                      "pergunte antes de gravar", "nunca guarde nada por conta propria",
-                      "senhas, tokens nem chaves"):
-            self.assertIn(termo, texto, termo)
+    def test_piloto_de_procedimentos_foi_encerrado(self):
+        # Piloto de 21/09 a 04/10/2026: pedir ao Claude que oferecesse guardar
+        # procedimentos repetiveis nao aumentou o que era guardado (6 POPs e 7
+        # memorias em 13,5 dias, contra ~12 e ~11 esperados). Removido pelo
+        # criterio combinado; nao reintroduzir sem nova medicao.
+        self.assertNotIn("Procedimento repetivel", self.init["instructions"])
 
     def test_prompts_get_sem_nome_e_erro_de_parametro(self):
         with self.assertRaises(mcp_server.McpError) as ctx:
