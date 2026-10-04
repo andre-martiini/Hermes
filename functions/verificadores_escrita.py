@@ -164,8 +164,11 @@ def _textos_pedidos(args) -> dict:
     """{etapa_id: texto completo pedido} a partir dos argumentos da ferramenta. O diff da resposta
     resume texto longo; o pedido traz o texto inteiro, que é o que dá para conferir de verdade."""
     pedidos = {}
-    if _arg(args, "etapa_id") and isinstance(args.get("text"), str):
-        pedidos[str(args["etapa_id"])] = args["text"]
+    # ids com strip, como os handlers (editar_etapa_da_tarefa e subtarefas) antes de resolver a
+    # etapa: senão o texto pedido não casa com o id canônico do diff e cai na comparação por resumo
+    etapa_id = str(_arg(args, "etapa_id", "id") or "").strip()
+    if etapa_id and isinstance(args.get("text"), str):
+        pedidos[etapa_id] = args["text"]
     for chave in ("novo_plano", "plano_acao", "etapas"):
         lista = args.get(chave)
         if isinstance(lista, str):  # o MCP aceita a lista como string JSON nesses campos
@@ -174,9 +177,9 @@ def _textos_pedidos(args) -> dict:
             except ValueError:
                 lista = None
         for etapa in lista if isinstance(lista, list) else []:
-            if isinstance(etapa, dict) and etapa.get("id") and isinstance(etapa.get("text"), str) \
-                    and not etapa.get("remover"):
-                pedidos[str(etapa["id"])] = etapa["text"]
+            eid = str(etapa.get("id") or "").strip() if isinstance(etapa, dict) else ""
+            if eid and isinstance(etapa.get("text"), str) and not etapa.get("remover"):
+                pedidos[eid] = etapa["text"]
     return pedidos
 
 

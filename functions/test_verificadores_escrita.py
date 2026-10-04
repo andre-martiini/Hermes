@@ -86,7 +86,12 @@ class TestAcoes(unittest.TestCase):
         diff = {"alteradas": {"e1": {"text": ["antes", pedido[:77] + "..."]}}}
         casos = (("editar_plano_acao", {"task_id": "t1", "novo_plano": [{"id": "e1", "text": pedido}]}),
                  ("editar_plano_acao", {"task_id": "t1", "etapas": json.dumps([{"id": "e1", "text": pedido}])}),
-                 ("editar_etapa", {"task_id": "t1", "etapa_id": "e1", "text": pedido}))
+                 ("editar_etapa", {"task_id": "t1", "etapa_id": "e1", "text": pedido}),
+                 # id com espaços em volta ou pelo apelido `id`: os handlers fazem strip e aceitam o
+                 # apelido, então o verificador tem de achar o texto pedido do mesmo jeito
+                 ("editar_etapa", {"task_id": "t1", "etapa_id": " e1 ", "text": pedido}),
+                 ("editar_etapa", {"task_id": "t1", "id": "e1", "text": pedido}),
+                 ("editar_plano_acao", {"task_id": "t1", "novo_plano": [{"id": "e1 ", "text": pedido}]}))
         for nome, args in casos:
             with self.subTest(nome=nome, args=list(args)):
                 res = _v(nome, db, args, "OK|" + json.dumps(diff))
