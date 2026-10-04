@@ -77,6 +77,26 @@ class TestAcoes(unittest.TestCase):
                 res = _v(nome, db, {"task_id": "t1", "etapa_id": "e1"}, "OK|" + json.dumps(diff))
                 self.assertEqual(res.estado, "verificado", res.motivo)
 
+    def test_texto_longo_confere_inteiro_contra_o_pedido(self):
+        # Revisão do #416: dois textos com os mesmos 77 primeiros caracteres têm o mesmo resumo;
+        # com o texto pedido nos argumentos, a diferença no fim tem de aparecer.
+        inicio = "Etapa com um começo idêntico e comprido o bastante para o resumo do diff cortar "
+        pedido, gravado = inicio + "no fim A", inicio + "no fim B, sobrescrito por outra escrita"
+        db = _db(tarefas={"t1": {"plano_acao": [{"id": "e1", "text": gravado}]}})
+        diff = {"alteradas": {"e1": {"text": ["antes", pedido[:77] + "..."]}}}
+        casos = (("editar_plano_acao", {"task_id": "t1", "novo_plano": [{"id": "e1", "text": pedido}]}),
+                 ("editar_plano_acao", {"task_id": "t1", "etapas": json.dumps([{"id": "e1", "text": pedido}])}),
+                 ("editar_etapa", {"task_id": "t1", "etapa_id": "e1", "text": pedido}))
+        for nome, args in casos:
+            with self.subTest(nome=nome, args=list(args)):
+                res = _v(nome, db, args, "OK|" + json.dumps(diff))
+                self.assertEqual(res.estado, "falhou")
+                self.assertIn("e1", res.motivo)
+        db_ok = _db(tarefas={"t1": {"plano_acao": [{"id": "e1", "text": pedido}]}})
+        for nome, args in casos:
+            with self.subTest(nome=nome, args=list(args), gravado="igual"):
+                self.assertEqual(_v(nome, db_ok, args, "OK|" + json.dumps(diff)).estado, "verificado")
+
     def test_texto_longo_diferente_continua_falhando(self):
         pedido = "Etapa com um texto bem comprido que passa dos oitenta caracteres para o diff cortar no fim"
         gravado = "Outra etapa, com texto diferente mas também comprido o bastante para ser resumido no diff"
