@@ -1,12 +1,20 @@
 {
   "name": "obter_estado_atual",
-  "description": "Panorama do dia numa chamada só: ações de hoje, herdadas do dia anterior, críticas, agenda, janelas livres e pendências. Use no início de uma conversa para se situar",
+  "description": "Panorama do dia numa chamada só: ações de hoje, herdadas do dia anterior, críticas, agenda, janelas livres e pendências. Use no início de uma conversa para se situar. Vem resumido por padrão (até 2 etapas esperando terceiros por ação, textos longos cortados); abra uma ação com obter_acao ou peça detalhe='completo'",
   "parameters": {
     "type": "object",
     "properties": {
       "data": {
         "type": "string",
         "description": "YYYY-MM-DD para consultar outro dia. Padrão: hoje"
+      },
+      "detalhe": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "completo"
+        ],
+        "description": "'auto' (padrão): resumido. 'completo': tudo, como a tela inicial do app (resposta grande)."
       }
     },
     "required": []
