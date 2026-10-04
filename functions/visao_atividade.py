@@ -68,8 +68,15 @@ def inicio_janela(agora_sp: datetime.datetime) -> datetime.datetime:
     return datetime.datetime.combine(ontem, datetime.time(19, 0), tzinfo=agora_sp.tzinfo)
 
 
-def _e(texto) -> str:
-    return html.escape(str(texto or "").strip())
+LINHA_MAX = 140
+
+
+def _e(texto, limite: int = LINHA_MAX) -> str:
+    """Uma linha do briefing: cortada antes de escapar (o corte não parte uma entidade HTML)."""
+    linha = " ".join(str(texto or "").split())
+    if len(linha) > limite:
+        linha = linha[: limite - 1].rstrip() + "…"
+    return html.escape(linha)
 
 
 def _rotulo(rotina: str) -> str:
@@ -113,17 +120,23 @@ def _linhas_fez(runs: list[dict]) -> list[str]:
     return linhas
 
 
-def _bloco(titulo: str, itens: list[str], maximo: int) -> list[str]:
+def _bloco(titulo: str, itens: list[str], maximo: int, fora_da_lista: int = 0) -> list[str]:
+    """`fora_da_lista`: itens que existem mas nem chegaram à lista (ex.: a fila de
+    atenção é lida com teto), para o "+N" contar todos."""
     if not itens:
         return []
     linhas = [titulo] + [f"• {i}" for i in itens[:maximo]]
-    if len(itens) > maximo:
-        linhas.append(f"+{len(itens) - maximo} itens")
+    restantes = max(0, len(itens) - maximo) + max(0, fora_da_lista)
+    if restantes:
+        linhas.append(f"+{restantes} itens")
     return linhas
 
 
-def montar_secao(runs: list[dict], atencao: list[dict], limite: int = TELEGRAM_MAX_CHARS) -> str:
-    """Seção em HTML do Telegram, com no máximo `limite` caracteres."""
+def montar_secao(runs: list[dict], atencao: list[dict], limite: int = TELEGRAM_MAX_CHARS,
+                 atencao_total: int | None = None) -> str:
+    """Seção em HTML do Telegram, com no máximo `limite` caracteres. `atencao_total`
+    é o total de itens abertos na fila, que pode ser maior que a lista lida."""
+    atencao_fora = max(0, (atencao_total or 0) - len(atencao))
     runs = [r for r in runs if r.get("rotina") != "briefing_matinal_acoes"]
     falhas = [_e(f"{_rotulo(r.get('rotina'))}: {r.get('erro') or r.get('resumo')}") for r in runs if _falhou(r)]
     fez = _linhas_fez([r for r in runs if not _falhou(r)])
@@ -135,7 +148,7 @@ def montar_secao(runs: list[dict], atencao: list[dict], limite: int = TELEGRAM_M
     for maximo in (_MAX_ITENS, 3, 1):
         linhas = (_bloco("⚠️ <b>Falhas</b>", falhas, maximo)
                   + _bloco("🤖 <b>O que o Gaspar fez</b>", fez, maximo)
-                  + _bloco("⏳ <b>O que espera você</b>", espera, maximo)
+                  + _bloco("⏳ <b>O que espera você</b>", espera, maximo, atencao_fora)
                   + _bloco("↩️ <b>O que pode ser desfeito</b>", desfazer, maximo))
         if not linhas:
             linhas = ["🤖 <b>O que o Gaspar fez</b>", "Nada registrado desde as 19h de ontem."]
@@ -156,11 +169,12 @@ def secao_atividade(db, agora_sp: datetime.datetime, limite: int = TELEGRAM_MAX_
 
     runs = agent_runs.listar_recentes(db, limite=50, desde=inicio_janela(agora_sp), completo=True)["runs"]
     try:
-        itens = coletar_fila_atencao(db, estado="aberto", limite=10)["itens"]
+        fila = coletar_fila_atencao(db, estado="aberto", limite=10)
+        itens, total = fila["itens"], fila.get("total")
     except Exception as exc:
         print(f"[VisaoAtividade] Fila de atenção indisponível: {exc}")
-        itens = []
-    return montar_secao(runs, itens, limite)
+        itens, total = [], None
+    return montar_secao(runs, itens, limite, atencao_total=total)
 
 
 # ---------------------------------------------------------------------------
