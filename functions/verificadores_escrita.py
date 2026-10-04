@@ -160,6 +160,29 @@ def _etapas(doc):
     return {str(e.get("id")): e for e in (doc.get("plano_acao") or []) if isinstance(e, dict) and e.get("id")}
 
 
+def _textos_pedidos(args) -> dict:
+    """{etapa_id: texto completo pedido} a partir dos argumentos da ferramenta. O diff da resposta
+    resume texto longo; o pedido traz o texto inteiro, que é o que dá para conferir de verdade."""
+    pedidos = {}
+    # ids com strip, como os handlers (editar_etapa_da_tarefa e subtarefas) antes de resolver a
+    # etapa: senão o texto pedido não casa com o id canônico do diff e cai na comparação por resumo
+    etapa_id = str(_arg(args, "etapa_id", "id") or "").strip()
+    if etapa_id and isinstance(args.get("text"), str):
+        pedidos[etapa_id] = args["text"]
+    for chave in ("novo_plano", "plano_acao", "etapas"):
+        lista = args.get(chave)
+        if isinstance(lista, str):  # o MCP aceita a lista como string JSON nesses campos
+            try:
+                lista = json.loads(lista)
+            except ValueError:
+                lista = None
+        for etapa in lista if isinstance(lista, list) else []:
+            eid = str(etapa.get("id") or "").strip() if isinstance(etapa, dict) else ""
+            if eid and isinstance(etapa.get("text"), str) and not etapa.get("remover"):
+                pedidos[eid] = etapa["text"]
+    return pedidos
+
+
 def editar_plano(db, args, resultado, nome="editar_plano_acao"):
     texto = _texto(resultado).strip()
     if texto.startswith("AVISO|") or texto.startswith("OK|Nenhuma etapa mudou"):
@@ -178,6 +201,7 @@ def editar_plano(db, args, resultado, nome="editar_plano_acao"):
     if doc is None:
         return _ausente(nome, alvo)
     etapas = _etapas(doc)
+    pedidos = _textos_pedidos(args)
     for etapa_id, campos in (diff.get("alteradas") or {}).items():
         etapa = etapas.get(str(etapa_id))
         if etapa is None:
@@ -185,9 +209,16 @@ def editar_plano(db, args, resultado, nome="editar_plano_acao"):
         for campo, par in (campos or {}).items():
             depois = par[1] if isinstance(par, (list, tuple)) and len(par) == 2 else par
             atual = etapa.get(campo)
+            if campo == "text" and str(etapa_id) in pedidos:
+                # texto inteiro pedido x texto inteiro relido: pega diferença em qualquer ponto
+                if _norm(atual) == _norm(pedidos[str(etapa_id)]):
+                    continue
+                return _falhou(nome, alvo, f"a etapa {etapa_id} ficou com text={atual!r}, "
+                                           f"esperado {pedidos[str(etapa_id)]!r}.")
             if (atual in (None, "") and depois in (None, "")) or _norm(atual) == _norm(depois):
                 continue
-            # O diff resume texto longo (77 caracteres + "..."): compara resumo com resumo.
+            # Sem o texto pedido (etapa casada por texto, sem id): o diff resume texto longo
+            # (77 caracteres + "..."), então o melhor possível é comparar resumo com resumo.
             if _norm(resumo_valor(atual)) == _norm(depois):
                 continue
             return _falhou(nome, alvo, f"a etapa {etapa_id} ficou com {campo}={atual!r}, esperado {depois!r}.")
