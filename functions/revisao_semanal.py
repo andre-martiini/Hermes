@@ -15,6 +15,7 @@ except ImportError:
 
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 _TZ_SP = zoneinfo.ZoneInfo("America/Sao_Paulo")
 COLLECTION_PROPOSTAS = "reagendamentos_propostos"
@@ -243,6 +244,7 @@ def propor_reagendamento_semanal(db, now: datetime | None = None) -> dict:
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
+@instrumentada("revisar_semana_propor_reagendamento")
 def revisar_semana_propor_reagendamento(event: scheduler_fn.ScheduledEvent):
     """Executa a revisão semanal e propõe reagendamento em lote das ações atrasadas."""
     from main import get_db

@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
 from firebase_functions import options, scheduler_fn
+from agent_runs import instrumentada
 from google import genai
 from google.genai import types
 
@@ -489,6 +490,7 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
+@instrumentada("retro_semanal_agente")
 def retro_semanal_agente(event: scheduler_fn.ScheduledEvent) -> None:
     """Retrospectiva semanal de execuções do agente e ferramentas MCP aos domingos às 20h."""
     db = firestore.client()

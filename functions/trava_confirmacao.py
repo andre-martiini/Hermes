@@ -149,17 +149,54 @@ def aplicar_trava(db, texto: str, chamadas, canal: str = "web") -> str:
 ALVO_PROPOSTA = "proposta"
 
 
-def verificar_ferramenta(db, nome: str, args, resultado) -> Optional[ResultadoOperacao]:
-    """ResultadoOperacao para ferramentas de escrita e propostas; None para leituras."""
+def verificar_ferramenta(db, nome: str, args, resultado, canal: Optional[str] = None) -> Optional[ResultadoOperacao]:
+    """ResultadoOperacao para ferramentas de escrita e propostas; None para leituras.
+    Com `canal` (web, telegram, mcp), a escrita conferida numa ação vira registro em
+    agent_runs, e o `run_id` dele volta no resultado."""
     if nome in PROPOSTAS:
         return ResultadoOperacao("pendente", nome, ALVO_PROPOSTA)
     verificador = VERIFICADORES.get(nome)
     if verificador is None:
         return None
     try:
-        return verificador(db, dict(args or {}), resultado)
+        res = verificador(db, dict(args or {}), resultado)
     except Exception as exc:
-        return ResultadoOperacao("falhou", nome, "?", motivo=f"não consegui conferir a gravação ({exc})")
+        res = ResultadoOperacao("falhou", nome, "?", motivo=f"não consegui conferir a gravação ({exc})")
+    if canal and res is not None:
+        registrar_escrita(db, canal, res)
+    return res
+
+
+_ORIGEM_DO_CANAL = {"mcp": "mcp", "telegram": "telegram", "web": "manual"}
+
+
+def registrar_escrita(db, canal: str, res: ResultadoOperacao) -> None:
+    """Escrita conferida em ação (`tarefas/...`) vira registro em agent_runs
+    (rotina `escritas_<canal>`), ligado ao resultado pelo `run_id`. Nunca
+    atrapalha a resposta: falha ao registrar só vai para o log."""
+    if res.estado not in ("verificado", "falhou") or not str(res.alvo or "").startswith("tarefas"):
+        return
+    import uuid
+
+    import agent_runs
+
+    run_id = f"escrita_{canal}_{uuid.uuid4().hex[:16]}"
+    acao = res.alvo.split("/", 1)[1] if res.alvo.startswith("tarefas/") else None
+    try:
+        gravado = agent_runs.registrar(
+            db, run_id=run_id, rotina=f"escritas_{canal}",
+            resumo=f"{res.operacao} {res.estado} em {res.alvo}",
+            status=agent_runs.STATUS_ERRO if res.estado == "falhou" else agent_runs.STATUS_SUCESSO,
+            erro=res.motivo if res.estado == "falhou" else None,
+            origem=_ORIGEM_DO_CANAL.get(canal, "manual"), estado_verificado=res.estado,
+            acoes_afetadas=[acao] if acao else None,
+        )
+        if gravado.get("status") == "ok":
+            res.run_id = run_id
+        else:
+            print(f"[Trava] Registro da escrita {res.operacao} recusado: {gravado.get('erro')}")
+    except Exception as exc:
+        print(f"[Trava] Falha ao registrar escrita {res.operacao}: {exc}")
 
 
 def anotar_resultado(resultado, res: Optional[ResultadoOperacao]):
@@ -171,6 +208,8 @@ def anotar_resultado(resultado, res: Optional[ResultadoOperacao]):
     nota = {"ok": res.ok, "estado": res.estado, "alvo": res.alvo}
     if res.motivo:
         nota["motivo"] = res.motivo
+    if res.run_id:
+        nota["run_id"] = res.run_id
     if isinstance(resultado, dict):
         return {**resultado, "verificacao": nota}
     texto = "" if resultado is None else str(resultado)
@@ -193,7 +232,7 @@ def verificar_e_anotar_mcp(ctx, nome: str, args, resultado):
     try:
         if output_schema(nome) is not None:
             return resultado
-        return anotar_resultado(resultado, verificar_ferramenta(ctx.db, nome, args, resultado))
+        return anotar_resultado(resultado, verificar_ferramenta(ctx.db, nome, args, resultado, canal="mcp"))
     except Exception as exc:
         print(f"[Trava] Falha ao verificar {nome} no MCP: {exc}")
         return resultado

@@ -6,6 +6,7 @@ except ImportError:
 
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
+from agent_runs import instrumentada
 
 import subtarefas
 
@@ -15,6 +16,7 @@ import subtarefas
     memory=options.MemoryOption.MB_256,
     timeout_sec=120,
 )
+@instrumentada("daily_wip_reset_and_degradation")
 def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
     from main import get_db, _send_telegram_message_raw
     db = get_db()

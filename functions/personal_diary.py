@@ -29,6 +29,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from firebase_functions import https_fn, scheduler_fn, options
+from agent_runs import instrumentada
 
 from gemini_cost_controls import GEMINI_FRONTIER_MODEL, generate_content_logged
 
@@ -301,6 +302,7 @@ INSTRUÇÕES:
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
+@instrumentada("gerar_diario_pessoal")
 def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
     """Agendada 21:30 BRT — gera o diário pessoal do dia corrente."""
     from main import (
@@ -593,6 +595,7 @@ Se não houver sinal suficiente para um campo, retorne lista vazia ou string vaz
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
+@instrumentada("consolidar_personalidade")
 def consolidar_personalidade(event: scheduler_fn.ScheduledEvent = None) -> None:
     """
     Agendada semanalmente (domingo 22h BRT) — destila os diários da semana

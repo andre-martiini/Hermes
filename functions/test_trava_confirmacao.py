@@ -185,13 +185,13 @@ class TestLigacaoNosLacos(unittest.TestCase):
 
     def test_copiloto_web_verifica_cada_ferramenta_e_trava_a_resposta(self):
         fonte = self._fonte("main.py")
-        self.assertIn("_verif = _trava_verificar(db, fc.name, fc.args, res)", fonte)
+        self.assertIn("_verif = _trava_verificar(db, fc.name, fc.args, res,", fonte)
         self.assertIn("_trava_anotar_chamada(_chamada, _verif)", fonte)
         self.assertIn("result_text = _trava_aplicar(", fonte)
         self.assertIn("+ _TRAVA_REGRA_PROMPT", fonte)
 
     def test_telegram_de_reserva_verifica_e_trava(self):
-        self.assertIn("verificacao = verificar_ferramenta(db, fc.name, kwargs, result_text)",
+        self.assertIn("verificacao = verificar_ferramenta(db, fc.name, kwargs, result_text, canal=\"telegram\")",
                       self._fonte("telegram_utils.py"))
         self.assertIn("response_text = aplicar_trava(db, response_text", self._fonte("telegram_handlers_core.py"))
 
