@@ -383,6 +383,22 @@ class TestConteudoVindoDoDrive(unittest.TestCase):
             "name": "Minuta do contrato", "size": None, "md5Checksum": None})
         self.assertEqual(nome, "Minuta do contrato.pdf")
 
+    def test_nativo_exportado_nao_e_conferido_contra_o_tamanho_do_original(self):
+        """O Drive informa `size` e `md5Checksum` do documento nativo (4.303 bytes
+        no relatório de Piúma), não do PDF exportado (86.287): comparar recusava
+        todo Google Doc, Planilha e Apresentação como "download incompleto"."""
+        for mime in ("application/vnd.google-apps.document", "application/vnd.google-apps.spreadsheet",
+                     "application/vnd.google-apps.presentation"):
+            with self.subTest(mime=mime):
+                dados, nome = self._rodar(b"%PDF-1.4 " + b"x" * 500, {
+                    "mimeType": mime, "name": "Relatório", "size": "4303", "md5Checksum": "a" * 32})
+                self.assertEqual(len(dados), 509)
+                self.assertEqual(nome, "Relatório.pdf")
+
+    def test_nativo_exportado_vazio_continua_recusado(self):
+        with self.assertRaises(ValueError):
+            self._rodar(b"", {"mimeType": "application/vnd.google-apps.document", "size": "4303"})
+
     def test_nativo_sem_exportacao_e_recusado_com_motivo(self):
         with self.assertRaises(ValueError) as erro:
             self._rodar(b"x", {"mimeType": "application/vnd.google-apps.form",

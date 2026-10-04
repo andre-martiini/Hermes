@@ -279,7 +279,8 @@ def _do_drive(args: dict) -> tuple[bytes, str]:
             f"de {MAX_BYTES // 1024 // 1024} MB.")
 
     buffer = _io.BytesIO()
-    if mime in _EXPORTAVEIS:
+    exportado = mime in _EXPORTAVEIS
+    if exportado:
         # Documento nativo do Google nao tem arquivo: e exportado na hora, e por
         # isso nao ha checksum guardado com que comparar.
         destino, extensao = _EXPORTAVEIS[mime]
@@ -303,7 +304,13 @@ def _do_drive(args: dict) -> tuple[bytes, str]:
         raise ValueError(f"'{nome}' veio vazio do Drive.")
 
     # Confere contra o que o Drive diz do arquivo. Nao e paranoia com o modelo,
-    # que aqui nem toca nos bytes: e o download que pode truncar.
+    # que aqui nem toca nos bytes: e o download que pode truncar. Documento
+    # nativo exportado nao tem com que comparar: o `size` que o Drive informa e
+    # o do documento nativo, nao o do PDF gerado (anexar Google Doc falhava
+    # sempre como "download incompleto", ate 01/10/2026).
+    if exportado:
+        return dados, nome
+
     if tamanho_declarado and len(dados) != tamanho_declarado:
         raise ValueError(
             f"Download incompleto de '{nome}': chegaram {len(dados)} bytes, "
