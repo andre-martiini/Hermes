@@ -293,3 +293,30 @@ class TestRelatorioDeCustosRegistraAExecucao(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAjustesDaPrevia(unittest.TestCase):
+    """Prévia de 04/10 com dados reais: o "+N" contava só os 10 itens lidos da fila
+    (havia 25 abertos) e os títulos da fila de atenção passavam de 200 caracteres."""
+
+    def test_mais_n_conta_os_itens_que_nem_foram_lidos(self):
+        atencao = [{"titulo": f"Item {i}"} for i in range(10)]
+        texto = va.montar_secao([], atencao, atencao_total=25)
+        self.assertIn("+20 itens", texto)
+
+    def test_sem_total_conta_so_a_lista(self):
+        texto = va.montar_secao([], [{"titulo": f"Item {i}"} for i in range(7)])
+        self.assertIn("+2 itens", texto)
+
+    def test_linha_longa_e_cortada_sem_partir_entidade(self):
+        titulo = "Audio de Gabriela na conversa vinculada a 'Ciclo Sispnaes' " + "x" * 300
+        linha = va._e(titulo)
+        self.assertTrue(linha.endswith("…"))
+        self.assertLessEqual(len(linha.replace("&#x27;", "'")), va.LINHA_MAX)
+        self.assertNotRegex(linha, r"&[#a-z0-9]*…$")
+
+    def test_secao_le_o_total_da_fila(self):
+        fila = {"itens": [{"titulo": f"Item {i}"} for i in range(10)], "total": 25}
+        with mock.patch.object(agent_runs, "listar_recentes", return_value={"total": 0, "runs": []}), \
+                mock.patch("atencao.coletar_fila_atencao", return_value=fila):
+            self.assertIn("+20 itens", va.secao_atividade("db", datetime.datetime.now(SP)))
