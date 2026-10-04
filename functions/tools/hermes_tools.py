@@ -272,9 +272,10 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
             limite=limite,
         )
 
+    # Sem segunda chamada com "any" quando "all" volta vazio: buscar_tarefas ja
+    # faz essa segunda chance (e o relaxamento de filtros) por dentro, e repetir
+    # relia as ~800 acoes do Firestore e refazia o ranqueamento a toa.
     res = _run(initial_mode)
-    if initial_mode == "all" and not res.get("resultados"):
-        res = _run("any")
 
     if res.get("erro"):
         return {"erro": res["erro"], "resultados": []}

@@ -252,3 +252,53 @@ class TestBuscaGrafo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBuscaMaisRapida(unittest.TestCase):
+    """Otimização de 04/10/2026: a mediana da busca no MCP tinha subido de 9 para 14 s
+    (p90 de 63 s). O tempo ia na comparação aproximada de palavras, repetida milhões
+    de vezes, e numa segunda leitura completa que o handler fazia quando nada vinha."""
+
+    def test_razao_memorizada_da_o_mesmo_valor_do_sequencematcher(self):
+        from difflib import SequenceMatcher
+
+        import tools.busca_grafo as bg
+
+        for a, b in (("contratacao", "contratação"), ("licitacao", "licitacoes"), ("sipac", "sigrh"), ("abc", "abc")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(bg._razao(a, b), SequenceMatcher(None, a, b).ratio())
+
+    def test_comparacao_repetida_nao_e_recalculada(self):
+        import tools.busca_grafo as bg
+
+        bg._razao.cache_clear()
+        bg._razao("licitacao", "licitacoes")
+        bg._razao("licitacao", "licitacoes")
+        self.assertEqual(bg._razao.cache_info().hits, 1)
+
+    def test_handler_le_a_colecao_uma_vez_so_quando_nada_e_encontrado(self):
+        """buscar_tarefas já tenta "any" e relaxa filtros por dentro; o handler não
+        repete a busca inteira (que relia as ~800 ações do Firestore)."""
+        from unittest.mock import patch
+
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+
+        with patch("tools.busca_grafo.buscar_tarefas", return_value={"resultados": [], "erro": None}) as buscar:
+            hermes_tools._consultar_historico_acoes(ToolContext(), {"query": "termo inexistente qualquer"})
+        self.assertEqual(buscar.call_count, 1)
+        self.assertEqual(buscar.call_args.kwargs["match_mode"], "all")
+
+    def test_buscar_tarefas_com_all_ja_amplia_para_any_por_dentro(self):
+        import tools.busca_grafo as busca_grafo
+
+        docs = [_FakeDoc("t1", {"titulo": "Contratação de som", "status": "em andamento",
+                                "data_criacao": "2026-09-01T10:00:00Z"})]
+        original_client = busca_grafo.firestore.Client
+        try:
+            busca_grafo.firestore.Client = lambda: _FakeDb(docs)
+            result = buscar_tarefas("som inexistentepalavra", match_mode="all", limite=5)
+        finally:
+            busca_grafo.firestore.Client = original_client
+        self.assertEqual([r["id"] for r in result["resultados"]], ["t1"])
+        self.assertIn("busca ampliada any", result.get("aviso", ""))
