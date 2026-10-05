@@ -2053,7 +2053,9 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                     "erro": {"type": "string"},
                     "erro_tipo": {
                         "type": "string",
-                        "enum": ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+                        # "travado": `mcp_jobs.sweep_mcp_jobs_travados` grava
+                        # esse tipo (Retro Semanal 04/10/2026).
+                        "enum": ["politica", "resultado_tool", "excecao", "erro_configuracao", "travado"],
                     },
                     "bloqueio_politica": {
                         "type": "object",
@@ -2261,7 +2263,7 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # e sempre devolve um dict default em caso de erro; o loop que monta
     # `contatos_detalhes` tambem tem `try/except Exception` em volta da
     # UNICA chamada que pode falhar, o `.get()` do documento do chat) e
-    # sempre constroi as 8 chaves do dict de retorno sem nenhum `if` que
+    # sempre constroi as 10 chaves do dict de retorno sem nenhum `if` que
     # pule uma delas -- lido por completo (`secretario_whatsapp.py`,
     # `consultar_status_modo_secretario` e `obter_config_secretario`).
     #
@@ -2310,11 +2312,20 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #
     # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
     # sub-entrega 27/N.
+    #
+    # Retro Semanal 04/10/2026: a funcao passou a devolver 10 chaves (ativacao
+    # programada e escopo universal) e o schema ficou com 8, entao todo cliente
+    # que valida structuredContent recusava a resposta. `ativa_em` tem a mesma
+    # normalizacao de `desativa_em` em `obter_config_secretario`; `escopo_
+    # universal` sai de la ja restrito a `_ESCOPOS_UNIVERSAIS_VALIDOS` ou None.
+    # `test_output_schema.py` valida o retorno real contra este schema.
     "consultar_status_modo_secretario": {
         "type": "object",
         "properties": {
             "enabled": {"type": "boolean"},
             "desativa_em": {"type": ["string", "null"]},
+            "ativa_em": {"type": ["string", "null"]},
+            "escopo_universal": {"enum": ["individuais", "grupos", "todos", None]},
             "chats_allowlist": {"type": "array", "items": {"type": "string"}},
             "contatos_detalhes": {
                 "type": "array",
@@ -2334,7 +2345,8 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             "mensagem": {"type": "string"},
         },
         "required": [
-            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "enabled", "desativa_em", "ativa_em", "escopo_universal",
+            "chats_allowlist", "contatos_detalhes",
             "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
             "mensagem",
         ],

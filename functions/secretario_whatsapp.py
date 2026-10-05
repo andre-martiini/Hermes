@@ -242,6 +242,8 @@ def obter_config_secretario(db) -> dict:
         ativa_em = cfg.get("ativa_em")
         if desativa_em is not None and not isinstance(desativa_em, str):
             desativa_em = str(desativa_em)
+        if ativa_em is not None and not isinstance(ativa_em, str):
+            ativa_em = str(ativa_em)
         enabled = bool(cfg.get("enabled", False))
         if enabled and desativa_em:
             if _esta_expirado(desativa_em):
