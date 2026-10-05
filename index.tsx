@@ -21,7 +21,7 @@ import { useMeetingRecordingEngine, MeetingRecordingEngineContext } from './src/
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, auth, storage, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, runTransaction, getDoc, getDocs, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 import FinanceView from './FinanceView';
@@ -1001,6 +1001,10 @@ const App: React.FC = () => {
   const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
   const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
   const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
+  // So gera contas fixas do mes depois que o servidor confirmou a lista: o
+  // cache local (persistentLocalCache) pode nao ter as contas que outro
+  // aparelho ja criou, e gerar a partir dele duplicava o mes inteiro.
+  const [fixedBillsFromServer, setFixedBillsFromServer] = useState(false);
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
@@ -1273,6 +1277,7 @@ const App: React.FC = () => {
     const qFixedBills = query(collection(db, 'fixed_bills'));
     const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
       setFixedBills(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as FixedBill)));
+      if (!snapshot.metadata.fromCache) setFixedBillsFromServer(true);
     }, handleSnapshotError('fixed_bills'));
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
       setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as BillRubric)));
@@ -1508,7 +1513,7 @@ const App: React.FC = () => {
   }, [tarefas, financeTransactions]); // Adicionado financeTransactions para garantir consistência
   // Auto-generate Fixed Bills from Rubrics
   useEffect(() => {
-    if (billRubrics.length === 0) return;
+    if (billRubrics.length === 0 || !fixedBillsFromServer) return;
     const missingBills: any[] = [];
     billRubrics.forEach(rubric => {
       const exists = fixedBills.some(b =>
@@ -1530,16 +1535,19 @@ const App: React.FC = () => {
       }
     });
     if (missingBills.length > 0) {
-      const batch = writeBatch(db);
-      missingBills.forEach(bill => {
-        const ref = doc(collection(db, 'fixed_bills'));
-        batch.set(ref, bill);
-      });
-      batch.commit().then(() => {
-        showToast(`${missingBills.length} contas fixas geradas para este mês.`, 'info');
+      // ID fixo por rubrica e mes, criado so se ainda nao existir: dois
+      // aparelhos (ou duas abas) gerando ao mesmo tempo caem no mesmo doc.
+      Promise.all(missingBills.map(bill => runTransaction(db, async tx => {
+        const ref = doc(db, 'fixed_bills', `${bill.rubricId}_${bill.year}_${bill.month}`);
+        if ((await tx.get(ref)).exists()) return 0;
+        tx.set(ref, bill);
+        return 1;
+      }))).then(created => {
+        const total = created.reduce((a, b) => a + b, 0);
+        if (total > 0) showToast(`${total} contas fixas geradas para este mês.`, 'info');
       }).catch(err => console.error("Erro ao gerar contas fixas:", err));
     }
-  }, [billRubrics, fixedBills, currentMonth, currentYear]);
+  }, [billRubrics, fixedBills, fixedBillsFromServer, currentMonth, currentYear]);
   // --- Service Installments Synchronization to Finance ---
   useEffect(() => {
     if (!services) return;

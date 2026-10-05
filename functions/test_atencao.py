@@ -870,6 +870,19 @@ class TestAtencaoFinanceiro(unittest.TestCase):
         self.assertEqual(itens[0]["prioridade"], PRIORIDADE_ALTA)
         self.assertIn("vence hoje", itens[0]["titulo"])
 
+    def test_avaliar_contas_ignora_duplicada_de_rubrica_ja_paga(self):
+        # Caso real de 05/10/2026: o app web gerou o mes em dobro; o André
+        # pagou uma copia e o Telegram avisou da outra, com R$ 0,00.
+        base = {"description": "Fatura Elo", "dueDay": 5, "month": 8,
+                "year": 2026, "rubricId": "rub-elo"}
+        contas = [
+            {**base, "id": "paga", "amount": 3814.14, "isPaid": True},
+            {**base, "id": "duplicada", "amount": 0, "isPaid": False},
+            {**base, "id": "outra", "rubricId": "rub-xp", "amount": 0, "isPaid": False},
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual([i["evidencia"]["bill_id"] for i in itens], ["outra"])
+
     def test_avaliar_contas_vencida_no_mes_gera_prioridade_alta(self):
         contas = [
             {
