@@ -776,7 +776,7 @@ class TestOutputSchema(unittest.TestCase):
         self.assertNotIn("bloqueio_politica", error["required"])
         self.assertEqual(
             error["properties"]["erro_tipo"]["enum"],
-            ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+            ["politica", "resultado_tool", "excecao", "erro_configuracao", "travado"],
         )
         # reason_code SEM null -- achado da 1a rodada de revisão
         # adversarial: `PolicyDecision.reason_code` é tipado `str` (nunca
@@ -855,7 +855,8 @@ class TestOutputSchema(unittest.TestCase):
         self.assertIsNotNone(schema)
         self.assertEqual(schema["type"], "object")
         campos = {
-            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "enabled", "desativa_em", "ativa_em", "escopo_universal",
+            "chats_allowlist", "contatos_detalhes",
             "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
             "mensagem",
         }
@@ -889,6 +890,26 @@ class TestOutputSchema(unittest.TestCase):
         self.assertFalse(item["additionalProperties"])
         self.assertEqual(item["properties"]["chat_id"], {"type": "string"})
         self.assertEqual(item["properties"]["nome"], {"type": "string"})
+
+    def test_consultar_status_modo_secretario_retorno_real_valida_no_schema(self):
+        # Retro Semanal 04/10/2026: o teste acima so olhava o schema, e a
+        # funcao ganhou 2 chaves sem ninguem perceber. Aqui o retorno REAL,
+        # com ativacao programada e escopo universal, passa pelo validador.
+        import jsonschema
+        from secretario_whatsapp import consultar_status_modo_secretario
+
+        db = MagicMock()
+        db.collection.return_value.document.return_value.get.return_value.to_dict.return_value = {
+            "whatsapp_secretario": {
+                "enabled": False,
+                "ativa_em": "2999-01-01T08:00:00-03:00",
+                "escopo_universal": "grupos",
+                "chats_allowlist": ["123@c.us"],
+            },
+        }
+        retorno = consultar_status_modo_secretario(db)
+        self.assertEqual(retorno["escopo_universal"], "grupos")
+        jsonschema.validate(retorno, registry.output_schema("consultar_status_modo_secretario"))
 
     def test_consultar_contatos_prioritarios_secretario_tem_schema_oneof_sucesso_e_erro(self):
         schema = registry.output_schema("consultar_contatos_prioritarios_secretario")
@@ -2460,6 +2481,8 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         mock_resultado = {
             "enabled": False,
             "desativa_em": None,
+            "ativa_em": None,
+            "escopo_universal": None,
             "chats_allowlist": [],
             "contatos_detalhes": [],
             "orientacoes_em_vigor": None,
