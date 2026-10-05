@@ -370,8 +370,19 @@ def avaliar_contas_vencendo(
     hoje_ano = hoje.year
     hoje_mes = hoje.month
 
+    # O app web ja gerou o mes em dobro (cache local sem as contas que outro
+    # aparelho criou): a copia paga e a duplicada ficam com a mesma rubrica.
+    # Rubrica paga no mes = conta paga, seja qual for o documento.
+    rubricas_pagas = {
+        (c.get("rubricId"), c.get("month"), c.get("year"))
+        for c in contas
+        if c.get("rubricId") and (c.get("isPaid") or c.get("paid"))
+    }
+
     for conta in contas:
         if conta.get("isPaid") or conta.get("paid"):
+            continue
+        if (conta.get("rubricId"), conta.get("month"), conta.get("year")) in rubricas_pagas:
             continue
 
         due_day = conta.get("dueDay")

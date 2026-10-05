@@ -681,9 +681,15 @@ def _coletar_contas(db, hoje: str) -> dict:
             print(f"[ResumoMatinal] Falha ao consultar fixed_bills {mes_1based}/{ano_alvo}: {exc}")
             return []
 
+    def _sem_duplicadas_pagas(docs: list) -> list[dict]:
+        # Conta duplicada pelo app web: se a mesma rubrica ja esta paga no mes,
+        # a copia nao paga nao e divida (ver atencao.avaliar_contas_vencendo).
+        dados = [d.to_dict() or {} for d in docs]
+        pagas = {d.get("rubricId") for d in dados if d.get("rubricId") and d.get("isPaid")}
+        return [d for d in dados if d.get("rubricId") not in pagas or d.get("isPaid")]
+
     pendentes = []
-    for doc in _buscar(mes, ano):
-        data = doc.to_dict() or {}
+    for data in _sem_duplicadas_pagas(_buscar(mes, ano)):
         if data.get("isPaid"):
             continue
         due = int(data.get("dueDay") or 0)
@@ -702,8 +708,7 @@ def _coletar_contas(db, hoje: str) -> dict:
     if limite > monthrange(ano, mes)[1]:
         prox_mes, prox_ano = _mes_seguinte(mes, ano)
         sobra = limite - monthrange(ano, mes)[1]
-        for doc in _buscar(prox_mes, prox_ano):
-            data = doc.to_dict() or {}
+        for data in _sem_duplicadas_pagas(_buscar(prox_mes, prox_ano)):
             due = int(data.get("dueDay") or 0)
             if data.get("isPaid") or not due or due > sobra:
                 continue
