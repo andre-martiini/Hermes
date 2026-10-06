@@ -20,6 +20,20 @@ index 4cc9c4e..789d782 100644
                  });
          }
      }
+diff --git a/node_modules/whatsapp-web.js/src/structures/Message.js b/node_modules/whatsapp-web.js/src/structures/Message.js
+index dd977e8..4bd2536 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Message.js
++++ b/node_modules/whatsapp-web.js/src/structures/Message.js
+@@ -566,6 +566,9 @@ class Message extends Base {
+                         mediaKey: msg.mediaKey,
+                         mediaKeyTimestamp: msg.mediaKeyTimestamp,
+                         type: msg.type,
++                        // Sem o mimetype o WhatsApp Web assume application/octet-stream e
++                        // rejeita o download (InvalidMediaFileType, minificado como "t").
++                        mimetype: msg.mimetype,
+                         signal: new AbortController().signal,
+                         downloadQpl: mockQpl,
+                     });
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 index 540078a..520f97f 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
