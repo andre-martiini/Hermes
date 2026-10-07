@@ -117,6 +117,26 @@ def _consultar_lista_compras(ctx: ToolContext, args: dict):
         return f"ERRO|{erro.message}"
 
 
+def _guardar_ideia(ctx: ToolContext, args: dict):
+    from tools import ideias
+
+    try:
+        return ideias.guardar(ctx.db, args.get("texto"), args.get("contexto"))
+    except ideias.IdeiasError as erro:
+        return f"ERRO|{erro.message}"
+
+
+def _listar_ideias(ctx: ToolContext, args: dict):
+    from tools import ideias
+
+    try:
+        return ideias.listar(
+            ctx.db, busca=args.get("busca"), status=args.get("status"), limite=args.get("limite")
+        )
+    except ideias.IdeiasError as erro:
+        return f"ERRO|{erro.message}"
+
+
 def _consultar_elevacoes_sugeridas(ctx: ToolContext, args: dict):
     import deteccao_subproduto
 
@@ -2844,6 +2864,8 @@ _HANDLERS: dict = {
 
     # Delegadas a modulos dedicados
     "consultar_lista_compras": _consultar_lista_compras,
+    "guardar_ideia": _guardar_ideia,
+    "listar_ideias": _listar_ideias,
     "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,

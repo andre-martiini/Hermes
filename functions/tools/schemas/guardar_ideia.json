@@ -1,0 +1,18 @@
+{
+  "name": "guardar_ideia",
+  "description": "Guarda uma ideia na tela Brainstorming do Gaspar para resgatar depois. Use quando o usuario disser que teve uma ideia, quer guardar/anotar uma ideia para depois. Grava literalmente o que ele disse, sem reescrever. Devolve id, texto gravado e timestamp.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "texto": {
+        "type": "string",
+        "description": "A ideia, com as palavras do usuario, sem resumir nem reescrever. Maximo de 4000 caracteres (somado ao contexto)."
+      },
+      "contexto": {
+        "type": "string",
+        "description": "Opcional: de onde a ideia surgiu (conversa, projeto, situacao). Gravado numa linha 'Contexto: ...' abaixo do texto."
+      }
+    },
+    "required": ["texto"]
+  }
+}

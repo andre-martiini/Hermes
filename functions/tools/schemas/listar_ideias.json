@@ -1,0 +1,23 @@
+{
+  "name": "listar_ideias",
+  "description": "Lista as ideias guardadas na tela Brainstorming do Gaspar, mais recentes primeiro, com id, texto, data e status. Use para resgatar uma ideia que o usuario guardou antes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "busca": {
+        "type": "string",
+        "description": "Trecho do texto da ideia, ignorando acento e caixa."
+      },
+      "status": {
+        "type": "string",
+        "enum": ["active", "archived", "todas"],
+        "description": "'active' (padrao, as que aparecem na tela), 'archived' (concluidas/arquivadas) ou 'todas'."
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Maximo de ideias no retorno. Padrao 20, maximo 100."
+      }
+    },
+    "required": []
+  }
+}

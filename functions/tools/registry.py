@@ -45,6 +45,9 @@ _CATALOG: dict[str, str] = {
     # item_id e nao havia de onde tira-lo. E nao dava para conferir o efeito da
     # propria escrita sem pedir ao usuario que abrisse a tela.
     "consultar_lista_compras": "Le a lista de compras com o item_id de cada item, o que esta planejado e o que ja foi comprado",
+    # Ideias soltas da tela Brainstorming (colecao brainstorm_ideas).
+    "guardar_ideia": "Guarda uma ideia do usuario na tela Brainstorming do Gaspar, literalmente como ele disse, para resgatar depois",
+    "listar_ideias": "Lista as ideias guardadas na tela Brainstorming, mais recentes primeiro, com busca por trecho do texto",
     # Detector de subproduto: o trabalho ja feito que rende um ativo com um passo
     # a mais. Sem a alca de decisao as sugestoes ficam na fila sem resposta, e a
     # que mais importa e "nunca" — sem ela o sistema repete e vira barulho.
@@ -205,6 +208,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "preparar_atualizacao_contato",
     # Gravam direto, sem card de confirmacao intermediario.
     "registrar_no_diario",
+    "guardar_ideia",
     "registrar_observacao_externa",
     "criar_objetivo_estrategico",
     "editar_objetivo_estrategico",
