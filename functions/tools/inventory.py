@@ -425,6 +425,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "compras", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "ela própria é o verificador de mutar_lista_compras",
     ),
+    "guardar_ideia": ToolInventoryEntry(
+        "ideias", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "listar_ideias relê a ideia gravada",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="reversível pela tela Brainstorming (arquivar/apagar). Não idempotente: cada chamada cria "
+        "documento com ID automático em brainstorm_ideas, sem checar texto repetido.",
+    ),
+    "listar_ideias": ToolInventoryEntry(
+        "ideias", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "ela própria é o verificador de guardar_ideia",
+    ),
     "consultar_elevacoes_sugeridas": ToolInventoryEntry(
         "estrategico", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
     ),
