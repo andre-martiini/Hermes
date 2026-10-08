@@ -37,7 +37,7 @@ class _Doc:
     def to_dict(self):
         return dict(self._d) if self._d else {}
 
-    def get(self):
+    def get(self, transaction=None):
         return _Doc(self._col, self.id, self._col.dados.get(self.id))
 
     def set(self, valores, merge=False):
@@ -77,12 +77,38 @@ class _Colecao:
         return _Doc(self, doc_id, self.dados.get(doc_id))
 
 
+class _Tx:
+    """Protocolo minimo que o `@firestore.transactional` real usa (mesmo
+    double de test_agent_requests.py); escreve direto no fake."""
+
+    def __init__(self):
+        self._read_only, self._id, self._max_attempts = False, None, 5
+
+    def set(self, ref, dados, merge=False):
+        ref.set(dados, merge=merge)
+
+    def _begin(self, retry_id=None):
+        self._id = retry_id or b"tx"
+
+    def _clean_up(self):
+        self._id = None
+
+    def _commit(self):
+        return []
+
+    def _rollback(self):
+        pass
+
+
 class _Db:
     def __init__(self):
         self.cols = {}
 
     def collection(self, nome):
         return self.cols.setdefault(nome, _Colecao())
+
+    def transaction(self):
+        return _Tx()
 
 
 class _Ctx:

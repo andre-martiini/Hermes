@@ -120,13 +120,13 @@
         "type": "number",
         "minimum": 0.1,
         "maximum": 50,
-        "description": "Distância total caminhada no dia, em km (0,1 a 50). Registrar de novo no mesmo dia substitui o valor anterior registrado por aqui"
+        "description": "Total de km caminhados no dia (somando o que já foi lançado pela web/Telegram), 0,1 a 50. O registro feito por aqui vale a diferença para o que já está lançado; registrar de novo recalcula"
       },
       "caminhada_min": {
         "type": "integer",
         "minimum": 1,
         "maximum": 600,
-        "description": "Duração da caminhada em minutos (1 a 600). Exige caminhada_km"
+        "description": "Total de minutos caminhados no dia (somando o que já foi lançado pela web/Telegram), 1 a 600. Exige caminhada_km"
       }
     },
     "required": []

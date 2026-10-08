@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from unittest import mock
 
 import telegram_utils
+import test_registrar_saude
 from test_registrar_saude import HOJE, _Colecao, _Ctx, _Doc
 from tools import anotar_no_diario as diario
 from tools import hermes_tools
@@ -96,22 +97,53 @@ class TestCamposDoCheckin(unittest.TestCase):
 
 
 class TestCaminhada(unittest.TestCase):
-    def test_vira_walk_block_que_o_painel_soma(self):
-        ctx = _Ctx()
-        ctx.db.cols[rs.COL_LOGS] = _Colecao({HOJE: {"walkBlocks": [{"id": "walk_1", "distance": 2.0, "source": "web"}]}})
-        rs.registrar(ctx, {"caminhada_km": "3,5", "caminhada_min": 40})
-        blocos = _log(ctx)["walkBlocks"]
-        self.assertEqual(blocos[0], {"id": "walk_1", "distance": 2.0, "source": "web"})
-        self.assertEqual({k: blocos[1][k] for k in ("id", "distance", "minutes", "source")},
-                         {"id": f"walk_mcp_{HOJE}", "distance": 3.5, "minutes": 40, "source": "mcp"})
-        self.assertRegex(blocos[1]["time"], r"^\d\d:\d\d$")
+    """`caminhada_km`/`caminhada_min` sao o total do dia; o painel soma walkBlocks."""
 
-    def test_repetir_substitui_nao_duplica(self):
+    def _com_blocos(self, *blocos):
+        ctx = _Ctx()
+        ctx.db.cols[rs.COL_LOGS] = _Colecao({HOJE: {"walkBlocks": list(blocos)}})
+        return ctx
+
+    def test_bloco_mcp_vale_o_total_menos_o_ja_lancado(self):
+        web = {"id": "walk_1", "distance": 2.0, "minutes": 25, "source": "web"}
+        ctx = self._com_blocos(web)
+        r = rs.registrar(ctx, {"caminhada_km": "3,5", "caminhada_min": 40})
+        blocos = _log(ctx)["walkBlocks"]
+        self.assertEqual(blocos[0], web)
+        self.assertEqual({k: blocos[1][k] for k in ("id", "distance", "minutes", "source")},
+                         {"id": f"walk_mcp_{HOJE}", "distance": 1.5, "minutes": 15, "source": "mcp"})
+        self.assertRegex(blocos[1]["time"], r"^\d\d:\d\d$")
+        self.assertEqual(sum(b["distance"] for b in blocos), 3.5)
+        self.assertEqual(r["caminhada"], {"bloco_mcp_km": 1.5, "total_dia_km": 3.5})
+
+    def test_sem_minutos_nos_outros_usa_o_informado(self):
+        ctx = self._com_blocos({"id": "walk_1", "distance": 1.0, "source": "telegram"})
+        rs.registrar(ctx, {"caminhada_km": 3, "caminhada_min": 40})
+        self.assertEqual(_log(ctx)["walkBlocks"][1]["minutes"], 40)
+
+    def test_total_ja_coberto_remove_o_bloco_mcp(self):
+        web = {"id": "walk_1", "distance": 4.0, "source": "web"}
+        ctx = self._com_blocos(web, {"id": f"walk_mcp_{HOJE}", "distance": 1.0, "source": "mcp"})
+        r = rs.registrar(ctx, {"caminhada_km": 3})
+        self.assertEqual(_log(ctx)["walkBlocks"], [web])
+        self.assertEqual(r["caminhada"], {"bloco_mcp_km": 0, "total_dia_km": 4.0})
+
+    def test_repetir_recalcula_nao_duplica(self):
         ctx = _Ctx()
         rs.registrar(ctx, {"caminhada_km": 3})
         rs.registrar(ctx, {"caminhada_km": 4.2})
-        blocos = _log(ctx)["walkBlocks"]
-        self.assertEqual([b["distance"] for b in blocos], [4.2])
+        self.assertEqual([b["distance"] for b in _log(ctx)["walkBlocks"]], [4.2])
+
+    def test_escrita_do_log_passa_pela_transacao(self):
+        ctx = _Ctx()
+        gravou = []
+        tx = test_registrar_saude._Tx()
+        tx.set = lambda ref, dados, merge=False: gravou.append((ref.id, dados, merge))
+        with mock.patch.object(ctx.db, "transaction", return_value=tx):
+            rs.registrar(ctx, {"caminhada_km": 2, "bem_estar": 6})
+        self.assertEqual(len(gravou), 1)
+        self.assertEqual((gravou[0][0], gravou[0][1]["wellbeing"], gravou[0][2]), (HOJE, 6, True))
+        self.assertFalse(ctx.db.cols.get(rs.COL_LOGS) and ctx.db.cols[rs.COL_LOGS].dados, "gravou fora da transacao")
 
 
 class TestAnotarNoDiario(unittest.TestCase):
@@ -124,27 +156,37 @@ class TestAnotarNoDiario(unittest.TestCase):
     def test_acrescenta_no_formato_da_ui_sem_sobrescrever(self):
         ctx = _Ctx()
         ctx.db.cols[diario.COLECAO] = _Colecao({HOJE: {
-            "data": HOJE, "texto": "diario ja gerado", "notas_manuais": [{"texto": "antes", "em": "x"}]}})
+            "data": HOJE, "notas_manuais": [{"texto": "antes", "em": "x"}]}})
         r = hermes_tools.execute("anotar_no_diario", {"texto": "  Dia pesado, dormi mal.  ", "origem": "checkin_manha"}, ctx)
-        self.assertEqual(r["status"], "completed")
+        self.assertEqual((r["status"], r["incorporado_no_diario"]), ("completed", True))
         doc = ctx.db.cols[diario.COLECAO].dados[HOJE]
-        self.assertEqual(doc["texto"], "diario ja gerado")
         self.assertEqual(len(doc["notas_manuais"]), 2)
         nota = doc["notas_manuais"][1]
         self.assertEqual((nota["texto"], nota["origem"]), ("Dia pesado, dormi mal.", "checkin_manha"))
         self.assertRegex(nota["em"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
 
-    def test_data_explicita(self):
+    def test_diario_ja_gerado_guarda_mas_avisa(self):
         ctx = _Ctx()
-        diario.anotar(ctx.db, "ontem foi bom", data=ONTEM)
-        self.assertEqual(ctx.db.cols[diario.COLECAO].dados[ONTEM]["data"], ONTEM)
+        ctx.db.cols[diario.COLECAO] = _Colecao({HOJE: {"data": HOJE, "texto": "diario ja gerado"}})
+        r = diario.anotar(ctx.db, "depois das 21h30")
+        doc = ctx.db.cols[diario.COLECAO].dados[HOJE]
+        self.assertEqual(doc["texto"], "diario ja gerado")
+        self.assertEqual(doc["notas_manuais"][0]["texto"], "depois das 21h30")
+        self.assertFalse(r["incorporado_no_diario"])
+        self.assertIn("ja foi gerado", r["observacao"])
+
+    def test_data_de_hoje_explicita_e_aceita(self):
+        ctx = _Ctx()
+        diario.anotar(ctx.db, "hoje", data=HOJE)
+        self.assertEqual(ctx.db.cols[diario.COLECAO].dados[HOJE]["data"], HOJE)
 
     def test_erros_prefixados_e_nada_gravado(self):
         ctx = _Ctx()
-        for args in ({"texto": "   "}, {"texto": "x" * 4001}, {"texto": "ok", "data": "08/10/2026"}):
+        for args in ({"texto": "   "}, {"texto": "x" * 4001}, {"texto": "ok", "data": "08/10/2026"},
+                     {"texto": "ontem foi bom", "data": ONTEM}):
             with self.subTest(args=args):
                 self.assertTrue(hermes_tools.execute("anotar_no_diario", args, ctx).startswith("ERRO|"))
-        self.assertNotIn(diario.COLECAO, ctx.db.cols)
+        self.assertFalse(ctx.db.cols.get(diario.COLECAO) and ctx.db.cols[diario.COLECAO].dados)
 
     def test_gerador_do_diario_le_a_nota(self):
         """`personal_diary._collect_diary_material` le `notas_manuais[].texto`."""

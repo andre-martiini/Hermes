@@ -130,6 +130,28 @@ def _lista_opcoes(campo: str, valor, opcoes: list, vazio: str) -> list:
     return list(dict.fromkeys(i for i in itens if i != vazio))
 
 
+def _blocos_com_total(blocos, dia: str, caminhada: dict):
+    """`caminhada_km`/`caminhada_min` sao o TOTAL do dia. O painel soma os
+    walkBlocks, entao o bloco MCP (um por dia, id fixo) vale o total menos o
+    que web/Telegram ja lancaram; se isso ja cobre o total, o bloco sai."""
+    bloco_id = f"walk_mcp_{dia}"
+    outros = [b for b in (blocos or []) if isinstance(b, dict) and b.get("id") != bloco_id]
+    km_outros = sum(float(b.get("distance") or 0) for b in outros)
+    km = round(caminhada["distance"] - km_outros, 2)
+    if km > 0:
+        bloco = {"id": bloco_id,
+                 "time": datetime.now(timezone.utc).astimezone(_TZ_BR).strftime("%H:%M"),
+                 "distance": km, "source": "mcp"}
+        if "minutes" in caminhada:
+            min_outros = sum(int(b.get("minutes") or 0) for b in outros)
+            minutos = caminhada["minutes"] - min_outros
+            if minutos > 0:
+                bloco["minutes"] = minutos
+        outros = outros + [bloco]
+    return outros, {"bloco_mcp_km": max(km, 0),
+                    "total_dia_km": round(sum(float(b.get("distance") or 0) for b in outros), 2)}
+
+
 def hoje_brasilia() -> str:
     """O servidor roda em UTC: depois das 21h de Brasilia `date.today()` ja e amanha."""
     from zoneinfo import ZoneInfo
@@ -282,36 +304,43 @@ def registrar(ctx, args: dict) -> dict:
                          "gatilhos ou caminhada_km."),
                 "aplicado": False}
 
+    resumo_caminhada = None
     if dor or sono or log_updates or sub or medicacao or caminhada:
+        from firebase_admin import firestore
+
         ref = ctx.db.collection(COL_LOGS).document(dia)
-        atual = ref.get()
-        atual_d = (atual.to_dict() or {}) if atual.exists else {}
-        for chave, valores in sub.items():
-            log_updates[chave] = {**(atual_d.get(chave) or {}), **valores}
-        if medicacao == "igual_ontem":
-            ontem = (datetime.strptime(dia, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
-            doc_ontem = ctx.db.collection(COL_LOGS).document(ontem).get()
-            meds_ontem = (doc_ontem.to_dict() or {}).get("meds") if doc_ontem.exists else None
-            log_updates["meds"] = meds_ontem or dict(_MEDS_NADA)
-        elif medicacao == "nada":
-            log_updates["meds"] = dict(_MEDS_NADA)
-        if caminhada:
-            # Um bloco MCP por dia, id fixo: repetir a chamada substitui, nao duplica.
-            bloco_id = f"walk_mcp_{dia}"
-            hora = datetime.now(timezone.utc).astimezone(_TZ_BR).strftime("%H:%M")
-            blocos = [b for b in (atual_d.get("walkBlocks") or [])
-                      if isinstance(b, dict) and b.get("id") != bloco_id]
-            blocos.append({"id": bloco_id, "time": hora, **caminhada, "source": "mcp"})
-            log_updates["walkBlocks"] = blocos
-        agora = datetime.now(timezone.utc).isoformat()
-        if dor:
-            log_updates["pain"] = {**(atual_d.get("pain") or {}), **dor,
-                                   "mcp_checked_at": agora}
-        if sono:
-            log_updates["sleepQuality"] = {**(atual_d.get("sleepQuality") or {}), **sono}
-        # `entrySource` diz de onde veio o registro do dia; a web usa isso.
-        log_updates.setdefault("entrySource", atual_d.get("entrySource") or "mcp")
-        ref.set(log_updates, merge=True)
+
+        # Le-monta-grava numa transacao, como o Telegram faz com walkBlocks:
+        # uma escrita concorrente (web/Telegram) entre a leitura e o set nao
+        # se perde. Monta tudo do zero a cada tentativa.
+        @firestore.transactional
+        def _atualizar(transaction):
+            atual = ref.get(transaction=transaction)
+            atual_d = (atual.to_dict() or {}) if atual.exists else {}
+            updates = dict(log_updates)
+            for chave, valores in sub.items():
+                updates[chave] = {**(atual_d.get(chave) or {}), **valores}
+            if medicacao == "igual_ontem":
+                ontem = (datetime.strptime(dia, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+                doc_ontem = ctx.db.collection(COL_LOGS).document(ontem).get(transaction=transaction)
+                meds_ontem = (doc_ontem.to_dict() or {}).get("meds") if doc_ontem.exists else None
+                updates["meds"] = meds_ontem or dict(_MEDS_NADA)
+            elif medicacao == "nada":
+                updates["meds"] = dict(_MEDS_NADA)
+            resumo = None
+            if caminhada:
+                updates["walkBlocks"], resumo = _blocos_com_total(atual_d.get("walkBlocks"), dia, caminhada)
+            if dor:
+                updates["pain"] = {**(atual_d.get("pain") or {}), **dor,
+                                   "mcp_checked_at": datetime.now(timezone.utc).isoformat()}
+            if sono:
+                updates["sleepQuality"] = {**(atual_d.get("sleepQuality") or {}), **sono}
+            # `entrySource` diz de onde veio o registro do dia; a web usa isso.
+            updates.setdefault("entrySource", atual_d.get("entrySource") or "mcp")
+            transaction.set(ref, updates, merge=True)
+            return resumo
+
+        resumo_caminhada = _atualizar(ctx.db.transaction())
 
     # As rotinas nao sao gravadas: `morning_summary._rotina_verificavel` as deduz
     # da existencia do dado. Dizer quais fecharam torna o laco visivel sem criar
@@ -331,6 +360,7 @@ def registrar(ctx, args: dict) -> dict:
         "data": dia,
         "campos_alterados": alterados,
         "rotinas_concluidas": rotinas,
+        **({"caminhada": resumo_caminhada} if resumo_caminhada else {}),
         "observacao": ("Registrado onde a interface web lê — o valor aparece em "
                        "consultar_saude desta data. Rotina cumprida é deduzida do "
                        "dado, não gravada à parte."),

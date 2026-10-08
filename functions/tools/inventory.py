@@ -764,8 +764,10 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "-- mesmo espírito do caveat de TTL em `criar_acao_no_sistema` (sub-entrega 16/N): documentado para "
         "nenhum cliente MCP assumir garantia mais forte do que a tool de fato oferece. Campos do "
         "check-in (bem_estar, radicular_local, treino_forca, terapia, alimentacao, proteina, medicacao, "
-        "gatilhos) seguem o mesmo upsert por dia; a caminhada grava um único bloco `walk_mcp_{dia}` em "
-        "`walkBlocks` (repetir substitui, não duplica).",
+        "gatilhos) seguem o mesmo upsert por dia; a caminhada é o total do dia e grava um único bloco "
+        "`walk_mcp_{dia}` em `walkBlocks` com a diferença para os blocos web/Telegram (repetir recalcula, "
+        "não duplica). Desde o PR #425 o update de `health_exercise_logs/{dia}` é feito numa transação "
+        "Firestore (o caveat 2 continua valendo só para peso/cintura).",
     ),
     "consultar_dados_cadastrais": ToolInventoryEntry(
         "dados_cadastrais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
