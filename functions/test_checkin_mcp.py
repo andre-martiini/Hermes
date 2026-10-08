@@ -4,7 +4,7 @@ leem esses campos), e `anotar_no_diario` tem de gravar a nota no formato da
 tela Diario Pessoal, sem apagar o que ja existe. Sem rede e sem Firestore."""
 
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 import telegram_utils
@@ -128,6 +128,13 @@ class TestCaminhada(unittest.TestCase):
         self.assertEqual(_log(ctx)["walkBlocks"], [web])
         self.assertEqual(r["caminhada"], {"bloco_mcp_km": 0, "total_dia_km": 4.0})
 
+    def test_corrigir_so_os_km_preserva_os_minutos(self):
+        ctx = _Ctx()
+        rs.registrar(ctx, {"caminhada_km": 3, "caminhada_min": 40})
+        rs.registrar(ctx, {"caminhada_km": 3.2})
+        bloco = _log(ctx)["walkBlocks"][0]
+        self.assertEqual((bloco["distance"], bloco["minutes"]), (3.2, 40))
+
     def test_repetir_recalcula_nao_duplica(self):
         ctx = _Ctx()
         rs.registrar(ctx, {"caminhada_km": 3})
@@ -148,8 +155,10 @@ class TestCaminhada(unittest.TestCase):
 
 class TestAnotarNoDiario(unittest.TestCase):
     def setUp(self):
+        meio_dia = datetime(2026, 10, 8, 12, 0, tzinfo=diario._TZ_BR)
         for p in (mock.patch.object(diario.firestore, "ArrayUnion", side_effect=_Union),
-                  mock.patch.object(_Doc, "set", _set_com_union)):
+                  mock.patch.object(_Doc, "set", _set_com_union),
+                  mock.patch.object(diario, "_agora_br", return_value=meio_dia)):
             p.start()
             self.addCleanup(p.stop)
 
@@ -173,7 +182,16 @@ class TestAnotarNoDiario(unittest.TestCase):
         self.assertEqual(doc["texto"], "diario ja gerado")
         self.assertEqual(doc["notas_manuais"][0]["texto"], "depois das 21h30")
         self.assertFalse(r["incorporado_no_diario"])
-        self.assertIn("ja foi gerado", r["observacao"])
+        self.assertIn("ja rodou", r["observacao"])
+
+    def test_depois_das_21h30_sem_texto_nao_promete_incorporar(self):
+        """A rotina das 21h30 pode ter rodado sem gerar texto (sem material, falha)."""
+        ctx = _Ctx()
+        tarde = datetime(2026, 10, 8, 21, 45, tzinfo=diario._TZ_BR)
+        with mock.patch.object(diario, "_agora_br", return_value=tarde):
+            r = diario.anotar(ctx.db, "lembrei de uma coisa")
+        self.assertFalse(r["incorporado_no_diario"])
+        self.assertEqual(ctx.db.cols[diario.COLECAO].dados[HOJE]["notas_manuais"][0]["texto"], "lembrei de uma coisa")
 
     def test_data_de_hoje_explicita_e_aceita(self):
         ctx = _Ctx()

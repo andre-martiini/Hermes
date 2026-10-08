@@ -135,6 +135,7 @@ def _blocos_com_total(blocos, dia: str, caminhada: dict):
     walkBlocks, entao o bloco MCP (um por dia, id fixo) vale o total menos o
     que web/Telegram ja lancaram; se isso ja cobre o total, o bloco sai."""
     bloco_id = f"walk_mcp_{dia}"
+    anterior = next((b for b in (blocos or []) if isinstance(b, dict) and b.get("id") == bloco_id), None)
     outros = [b for b in (blocos or []) if isinstance(b, dict) and b.get("id") != bloco_id]
     km_outros = sum(float(b.get("distance") or 0) for b in outros)
     km = round(caminhada["distance"] - km_outros, 2)
@@ -142,7 +143,9 @@ def _blocos_com_total(blocos, dia: str, caminhada: dict):
         bloco = {"id": bloco_id,
                  "time": datetime.now(timezone.utc).astimezone(_TZ_BR).strftime("%H:%M"),
                  "distance": km, "source": "mcp"}
-        if "minutes" in caminhada:
+        if "minutes" not in caminhada and anterior and anterior.get("minutes"):
+            bloco["minutes"] = anterior["minutes"]  # correcao so dos km nao apaga a duracao
+        elif "minutes" in caminhada:
             min_outros = sum(int(b.get("minutes") or 0) for b in outros)
             minutos = caminhada["minutes"] - min_outros
             if minutos > 0:

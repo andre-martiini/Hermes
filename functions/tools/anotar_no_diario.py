@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_TZ_BR = ZoneInfo("America/Sao_Paulo")
 
 from firebase_admin import firestore
 
@@ -21,6 +24,10 @@ from tools.registrar_saude import hoje_brasilia
 
 COLECAO = "diario_pessoal"
 LIMITE_TEXTO = 4000
+
+
+def _agora_br() -> datetime:
+    return datetime.now(timezone.utc).astimezone(_TZ_BR)
 
 
 class DiarioError(Exception):
@@ -50,10 +57,12 @@ def anotar(db, texto, data=None, origem=None) -> dict:
         nota["origem"] = origem
     ref = db.collection(COLECAO).document(dia)
     atual = ref.get()
-    ja_gerado = bool(atual.exists and (atual.to_dict() or {}).get("texto"))
+    # Depois das 21h30 a rotina ja rodou (gerando texto ou nao): nota nova nao entra mais.
+    agora_br = _agora_br()
+    ja_gerado = bool(atual.exists and (atual.to_dict() or {}).get("texto")) or         (agora_br.hour, agora_br.minute) >= (21, 30)
     ref.set({"data": dia, "notas_manuais": firestore.ArrayUnion([nota])}, merge=True)
     if ja_gerado:
-        observacao = ("O diario de hoje ja foi gerado as 21h30; a nota fica guardada "
+        observacao = ("A rotina do diario de hoje ja rodou (21h30); a nota fica guardada "
                       "mas nao entra no texto.")
     else:
         observacao = "Entra no diario gerado hoje as 21h30 como anotacao do proprio usuario."
