@@ -52,7 +52,10 @@ visivel sem criar uma segunda verdade.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+_TZ_BR = ZoneInfo("America/Sao_Paulo")
 
 COL_PESOS = "health_weights"
 COL_CINTURA = "health_waist"
@@ -68,17 +71,32 @@ _FAIXAS = {
     "dor_noite": (0, 10, ""),
     "dor_pos_caminhada": (0, 10, ""),
     "sono_qualidade": (1, 5, ""),
+    "bem_estar": (0, 10, ""),
+    "caminhada_km": (0.1, 50.0, "km"),
+    "caminhada_min": (1, 600, "min"),
 }
 
-_INTEIROS = {"calorias", "dor_manha", "dor_noite", "dor_pos_caminhada", "sono_qualidade"}
+_INTEIROS = {"calorias", "dor_manha", "dor_noite", "dor_pos_caminhada", "sono_qualidade",
+             "bem_estar", "caminhada_min"}
+
+# Opcoes do check-in do Telegram, mesmos valores gravados (copia de
+# telegram_utils._HEALTH_*, que e pesado de importar aqui; teste garante que
+# nao divergem). "nenhum(a)" grava lista vazia, como o Telegram.
+_OPCOES_RADICULAR = ["nenhum", "gluteo", "quadril", "coxa", "joelho", "panturrilha", "tornozelo", "pe"]
+_OPCOES_TERAPIA = ["pilates", "fisioterapia", "rpg", "acupuntura", "nenhuma"]
+_OPCOES_GATILHO = ["espirro_crise_alergica", "viagem_longa_sentado", "dia_muito_sentado",
+                   "torcao_no_sono", "carga_assimetrica", "estresse", "outro", "nenhum"]
+_OPCOES_ALIMENTACAO = ["sim", "parcial", "nao"]
+_OPCOES_MEDICACAO = ["igual_ontem", "nada"]
+_MEDS_NADA = {"pregabalina": False, "dipirona": 0, "adorlan": 0, "fexofenadina": False}
 
 # Pedidos que nao tem onde morar. Nomear a alternativa e o que evita a proxima
 # tentativa as cegas.
 _NAO_EXISTEM = {
-    "passos": "o modulo nao registra passos; o que ha e caminhada em km (walkBlocks, pela web)",
+    "passos": "o modulo nao registra passos; use `caminhada_km` (e `caminhada_min`)",
     "sono_horas": "nao ha horas de sono; use `sono_qualidade` (1 a 5), que e a escala do check-in",
-    "ciatica": "nao ha campo booleano; o que existe e `radicular.location`, registrado no check-in",
-    "crise": "nao ha campo de crise; o que existe e `triggers.types`, registrado no check-in",
+    "ciatica": "nao ha campo booleano; use `radicular_local` (ate onde desce o sintoma)",
+    "crise": "nao ha campo de crise; use `gatilhos` (triggers.types) e `dor_*`",
 }
 
 
@@ -97,6 +115,19 @@ def _numero(campo: str, valor):
             f"`{campo}` = {n}{(' ' + unidade) if unidade else ''} esta fora da faixa "
             f"plausivel ({minimo}-{maximo}). Nada foi gravado — confira o valor.")
     return n
+
+
+def _opcao(campo: str, valor, opcoes: list) -> str:
+    texto = str(valor or "").strip().lower()
+    if texto not in opcoes:
+        raise ValorRecusado(f"`{campo}` = {valor!r} nao e opcao valida. Use: {', '.join(opcoes)}.")
+    return texto
+
+
+def _lista_opcoes(campo: str, valor, opcoes: list, vazio: str) -> list:
+    """Aceita um valor ou lista; `vazio` ("nenhum"/"nenhuma") vira [] como no Telegram."""
+    itens = [_opcao(campo, v, opcoes) for v in (valor if isinstance(valor, list) else [valor])]
+    return list(dict.fromkeys(i for i in itens if i != vazio))
 
 
 def hoje_brasilia() -> str:
@@ -174,6 +205,9 @@ def registrar(ctx, args: dict) -> dict:
     log_updates: dict = {}
     dor: dict = {}
     sono: dict = {}
+    sub: dict = {}  # radicular/strength/nutrition/triggers: mesclados no dict existente
+    medicacao = None
+    caminhada = None
 
     if args.get("peso") is not None:
         res_peso = gravar_peso_verificado(ctx.db, args["peso"], dia)
@@ -200,6 +234,40 @@ def registrar(ctx, args: dict) -> dict:
         if args.get("acordou_com_dor") is not None:
             sono["wokeInPain"] = bool(args["acordou_com_dor"])
             alterados.append("acordou_com_dor")
+        # Campos do check-in do Telegram, nos mesmos lugares e formatos.
+        if args.get("bem_estar") is not None:
+            log_updates["wellbeing"] = _numero("bem_estar", args["bem_estar"])
+            alterados.append("bem_estar")
+        if args.get("radicular_local") is not None:
+            sub["radicular"] = {"location": _opcao("radicular_local", args["radicular_local"], _OPCOES_RADICULAR)}
+            alterados.append("radicular_local")
+        if args.get("treino_forca") is not None:
+            sub["strength"] = {"done": bool(args["treino_forca"])}
+            alterados.append("treino_forca")
+        if args.get("terapia") is not None:
+            log_updates["therapy"] = _lista_opcoes("terapia", args["terapia"], _OPCOES_TERAPIA, "nenhuma")
+            alterados.append("terapia")
+        if args.get("alimentacao") is not None:
+            sub.setdefault("nutrition", {})["plan"] = _opcao(
+                "alimentacao", args["alimentacao"], _OPCOES_ALIMENTACAO)
+            alterados.append("alimentacao")
+        if args.get("proteina") is not None:
+            sub.setdefault("nutrition", {})["proteinTarget"] = bool(args["proteina"])
+            alterados.append("proteina")
+        if args.get("medicacao") is not None:
+            medicacao = _opcao("medicacao", args["medicacao"], _OPCOES_MEDICACAO)
+            alterados.append("medicacao")
+        if args.get("gatilhos") is not None:
+            sub["triggers"] = {"types": _lista_opcoes("gatilhos", args["gatilhos"], _OPCOES_GATILHO, "nenhum")}
+            alterados.append("gatilhos")
+        if args.get("caminhada_km") is not None or args.get("caminhada_min") is not None:
+            if args.get("caminhada_km") is None:
+                raise ValorRecusado("`caminhada_min` sem `caminhada_km`: o painel soma a caminhada "
+                                    "em km. Informe os km (os minutos sao opcionais).")
+            caminhada = {"distance": _numero("caminhada_km", args["caminhada_km"])}
+            if args.get("caminhada_min") is not None:
+                caminhada["minutes"] = _numero("caminhada_min", args["caminhada_min"])
+            alterados.append("caminhada")
     except ValorRecusado as exc:
         # O que ja foi gravado antes da recusa fica; o retorno diz o que passou,
         # para nao restar duvida sobre o estado.
@@ -209,13 +277,32 @@ def registrar(ctx, args: dict) -> dict:
     if not alterados:
         return {"erro": ("Nenhum valor informado. Passe ao menos um: peso, cintura, "
                          "calorias, dor_manha, dor_noite, dor_pos_caminhada, "
-                         "sono_qualidade ou acordou_com_dor."),
+                         "sono_qualidade, acordou_com_dor, bem_estar, radicular_local, "
+                         "treino_forca, terapia, alimentacao, proteina, medicacao, "
+                         "gatilhos ou caminhada_km."),
                 "aplicado": False}
 
-    if dor or sono or log_updates:
+    if dor or sono or log_updates or sub or medicacao or caminhada:
         ref = ctx.db.collection(COL_LOGS).document(dia)
         atual = ref.get()
         atual_d = (atual.to_dict() or {}) if atual.exists else {}
+        for chave, valores in sub.items():
+            log_updates[chave] = {**(atual_d.get(chave) or {}), **valores}
+        if medicacao == "igual_ontem":
+            ontem = (datetime.strptime(dia, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+            doc_ontem = ctx.db.collection(COL_LOGS).document(ontem).get()
+            meds_ontem = (doc_ontem.to_dict() or {}).get("meds") if doc_ontem.exists else None
+            log_updates["meds"] = meds_ontem or dict(_MEDS_NADA)
+        elif medicacao == "nada":
+            log_updates["meds"] = dict(_MEDS_NADA)
+        if caminhada:
+            # Um bloco MCP por dia, id fixo: repetir a chamada substitui, nao duplica.
+            bloco_id = f"walk_mcp_{dia}"
+            hora = datetime.now(timezone.utc).astimezone(_TZ_BR).strftime("%H:%M")
+            blocos = [b for b in (atual_d.get("walkBlocks") or [])
+                      if isinstance(b, dict) and b.get("id") != bloco_id]
+            blocos.append({"id": bloco_id, "time": hora, **caminhada, "source": "mcp"})
+            log_updates["walkBlocks"] = blocos
         agora = datetime.now(timezone.utc).isoformat()
         if dor:
             log_updates["pain"] = {**(atual_d.get("pain") or {}), **dor,
