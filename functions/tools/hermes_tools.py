@@ -126,6 +126,15 @@ def _guardar_ideia(ctx: ToolContext, args: dict):
         return f"ERRO|{erro.message}"
 
 
+def _anotar_no_diario(ctx: ToolContext, args: dict):
+    from tools import anotar_no_diario
+
+    try:
+        return anotar_no_diario.anotar(ctx.db, args.get("texto"), args.get("data"), args.get("origem"))
+    except anotar_no_diario.DiarioError as erro:
+        return f"ERRO|{erro.message}"
+
+
 def _listar_ideias(ctx: ToolContext, args: dict):
     from tools import ideias
 
@@ -2866,6 +2875,7 @@ _HANDLERS: dict = {
     "consultar_lista_compras": _consultar_lista_compras,
     "guardar_ideia": _guardar_ideia,
     "listar_ideias": _listar_ideias,
+    "anotar_no_diario": _anotar_no_diario,
     "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,

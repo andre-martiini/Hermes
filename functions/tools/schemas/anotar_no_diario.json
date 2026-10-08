@@ -1,0 +1,24 @@
+{
+  "name": "anotar_no_diario",
+  "description": "Use quando o usuário quiser registrar algo do dia dele no diário — como está se sentindo, um dia ruim, um acontecimento — a qualquer hora, ou ao fim de um check-in. Grave nas palavras dele, em primeira pessoa, sem dramatizar nem resumir demais. Acrescenta a nota ao diário pessoal de HOJE (não apaga as outras); o diário gerado às 21h30 trata essas notas como a entrada mais importante do dia. Depois das 21h30, se o diário de hoje já foi gerado, a nota fica guardada mas não entra no texto (resposta traz incorporado_no_diario: false).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "texto": {
+        "type": "string",
+        "description": "A nota, nas palavras do usuário, em primeira pessoa. Máximo de 4000 caracteres."
+      },
+      "data": {
+        "type": "string",
+        "description": "Opcional; só é aceita a data de hoje (YYYY-MM-DD, horário de Brasília). Outra data é recusada"
+      },
+      "origem": {
+        "type": "string",
+        "description": "Opcional: de onde veio a nota, ex. 'checkin_manha', 'checkin_noite' ou 'livre'"
+      }
+    },
+    "required": [
+      "texto"
+    ]
+  }
+}

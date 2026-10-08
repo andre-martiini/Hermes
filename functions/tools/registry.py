@@ -86,7 +86,8 @@ _CATALOG: dict[str, str] = {
     # A descricao antiga prometia "passos" e "sono", que nao existem no modelo:
     # o que ha e caminhada em km, calorias, qualidade do sono e dor.
     "consultar_saude": "Consulta dados de saude: peso, cintura, caminhada, calorias, qualidade do sono e dor",
-    "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono",
+    "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono, bem-estar, caminhada e os itens do check-in",
+    "anotar_no_diario": "Acrescenta uma nota do usuario, nas palavras dele, ao diario pessoal do dia (entra no diario das 21h30)",
     "consultar_saude_integracoes": "Reporta a saude (healthy/degraded/unavailable/unknown) de cada integracao: calendar, contacts, gmail, whatsapp, sipac, financas, repositorio",
     "registrar_observacao_externa": "Registra um fato relatado por OUTRO conector do cliente (nao o Hermes), com fonte, horario e nivel de verificacao; nao cria nem altera preferencia, memoria ou autorizacao",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
@@ -209,6 +210,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     # Gravam direto, sem card de confirmacao intermediario.
     "registrar_no_diario",
     "guardar_ideia",
+    "anotar_no_diario",
     "registrar_observacao_externa",
     "criar_objetivo_estrategico",
     "editar_objetivo_estrategico",

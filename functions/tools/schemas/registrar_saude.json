@@ -1,6 +1,6 @@
 {
   "name": "registrar_saude",
-  "description": "Registra no módulo Saúde o que o USUÁRIO DECLAROU sobre o próprio dia. Nunca preencha por estimativa, inferência ou memória de conversa: peso, dor e sono só o usuário pode informar, e um valor inventado contamina a média de 7 dias e a projeção da meta sem que ninguém perceba. Grava nas mesmas coleções que a interface web usa, é idempotente por dia e por campo (registrar de novo atualiza, não duplica), e recusa valor fora de faixa plausível em vez de gravar. Pelo menos um campo além da data é obrigatório.",
+  "description": "Registra no módulo Saúde o que o USUÁRIO DECLAROU sobre o próprio dia. Nunca preencha por estimativa, inferência ou memória de conversa: peso, dor e sono só o usuário pode informar, e um valor inventado contamina a média de 7 dias e a projeção da meta sem que ninguém perceba. Grava nas mesmas coleções que a interface web usa, é idempotente por dia e por campo (registrar de novo atualiza, não duplica), e recusa valor fora de faixa plausível em vez de gravar. Pelo menos um campo além da data é obrigatório. Também grava os itens do check-in (sintoma radicular, treino de força, terapia, alimentação, proteína, medicação, gatilhos), a nota geral de bem-estar e a caminhada, nos mesmos campos que o check-in do Telegram e o painel usam.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -39,6 +39,94 @@
       "acordou_com_dor": {
         "type": "boolean",
         "description": "Se acordou com dor"
+      },
+      "bem_estar": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10,
+        "description": "Nota geral de como o usuário está no dia, 0 (péssimo) a 10 (ótimo)"
+      },
+      "radicular_local": {
+        "type": "string",
+        "enum": [
+          "nenhum",
+          "gluteo",
+          "quadril",
+          "coxa",
+          "joelho",
+          "panturrilha",
+          "tornozelo",
+          "pe"
+        ],
+        "description": "Até onde desce o sintoma radicular (dor/formigamento na perna); 'nenhum' se não houve"
+      },
+      "treino_forca": {
+        "type": "boolean",
+        "description": "Se fez o treino de força hoje"
+      },
+      "terapia": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "pilates",
+            "fisioterapia",
+            "rpg",
+            "acupuntura",
+            "nenhuma"
+          ]
+        },
+        "description": "Modalidades terapêuticas feitas hoje; ['nenhuma'] se nenhuma. Substitui a lista do dia"
+      },
+      "alimentacao": {
+        "type": "string",
+        "enum": [
+          "sim",
+          "parcial",
+          "nao"
+        ],
+        "description": "Se seguiu o plano alimentar hoje"
+      },
+      "proteina": {
+        "type": "boolean",
+        "description": "Se bateu a meta de proteína hoje"
+      },
+      "medicacao": {
+        "type": "string",
+        "enum": [
+          "igual_ontem",
+          "nada"
+        ],
+        "description": "Medicação do dia: 'igual_ontem' copia a de ontem; 'nada' registra que não tomou nada. Mesmas opções do check-in"
+      },
+      "gatilhos": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "espirro_crise_alergica",
+            "viagem_longa_sentado",
+            "dia_muito_sentado",
+            "torcao_no_sono",
+            "carga_assimetrica",
+            "estresse",
+            "outro",
+            "nenhum"
+          ]
+        },
+        "description": "Eventos/gatilhos de dor do dia; ['nenhum'] se nenhum. Substitui a lista do dia"
+      },
+      "caminhada_km": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 50,
+        "description": "Total de km caminhados no dia (somando o que já foi lançado pela web/Telegram), 0,1 a 50. O registro feito por aqui vale a diferença para o que já está lançado; registrar de novo recalcula"
+      },
+      "caminhada_min": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 600,
+        "description": "Total de minutos caminhados no dia (somando o que já foi lançado pela web/Telegram), 1 a 600. Exige caminhada_km"
       }
     },
     "required": []
