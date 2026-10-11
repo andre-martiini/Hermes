@@ -583,17 +583,74 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
 
     def salvar_memoria_global(fato: str, categoria: str):
         """Persiste fato durável na memória global do Gaspar. Apenas para regras estáveis e preferências permanentes."""
+        # P06 do plano de autonomia (docs/plano-hermes-autonomo-2026-09-06.md,
+        # achado registrado em autonomy/context.py na sub-entrega que
+        # introduziu origem_fato): este motor Telegram legado gravava DIRETO
+        # em knowledge_nodes com um esquema próprio e divergente
+        # (fato/categoria/origem soltos, sem embedding, sem dedup, sem
+        # origem_fato), bypassando main._save_memory_node -- o mesmo caminho
+        # que salvar_memoria_global via MCP/web já usa. Unificado aqui: ganha
+        # embedding (retrieval semântico volta a achar memórias salvas pelo
+        # Telegram), dedup/conflito por similaridade e origem_fato. Canal
+        # "telegram" não tem contrato de exigir afirmação literal do usuário
+        # (texto desta própria docstring: "Apenas para regras estáveis...",
+        # sem exigir que o usuário tenha dito aquilo) -- mesmo espírito do
+        # canal "web", por isso cai no mesmo default de INFERENCIA_AGENTE
+        # (ver origem_fato_para_canal_de_salvar_memoria).
+        #
+        # ACHADO REAL de revisão adversarial independente sobre esta mesma
+        # sub-entrega: `_save_memory_node` pode devolver `status="conflict"`
+        # (similaridade média com um nó existente -- nem duplicado o
+        # suficiente para ignorar, nem diferente o suficiente para criar um
+        # nó novo). No canal web/MCP isso é tratado de verdade (main.py
+        # intercepta `status=="conflict"`, grava `pendingMemoryConflict` na
+        # sessão, o system prompt web instrui o modelo a perguntar ao
+        # usuário, e existe a tool `resolver_conflito_memoria` para
+        # resolver). O Telegram NÃO tem nenhum desses três: não expõe
+        # `resolver_conflito_memoria` nesta lista de closures, o prompt do
+        # Telegram (telegram_utils.py) nunca menciona `status="conflict"`, e
+        # a sessão do Telegram não persiste conflito pendente -- sem
+        # tratamento, o fato NOVO seria descartado silenciosamente (pior do
+        # que o motor legado anterior, que sempre salvava, duplicado ou
+        # não). Resolve automaticamente a favor do fato MAIS RECENTE -- a
+        # mesma operação que `resolver_conflito_memoria` faz com
+        # `force_update_id` quando o humano escolhe "substituir_pelo_novo"
+        # no outro canal, só que sem esperar confirmação (este canal nunca
+        # esperou confirmação para salvar memória, então não há regressão
+        # de comportamento aqui, só a lacuna que foi fechada).
         try:
-            import uuid as _uuid
-            node_id = str(_uuid.uuid4())[:16]
-            db.collection("knowledge_nodes").document(node_id).set({
-                "id": node_id,
-                "fato": fato,
-                "categoria": categoria,
-                "data_criacao": datetime.now(timezone.utc).isoformat(),
-                "origem": "telegram",
-            })
-            return json.dumps({"status": "saved", "id": node_id}, ensure_ascii=False)
+            from main import _save_memory_node
+            from autonomy.context import origem_fato_para_canal_de_salvar_memoria
+
+            gemini_key = _get_api_keys(db).get("gemini_api_key")
+            origem_fato = origem_fato_para_canal_de_salvar_memoria("telegram")
+            result = _save_memory_node(
+                db=db,
+                api_key=gemini_key,
+                fato=fato,
+                categoria=categoria,
+                origem_fato=origem_fato,
+            )
+            if result.get("status") == "conflict":
+                result = _save_memory_node(
+                    db=db,
+                    api_key=gemini_key,
+                    fato=fato,
+                    categoria=categoria,
+                    origem_fato=origem_fato,
+                    force_update_id=result["memory_id"],
+                )
+                if result.get("status") == "updated":
+                    # Achado real da 2a rodada de revisao adversarial: antes
+                    # marcava "conflict_resolution" mesmo quando esta 2a
+                    # chamada falhava (ex.: "memory_not_found", se o no
+                    # conflitante foi apagado por uma escrita concorrente
+                    # entre as duas chamadas) -- um resultado "error" com
+                    # "conflict_resolution": "auto_replaced_existing" anexado
+                    # sugeria falsamente que a substituicao deu certo. Só
+                    # marca quando a 2a chamada de fato confirma "updated".
+                    result["conflict_resolution"] = "auto_replaced_existing"
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
 
@@ -613,7 +670,6 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 "area_tematica": area_tematica,
                 "titulo_procedimento": titulo_procedimento,
                 "correcao_descrita": correcao_descrita,
-                "novo_conteudo_proposto": novo_conteudo_proposto,
                 "justificativa_usuario": justificativa,
                 "status": "pendente",
                 "data_criacao": firestore.SERVER_TIMESTAMP,
