@@ -2044,7 +2044,42 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
         apenas_parceladas=bool(args.get("apenas_parceladas")),
         limite=int(args.get("limite") or 200),
         cartao=args.get("cartao"),
+        categoria=args.get("categoria"),
     )
+
+
+def gerenciar_categorias_cartao(ctx: ToolContext, args: dict):
+    """Lista, define ou desliga regras de categoria por estabelecimento."""
+    import categorias_cartao as cc
+
+    acao = str(args.get("acao") or "listar").strip()
+    try:
+        if acao == "listar":
+            regras = cc.carregar_regras(ctx.db)
+            por_categoria: dict[str, list[str]] = {}
+            for regra in sorted(regras, key=lambda r: r["padrao"]):
+                por_categoria.setdefault(regra["categoria"], []).append(
+                    regra["padrao"] + (" (dono)" if regra["origem"] == "dono" else ""))
+            return {"categorias": list(cc.CATEGORIAS), "naturezas": list(cc.NATUREZAS),
+                    "regras_por_categoria": por_categoria, "total_regras": len(regras)}
+        padrao = str(args.get("padrao") or "").strip()
+        if not padrao:
+            return {"erro": "Informe o padrao (palavra do nome do estabelecimento, ex.: 'uber')."}
+        if acao == "definir":
+            relido = cc.definir(ctx.db, padrao, str(args.get("categoria") or ""),
+                                str(args.get("natureza") or "pessoal"))
+            ok = relido.get("ativo") is True and relido.get("categoria") == str(args.get("categoria")).strip()
+        elif acao == "remover":
+            relido = cc.remover(ctx.db, padrao)
+            ok = relido.get("ativo") is False
+        else:
+            return {"erro": f"Acao desconhecida: {acao!r}. Use listar, definir ou remover."}
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if not ok:
+        return {"erro": "A regra nao foi confirmada ao reler o banco.", "relido": relido}
+    return {"estado": "verificado", "acao": acao, "regra": relido,
+            "observacao": "Vale na proxima consulta, inclusive para faturas antigas."}
 
 
 def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
@@ -2986,6 +3021,7 @@ _HANDLERS: dict = {
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
     "importar_fatura_cartao": importar_fatura_cartao,
+    "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,

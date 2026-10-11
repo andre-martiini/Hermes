@@ -1,6 +1,6 @@
 {
   "name": "consultar_fatura_cartao",
-  "description": "Consulta os lançamentos da fatura do cartão de crédito, com total por estabelecimento. Use para saber em que o dinheiro foi gasto",
+  "description": "Consulta os lançamentos da fatura do cartão de crédito, com total por estabelecimento, por categoria, por natureza (pessoal/projeto/misto) e por cartão. Use para saber em que o dinheiro foi gasto. 'sem_categoria' lista os maiores estabelecimentos ainda sem regra (ver gerenciar_categorias_cartao)",
   "parameters": {
     "type": "object",
     "properties": {
@@ -31,6 +31,10 @@
           "xp"
         ],
         "description": "Só os lançamentos deste cartão. Sem ele, vêm todos, com o total de cada cartão em por_cartao"
+      },
+      "categoria": {
+        "type": "string",
+        "description": "Só os lançamentos desta categoria (ex.: 'IA e software', 'Sem categoria')"
       }
     },
     "required": []

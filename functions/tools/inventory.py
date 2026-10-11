@@ -1106,6 +1106,14 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — projeção determinística sobre dados já gravados", dados_sensiveis_categoria="financeiro",
     ),
+    "gerenciar_categorias_cartao": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê a regra gravada e só devolve sucesso se bater",
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="regra com ID determinístico pelo padrão normalizado: definir de novo sobrescreve; remover grava "
+        "ativo=false (desliga também a regra padrão do código com o mesmo padrão) e definir de novo religa.",
+    ),
     "importar_fatura_cartao": ToolInventoryEntry(
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "a própria tool relê cabeçalho e lançamentos gravados e só devolve sucesso se baterem",
