@@ -743,13 +743,6 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
         processed_ids = set(processed_emails_doc.to_dict().get('ids', [])) if processed_emails_doc.exists else set()
         new_processed_ids = []
 
-        bill_rubrics_cache = []
-        for r in db.collection('bill_rubrics').stream():
-            d = r.to_dict()
-            desc = d.get('description', '')
-            keywords = [w.strip().lower() for w in re.split(r'[\(\)\s,-]+', desc) if len(w.strip()) > 2]
-            bill_rubrics_cache.append({'id': r.id, 'desc': desc.lower(), 'keywords': keywords, 'full_desc': desc})
-
         for msg in messages:
             msg_id = msg['id']
             if msg_id in existing_google_ids:
@@ -786,53 +779,8 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
                 description = f"Pix: {subject}"
                 iso_date = dt.isoformat()
 
-                # Conciliação com Rubricas de Contas (Contas Fixas / Saídas)
-                if not is_income:
-                    matched_bill_rubric = None
-                    clean_content = content.lower()
-                    for rb in bill_rubrics_cache:
-                        if rb['desc'] in clean_content or any(kw in clean_content for kw in rb['keywords']):
-                            matched_bill_rubric = rb
-                            break
-
-                    if matched_bill_rubric:
-                        month = dt.month - 1
-                        year = dt.year
-                        
-                        found_bill_doc = None
-                        for fb_doc in db.collection('fixed_bills').where('month', '==', month).where('year', '==', year).stream():
-                            fb_data = fb_doc.to_dict()
-                            if fb_data.get('rubricId') == matched_bill_rubric['id'] or matched_bill_rubric['desc'] in fb_data.get('description', '').lower():
-                                found_bill_doc = fb_doc
-                                break
-                        
-                        if found_bill_doc:
-                            db.collection('fixed_bills').document(found_bill_doc.id).update({
-                                'isPaid': True,
-                                'amount': amount,
-                                'data_pagamento': iso_date,
-                                'google_message_id': msg_id,
-                                'pix_id': pix_id
-                            })
-                            log(f"[CONCILIAÇÃO] Conta Fixa '{matched_bill_rubric['full_desc']}' baixada como PAGA (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
-                        else:
-                            db.collection('fixed_bills').add({
-                                'description': matched_bill_rubric['full_desc'],
-                                'amount': amount,
-                                'dueDay': dt.day,
-                                'month': month,
-                                'year': year,
-                                'isPaid': True,
-                                'rubricId': matched_bill_rubric['id'],
-                                'google_message_id': msg_id,
-                                'pix_id': pix_id,
-                                'created_at': iso_date
-                            })
-                            log(f"[CONCILIAÇÃO] Criada e baixada Conta Fixa '{matched_bill_rubric['full_desc']}' (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
-                        
-                        new_processed_ids.append(msg_id)
-                        archive_gmail_message(service, msg_id, log, "pix-conciliado-conta-fixa")
-                        continue
+                # A conciliação de Pix com contas fixas só roda na nuvem
+                # (functions/conciliacao_pix.py); aqui o Pix vira lançamento avulso.
                 
                 is_duplicate = False
                 target_cache = existing_income if is_income else existing_transactions
