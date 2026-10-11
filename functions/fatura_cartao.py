@@ -342,7 +342,7 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
 
 def consultar(db, *, competencia: str | None = None, desde: str | None = None,
               estabelecimento: str | None = None, apenas_parceladas: bool = False,
-              limite: int = 200) -> dict:
+              limite: int = 200, cartao: str | None = None) -> dict:
     """Lancamentos por periodo e/ou estabelecimento, com totais por estabelecimento.
 
     Devolve dado agregado junto com a lista porque o agregado e o que quase sempre
@@ -365,6 +365,8 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
             continue
         if alvo and alvo not in str(item.get("estabelecimento", "")).lower():
             continue
+        if cartao and _cartao_do_item(item) != cartao:
+            continue
         itens.append(item)
 
     itens.sort(key=lambda i: (str(i.get("competencia") or ""), str(i.get("data") or "")))
@@ -381,10 +383,16 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
 
     ranking = sorted(por_estabelecimento.values(), key=lambda x: -x["total"])
 
+    por_cartao: dict[str, float] = {}
+    for item in itens:
+        chave = _cartao_do_item(item)
+        por_cartao[chave] = round(por_cartao.get(chave, 0.0) + item["valor"], 2)
+
     total_encargos = round(sum(i["valor"] for i in encargos), 2)
     return {
         "total_lancamentos": len(itens),
         "total_gasto": round(sum(i["valor"] for i in itens), 2),
+        "por_cartao": por_cartao,
         # Separado de proposito: IOF e juros sao custo real, mas nao sao gasto
         # num estabelecimento — misturar esconde os dois.
         "total_encargos": total_encargos,
@@ -396,6 +404,7 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         "filtros": {
             "competencia": competencia, "desde": desde,
             "estabelecimento": estabelecimento, "apenas_parceladas": apenas_parceladas,
+            "cartao": cartao,
         },
     }
 

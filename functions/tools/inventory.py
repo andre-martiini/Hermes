@@ -1106,6 +1106,16 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — projeção determinística sobre dados já gravados", dados_sensiveis_categoria="financeiro",
     ),
+    "importar_fatura_cartao": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê cabeçalho e lançamentos gravados e só devolve sucesso se baterem",
+        rede_servico="Google Drive (download) e Gemini (só para PDF)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="reimportar a mesma fatura apaga e regrava os lançamentos da competência "
+        "(fatura_cartao.salvar); a correção da conta do mês guarda o valor anterior em amount_anterior.",
+    ),
     "listar_conversas_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
         dados_sensiveis_categoria="nomes/ids de conversas",
