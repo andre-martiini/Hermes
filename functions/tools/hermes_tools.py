@@ -2048,6 +2048,22 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
     )
 
 
+def atualizar_reserva_emergencia(ctx: ToolContext, args: dict):
+    """Valor atual e/ou alvo da reserva de emergencia, com historico."""
+    from reserva_emergencia import atualizar
+
+    try:
+        resultado = atualizar(
+            ctx.db, valor_atual=args.get("valor_atual"), valor_alvo=args.get("valor_alvo"),
+            fonte=args.get("fonte") or "", observacao=args.get("observacao") or "",
+        )
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Reserva nao confirmada: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
 def gerenciar_categorias_cartao(ctx: ToolContext, args: dict):
     """Lista, define ou desliga regras de categoria por estabelecimento."""
     import categorias_cartao as cc
@@ -3022,6 +3038,7 @@ _HANDLERS: dict = {
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
     "importar_fatura_cartao": importar_fatura_cartao,
     "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
+    "atualizar_reserva_emergencia": atualizar_reserva_emergencia,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
