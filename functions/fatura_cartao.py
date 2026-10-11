@@ -373,7 +373,7 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
             continue
         if cartao and _cartao_do_item(item) != cartao:
             continue
-        item.update(categorias_cartao.classificar(item.get("estabelecimento", ""), regras))
+        item.update(categorias_cartao.classificar_lancamento(item, regras))
         item.pop("regra", None)
         if categoria_alvo and categorias_cartao.normalizar(item["categoria"]) != categoria_alvo:
             continue
