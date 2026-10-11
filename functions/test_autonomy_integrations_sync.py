@@ -524,6 +524,82 @@ class TestSaudeWhatsapp(unittest.TestCase):
         self.assertIsNone(saude.lag_seconds)
 
 
+class TestSaudeWhatsappEnvio(unittest.TestCase):
+    """11/10/2026: envios falhando ("detached Frame") com a ingestão em dia
+    precisam aparecer como DEGRADED -- `system/whatsapp_worker`."""
+
+    _INGEST_OK = {"last_query_success_at": _AGORA - timedelta(minutes=10)}
+
+    def _worker(self, **campos):
+        base = {"last_seen": _AGORA - timedelta(minutes=2), "ready": True}
+        base.update(campos)
+        return base
+
+    def test_sem_doc_do_worker_mantem_comportamento_antigo(self):
+        saude = saude_whatsapp(self._INGEST_OK, _AGORA)
+        self.assertEqual(saude.status, IntegrationStatus.HEALTHY)
+        self.assertIsNone(saude.motivo)
+
+    def test_duas_falhas_seguidas_depois_do_ultimo_sucesso_e_degraded(self):
+        worker = self._worker(
+            consecutive_send_failures=2,
+            last_send_failure_at=_AGORA - timedelta(minutes=1),
+            last_send_success_at=_AGORA - timedelta(hours=3),
+            last_send_error="Attempted to use detached Frame 'A45E'",
+        )
+        saude = saude_whatsapp(self._INGEST_OK, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.DEGRADED)
+        self.assertIn("2 envios seguidos", saude.motivo)
+        self.assertIn("detached Frame", saude.motivo)
+        self.assertIsNone(saude.error_code)
+
+    def test_uma_falha_so_continua_healthy(self):
+        worker = self._worker(consecutive_send_failures=1, last_send_failure_at=_AGORA - timedelta(minutes=1))
+        self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)
+
+    def test_sucesso_mais_recente_que_a_falha_continua_healthy(self):
+        worker = self._worker(
+            consecutive_send_failures=3,
+            last_send_failure_at=_AGORA - timedelta(minutes=5),
+            last_send_success_at=_AGORA - timedelta(minutes=1),
+        )
+        self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)
+
+    def test_heartbeat_do_worker_velho_e_degraded(self):
+        worker = self._worker(last_seen=_AGORA - timedelta(minutes=25))
+        saude = saude_whatsapp(self._INGEST_OK, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.DEGRADED)
+        self.assertIn("25 min", saude.motivo)
+
+    def test_whatsapp_web_fechado_ha_mais_de_10_min_e_degraded(self):
+        """Recuperação da página que não conclui: heartbeat em dia, mas `ready: false`."""
+        worker = self._worker(ready=False, not_ready_since=_AGORA - timedelta(minutes=15))
+        saude = saude_whatsapp(self._INGEST_OK, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.DEGRADED)
+        self.assertIn("15 min", saude.motivo)
+
+    def test_whatsapp_web_reabrindo_ha_pouco_continua_healthy(self):
+        worker = self._worker(ready=False, not_ready_since=_AGORA - timedelta(minutes=3))
+        self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)
+
+    def test_heartbeat_recente_continua_healthy(self):
+        worker = self._worker(last_seen=_AGORA - timedelta(minutes=9))
+        self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)
+
+    def test_nunca_piora_para_unavailable_nem_melhora_unavailable(self):
+        worker = self._worker(last_seen=_AGORA - timedelta(hours=1))
+        antigo = {"last_query_success_at": _AGORA - timedelta(hours=8)}
+        saude = saude_whatsapp(antigo, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.UNAVAILABLE)
+        self.assertIsNotNone(saude.motivo)
+
+    def test_sem_leitura_de_ingestao_fica_unknown_com_motivo(self):
+        worker = self._worker(last_seen=_AGORA - timedelta(hours=1))
+        saude = saude_whatsapp(None, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.UNKNOWN)
+        self.assertIsNotNone(saude.motivo)
+
+
 class TestSaudeSemSincronizacaoPersistida(unittest.TestCase):
     def test_sipac_e_sempre_unknown(self):
         saude = saude_sem_sincronizacao_persistida("sipac", _AGORA)
