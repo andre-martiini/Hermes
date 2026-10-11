@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ehPaginaQuebrada, criarRecuperadorDePagina } from './pagina_quebrada.js';
+import { ehPaginaQuebrada, criarRecuperadorDePagina, jaFoiEnviada } from './pagina_quebrada.js';
 
 const silencioso = { warn() {}, error() {}, log() {} };
 
@@ -87,4 +87,16 @@ test('quebra logo depois de recuperar espera o intervalo mínimo (sem loop)', as
     agendados[0].fn();
     await new Promise((res) => setImmediate(res));
     assert.equal(abertas.length, 2);
+});
+
+test('envio interrompido: acha a mensagem já entregue e não reenvia', () => {
+    const desde = 1_000_000_000;
+    const msgs = [
+        { fromMe: true, body: 'Oi, José', timestamp: (desde - 3_600_000) / 1000, id: { id: 'antiga' } },
+        { fromMe: false, body: 'Oi, José', timestamp: desde / 1000 + 5, id: { id: 'dele' } },
+        { fromMe: true, body: 'Oi, José ', timestamp: desde / 1000 + 2, id: { id: 'certa' } },
+    ];
+    assert.equal(jaFoiEnviada(msgs, 'Oi, José', desde)?.id.id, 'certa');
+    assert.equal(jaFoiEnviada(msgs, 'Outra mensagem', desde), null);
+    assert.equal(jaFoiEnviada([msgs[0]], 'Oi, José', desde), null, 'a de 1h antes é outro envio');
 });

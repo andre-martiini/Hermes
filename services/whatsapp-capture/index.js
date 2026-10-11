@@ -11,7 +11,7 @@ import { detectarMencao } from './mentions.js';
 import { criarExecutorCoalescido } from './coalescido.js';
 import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes.js';
 import { criarInicializador } from './inicializacao.js';
-import { ehPaginaQuebrada, criarRecuperadorDePagina } from './pagina_quebrada.js';
+import { ehPaginaQuebrada, criarRecuperadorDePagina, jaFoiEnviada } from './pagina_quebrada.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -1093,7 +1093,7 @@ function registrarEnvio(erro) {
 }
 
 // Falha definitiva avisa o dono uma vez por outbox (`failure_alerted_at`).
-async function avisarFalhaDefinitiva(doc, data, motivo) {
+async function avisarFalhaDefinitiva(doc, data, motivo, incerto = false) {
     if (data.failure_alerted_at) return;
     try {
         await doc.ref.update({ failure_alerted_at: admin.firestore.Timestamp.now() });
@@ -1105,7 +1105,10 @@ async function avisarFalhaDefinitiva(doc, data, motivo) {
     const trecho = conteudo.length > 60 ? `${conteudo.slice(0, 60)}…` : conteudo;
     await sendTelegramAlert(
         `❌ Gaspar WhatsApp: envio para ${destino} falhou (${String(motivo).slice(0, 160)}) — `
-        + `outbox ${doc.id}, nada foi entregue.${trecho ? ` Início: "${trecho}"` : ''}`
+        + `outbox ${doc.id}, `
+        + (incerto ? 'a entrega é INCERTA (a página quebrou durante o envio) — confira a conversa antes de reenviar.'
+            : 'nada foi entregue.')
+        + (trecho ? ` Início: "${trecho}"` : '')
     );
 }
 
@@ -1188,9 +1191,36 @@ async function rodarOutboxUmaVez() {
 
             const toNumber = data.to_number;
             const content = data.content;
+            let inicioEnvio = null;
 
             try {
                 const destino = await resolverDestino(toNumber);
+
+                // Tentativa anterior quebrou durante o sendMessage: confere se a
+                // mensagem já saiu antes de reenviar (achado do Codex no PR #426).
+                const incertoDesde = data.envio_incerto_desde?.toMillis?.();
+                if (incertoDesde) {
+                    const chat = await client.getChatById(destino);
+                    const recentes = await chat.fetchMessages({ limit: 30, fromMe: true });
+                    const achada = jaFoiEnviada(recentes, content, incertoDesde);
+                    if (achada) {
+                        await doc.ref.update({
+                            status: 'sent',
+                            sent_at: admin.firestore.Timestamp.fromMillis(Number(achada.timestamp) * 1000),
+                            sent_to: destino,
+                            wa_message_id: achada.id?.id || null,
+                            reconciliado: true,
+                            error_message: admin.firestore.FieldValue.delete(),
+                            envio_incerto_desde: admin.firestore.FieldValue.delete(),
+                            updated_at: admin.firestore.Timestamp.now()
+                        });
+                        console.log(`[Outbox] ${doc.id} já tinha sido entregue antes da página quebrar; não reenviado.`);
+                        registrarEnvio(null);
+                        continue;
+                    }
+                }
+
+                inicioEnvio = admin.firestore.Timestamp.now();
                 const enviada = await client.sendMessage(destino, content);
 
                 await doc.ref.update({
@@ -1201,6 +1231,7 @@ async function rodarOutboxUmaVez() {
                     sent_to: destino,
                     wa_message_id: enviada?.id?.id || null,
                     error_message: admin.firestore.FieldValue.delete(),
+                    envio_incerto_desde: admin.firestore.FieldValue.delete(),
                     updated_at: admin.firestore.Timestamp.now()
                 });
                 console.log(`Message sent to ${toNumber} (${destino})`);
@@ -1225,6 +1256,8 @@ async function rodarOutboxUmaVez() {
                         status: 'pending',
                         error_message: `Página do WhatsApp Web quebrada (${detalhe.slice(0, 120)}); `
                             + `reabrindo e tentando de novo (tentativa ${tentativas}/${MAX_TENTATIVAS_PAGINA}).`,
+                        // Quebrou durante o sendMessage: a próxima tentativa confere antes de reenviar.
+                        ...(inicioEnvio ? { envio_incerto_desde: inicioEnvio } : {}),
                         updated_at: admin.firestore.Timestamp.now()
                     });
                     paginaQuebrada('outbox');
@@ -1241,7 +1274,8 @@ async function rodarOutboxUmaVez() {
                     failed_at: admin.firestore.Timestamp.now(),
                     updated_at: admin.firestore.Timestamp.now()
                 });
-                await avisarFalhaDefinitiva(doc, data, motivo);
+                await avisarFalhaDefinitiva(doc, data, motivo,
+                    Boolean(quebrada && inicioEnvio) || Boolean(data.envio_incerto_desde));
                 if (quebrada) {
                     paginaQuebrada('outbox');
                     break;

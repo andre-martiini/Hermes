@@ -64,3 +64,14 @@ export function criarRecuperadorDePagina({
         get recuperando() { return recuperando; },
     };
 }
+
+// Envio interrompido pela página quebrada tem entrega incerta: o WhatsApp pode
+// ter aceitado a mensagem antes de o puppeteer perder o frame. Antes de reenviar,
+// procura a mesma mensagem já enviada na conversa (fromMe, mesmo texto, depois
+// do início da tentativa) — reenviar sem conferir duplicaria para o contato.
+export function jaFoiEnviada(mensagens, conteudo, desdeMs, folgaMs = 60_000) {
+    const alvo = String(conteudo ?? '').trim();
+    return (mensagens || []).find((m) => m?.fromMe
+        && String(m.body ?? '').trim() === alvo
+        && Number(m.timestamp) * 1000 >= desdeMs - folgaMs) || null;
+}
