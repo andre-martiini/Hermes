@@ -395,6 +395,13 @@ def _motivo_envio_degradado(worker: Mapping[str, Any], heartbeat_at: datetime) -
     ):
         erro = str(worker.get("last_send_error") or "").strip()[:120]
         return f"{int(falhas)} envios seguidos do WhatsApp falharam" + (f" (último erro: {erro})" if erro else "")
+    # Recuperação da página que não conclui: o worker fica `ready: false` com
+    # heartbeat em dia e para de pegar envios, então o contador não sobe.
+    nao_pronto = _extrair_instante(worker.get("not_ready_since"))
+    if (worker.get("ready") is False and nao_pronto is not None
+            and (heartbeat_at - nao_pronto).total_seconds() > WORKER_HEARTBEAT_VELHO_SEGUNDOS):
+        minutos = int((heartbeat_at - nao_pronto).total_seconds() // 60)
+        return f"worker do WhatsApp sem o WhatsApp Web aberto há {minutos} min"
     visto = _extrair_instante(worker.get("last_seen"))
     if visto is not None and (heartbeat_at - visto).total_seconds() > WORKER_HEARTBEAT_VELHO_SEGUNDOS:
         minutos = int((heartbeat_at - visto).total_seconds() // 60)

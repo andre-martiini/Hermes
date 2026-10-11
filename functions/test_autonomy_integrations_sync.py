@@ -571,6 +571,17 @@ class TestSaudeWhatsappEnvio(unittest.TestCase):
         self.assertEqual(saude.status, IntegrationStatus.DEGRADED)
         self.assertIn("25 min", saude.motivo)
 
+    def test_whatsapp_web_fechado_ha_mais_de_10_min_e_degraded(self):
+        """Recuperação da página que não conclui: heartbeat em dia, mas `ready: false`."""
+        worker = self._worker(ready=False, not_ready_since=_AGORA - timedelta(minutes=15))
+        saude = saude_whatsapp(self._INGEST_OK, _AGORA, worker)
+        self.assertEqual(saude.status, IntegrationStatus.DEGRADED)
+        self.assertIn("15 min", saude.motivo)
+
+    def test_whatsapp_web_reabrindo_ha_pouco_continua_healthy(self):
+        worker = self._worker(ready=False, not_ready_since=_AGORA - timedelta(minutes=3))
+        self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)
+
     def test_heartbeat_recente_continua_healthy(self):
         worker = self._worker(last_seen=_AGORA - timedelta(minutes=9))
         self.assertEqual(saude_whatsapp(self._INGEST_OK, _AGORA, worker).status, IntegrationStatus.HEALTHY)

@@ -158,11 +158,18 @@ async function sendTelegramAlert(text) {
     }
 }
 
+// Desde quando o WhatsApp Web não está pronto: a saúde fica `degraded` se isso
+// passar de 10 min (recuperação de página que não conclui, 11/10/2026).
+let naoProntoDesde = null;
+
 async function writeHeartbeat() {
     try {
+        if (isClientReady) naoProntoDesde = null;
+        else if (!naoProntoDesde) naoProntoDesde = admin.firestore.Timestamp.now();
         await db.collection('system').doc('whatsapp_worker').set({
             last_seen: admin.firestore.Timestamp.now(),
             ready: isClientReady,
+            not_ready_since: naoProntoDesde,
         }, { merge: true });
     } catch (e) {
         console.error('[Heartbeat] Falha ao gravar:', e);
@@ -201,6 +208,7 @@ async function telefoneDoChat(chatId, chat) {
         // deixar em branco, porque um numero errado casa com alguem.
         if (num.length >= 8 && num !== lidDigits) return num;
     } catch (e) {
+        if (ehPaginaQuebrada(e)) throw e;  // sobe para o sync recriar a página
         // pupPage indisponivel (reconectando): tenta o caminho classico abaixo.
     }
 
@@ -209,6 +217,7 @@ async function telefoneDoChat(chatId, chat) {
         const num = soDigitos(contato?.number);
         if (num.length >= 8 && num !== lidDigits) return num;
     } catch (e) {
+        if (ehPaginaQuebrada(e)) throw e;
         // Contato apagado ou sem numero visivel.
     }
     return null;
@@ -346,6 +355,7 @@ async function syncChatRegistry() {
                     }
                 }
             } catch (itemErr) {
+                if (ehPaginaQuebrada(itemErr)) throw itemErr;  // aborta o sync; o catch externo recria a página
                 console.error('[Chats] Falha ao processar chat individual:', itemErr);
             }
         }
