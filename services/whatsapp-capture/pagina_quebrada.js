@@ -33,6 +33,7 @@ export function criarRecuperadorDePagina({
 }) {
     let recuperando = false;
     let ultimaMs = -Infinity;
+    let geracao = 0;  // `liberar` invalida uma recuperação adiada que ainda não rodou
 
     async function recuperar(origem) {
         if (recuperando) return false;
@@ -40,7 +41,12 @@ export function criarRecuperadorDePagina({
         const falta = ultimaMs + intervaloMinimoMs - agora();
         if (falta > 0) {
             log.warn(`[Pagina] Página quebrada de novo (${origem}); recrio em ${Math.round(falta / 1000)}s.`);
-            agendar(() => { recuperando = false; recuperar(`${origem}, adiada`); }, falta);
+            const minha = geracao;
+            agendar(() => {
+                if (minha !== geracao) return;  // a página voltou antes: não derrubar
+                recuperando = false;
+                recuperar(`${origem}, adiada`);
+            }, falta);
             return false;
         }
         ultimaMs = agora();
@@ -60,7 +66,7 @@ export function criarRecuperadorDePagina({
 
     return {
         recuperar,
-        liberar: () => { recuperando = false; },
+        liberar: () => { recuperando = false; geracao += 1; },
         get recuperando() { return recuperando; },
     };
 }
@@ -69,7 +75,10 @@ export function criarRecuperadorDePagina({
 // ter aceitado a mensagem antes de o puppeteer perder o frame. Antes de reenviar,
 // procura a mesma mensagem já enviada na conversa (fromMe, mesmo texto, depois
 // do início da tentativa) — reenviar sem conferir duplicaria para o contato.
-export function jaFoiEnviada(mensagens, conteudo, desdeMs, folgaMs = 60_000) {
+// A folga só cobre o arredondamento do timestamp do WhatsApp (segundos) e um
+// relógio levemente adiantado: mensagem igual enviada ANTES da tentativa (um
+// "OK" de um minuto atrás) não pode passar por esta (achado do Codex, PR #426).
+export function jaFoiEnviada(mensagens, conteudo, desdeMs, folgaMs = 2_000) {
     const alvo = String(conteudo ?? '').trim();
     return (mensagens || []).find((m) => m?.fromMe
         && String(m.body ?? '').trim() === alvo

@@ -1079,6 +1079,9 @@ const MAX_TENTATIVAS_PAGINA = 3;
 
 // Saúde do envio em system/whatsapp_worker (lido por saude_whatsapp no backend):
 // o heartbeat só diz que o processo vive; isto diz se o envio funciona.
+// Gravações em fila: sem isso um incremento de falha podia chegar depois do
+// zerar de um sucesso seguinte e deixar a saúde degradada à toa.
+let filaEstatistica = Promise.resolve();
 function registrarEnvio(erro) {
     const agora = admin.firestore.Timestamp.now();
     const campos = erro == null
@@ -1088,8 +1091,10 @@ function registrarEnvio(erro) {
             last_send_error: String(erro).slice(0, 200),
             consecutive_send_failures: FieldValue.increment(1),
         };
-    db.collection('system').doc('whatsapp_worker').set(campos, { merge: true })
+    filaEstatistica = filaEstatistica
+        .then(() => db.collection('system').doc('whatsapp_worker').set(campos, { merge: true }))
         .catch((e) => console.error('[Outbox] Falha ao gravar estatística de envio:', e));
+    return filaEstatistica;
 }
 
 // Falha definitiva avisa o dono uma vez por outbox (`failure_alerted_at`).
@@ -1192,6 +1197,7 @@ async function rodarOutboxUmaVez() {
             const toNumber = data.to_number;
             const content = data.content;
             let inicioEnvio = null;
+            let entregue = null;  // o sendMessage voltou: daqui em diante a mensagem saiu
 
             try {
                 const destino = await resolverDestino(toNumber);
@@ -1215,13 +1221,14 @@ async function rodarOutboxUmaVez() {
                             updated_at: admin.firestore.Timestamp.now()
                         });
                         console.log(`[Outbox] ${doc.id} já tinha sido entregue antes da página quebrar; não reenviado.`);
-                        registrarEnvio(null);
+                        await registrarEnvio(null);
                         continue;
                     }
                 }
 
                 inicioEnvio = admin.firestore.Timestamp.now();
                 const enviada = await client.sendMessage(destino, content);
+                entregue = { destino, id: enviada?.id?.id || null };
 
                 await doc.ref.update({
                     status: 'sent',
@@ -1235,16 +1242,32 @@ async function rodarOutboxUmaVez() {
                     updated_at: admin.firestore.Timestamp.now()
                 });
                 console.log(`Message sent to ${toNumber} (${destino})`);
-                registrarEnvio(null);
+                await registrarEnvio(null);
 
             } catch (error) {
+                if (entregue) {
+                    // Saiu, mas gravar "enviada" falhou: nunca devolver à fila nem
+                    // dizer "nada foi entregue" — isso levaria a reenviar (duplicar).
+                    console.error(`[Outbox] ${doc.id} enviada, mas falhou ao registrar:`, error);
+                    try {
+                        await doc.ref.update({
+                            status: 'sent', sent_at: admin.firestore.Timestamp.now(),
+                            sent_to: entregue.destino, wa_message_id: entregue.id,
+                            updated_at: admin.firestore.Timestamp.now()
+                        });
+                    } catch (e2) {
+                        await sendTelegramAlert(`⚠️ Gaspar WhatsApp: a mensagem do outbox ${doc.id} FOI enviada, `
+                            + 'mas não consegui registrar isso na fila. Não reenvie.');
+                    }
+                    continue;
+                }
                 // A excecao do WhatsApp Web vem minificada — o erro real das duas
                 // tentativas de 28/08 era literalmente `t: t`, inutil para quem le.
                 // Guardar tambem o nome e a pilha da origem torna a proxima
                 // investigacao possivel sem precisar do log do processo.
                 const detalhe = error?.message || String(error);
                 console.error(`Failed to send message to ${toNumber}:`, error);
-                registrarEnvio(detalhe);
+                await registrarEnvio(detalhe);
 
                 // 11/10/2026: página quebrada não é culpa do destino — devolve à
                 // fila, recria a página e para o lote (o resto falharia igual); o

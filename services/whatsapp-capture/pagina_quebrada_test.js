@@ -99,4 +99,26 @@ test('envio interrompido: acha a mensagem já entregue e não reenvia', () => {
     assert.equal(jaFoiEnviada(msgs, 'Oi, José', desde)?.id.id, 'certa');
     assert.equal(jaFoiEnviada(msgs, 'Outra mensagem', desde), null);
     assert.equal(jaFoiEnviada([msgs[0]], 'Oi, José', desde), null, 'a de 1h antes é outro envio');
+    const umMinutoAntes = { fromMe: true, body: 'OK', timestamp: (desde - 60_000) / 1000 };
+    assert.equal(jaFoiEnviada([umMinutoAntes], 'OK', desde), null, '"OK" de 1 min antes não é desta tentativa');
+});
+
+test('ready antes da recuperação adiada cancela a recuperação (não derruba página saudável)', async () => {
+    let t = 0;
+    const agendados = [];
+    const abertas = [];
+    const r = criarRecuperadorDePagina({
+        destruir: async () => {}, abrir: async (o) => { abertas.push(o); },
+        intervaloMinimoMs: 300_000, agora: () => t,
+        agendar: (fn) => agendados.push(fn), log: { warn() {}, error() {} },
+    });
+    await r.recuperar('envio');
+    r.liberar();
+    t = 60_000;
+    await r.recuperar('chats');          // adiada
+    r.liberar();                          // a reconexão do 'disconnected' abriu a página antes
+    t = 300_000;
+    agendados[0]();
+    await new Promise((res) => setImmediate(res));
+    assert.equal(abertas.length, 1);
 });
