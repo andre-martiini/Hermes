@@ -133,6 +133,7 @@ _CATALOG: dict[str, str] = {
     # ja esta comprometido nos meses seguintes.
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
+    "importar_fatura_cartao": "Importa a fatura do cartao de um arquivo no Drive (PDF do Elo ou CSV da XP) e acerta a conta do mes",
     # WhatsApp: a consolidacao ja existia e so era acionavel pela Caixa de
     # Entrada na web. Leitura de conteudo exige chat na allowlist.
     "listar_conversas_whatsapp": "Lista as conversas de WhatsApp, marcando quais estao monitoradas",
@@ -277,6 +278,8 @@ _ASYNC_TOOLS: set[str] = {
     # Imagens: de dezenas de segundos a ~2 min em qualidade alta.
     "gerar_imagem",
     "editar_imagem",
+    # Fatura em PDF: leitura pelo Gemini.
+    "importar_fatura_cartao",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -328,6 +331,8 @@ _VOICE_EXCLUDED: set[str] = {
     "video_renderizar",
     "video_refazer_cena",
     "video_cancelar",
+    # Importar fatura parte de um arquivo do Drive, que nao se dita.
+    "importar_fatura_cartao",
 }
 
 _schema_cache: dict[str, dict] = {}

@@ -23,6 +23,14 @@
       "limite": {
         "type": "integer",
         "description": "Máximo de lançamentos na lista (padrão 200). O total por estabelecimento vem sempre completo"
+      },
+      "cartao": {
+        "type": "string",
+        "enum": [
+          "elo-caixa",
+          "xp"
+        ],
+        "description": "Só os lançamentos deste cartão. Sem ele, vêm todos, com o total de cada cartão em por_cartao"
       }
     },
     "required": []

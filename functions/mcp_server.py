@@ -201,6 +201,9 @@ _TOOLS_LONGAS: set[str] = {
     # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
     "gerar_imagem",
     "editar_imagem",
+    # Fatura em PDF passa pelo Gemini (dezenas de segundos); o CSV e instantaneo,
+    # mas a tool e uma so.
+    "importar_fatura_cartao",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60

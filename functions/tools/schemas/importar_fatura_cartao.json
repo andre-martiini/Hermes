@@ -1,0 +1,23 @@
+{
+  "name": "importar_fatura_cartao",
+  "description": "Importa a fatura do cartão a partir de um arquivo no Drive: PDF da fatura (Elo/Caixa) ou CSV exportado do app da XP. Grava os lançamentos, acerta a conta 'Fatura ...' do mês com o total e devolve o que ficou gravado, relido do banco. Reimportar a mesma fatura substitui, não duplica. Roda como job: busque o resultado com consultar_job",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "drive_file_id": {
+        "type": "string",
+        "description": "ID do arquivo no Drive, ou o link drive.google.com/file/d/<id>/view"
+      },
+      "cartao": {
+        "type": "string",
+        "enum": ["elo-caixa", "xp"],
+        "description": "Cartão da fatura. Se omitido: PDF = elo-caixa, CSV = xp"
+      },
+      "vencimento": {
+        "type": "string",
+        "description": "Data de vencimento da fatura (YYYY-MM-DD). Obrigatória para CSV cujo nome não traga a data (o app da XP nomeia como Fatura2026-10-05.csv); no PDF, sobrepõe a lida do documento"
+      }
+    },
+    "required": ["drive_file_id"]
+  }
+}

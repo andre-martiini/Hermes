@@ -2043,6 +2043,7 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
         estabelecimento=args.get("estabelecimento"),
         apenas_parceladas=bool(args.get("apenas_parceladas")),
         limite=int(args.get("limite") or 200),
+        cartao=args.get("cartao"),
     )
 
 
@@ -2055,6 +2056,35 @@ def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
     from fatura_cartao import projetar_parcelas
 
     return projetar_parcelas(ctx.db, meses=int(args.get("meses") or 12))
+
+
+def importar_fatura_cartao(ctx: ToolContext, args: dict):
+    """Fatura do cartao a partir de um arquivo no Drive (PDF do Elo, CSV da XP)."""
+    from datetime import datetime, timezone
+
+    from importar_fatura import extrair_pdf, importar
+    from tools.anexar_arquivo import _do_drive, id_do_drive
+
+    try:
+        dados, nome = _do_drive({"drive_file_id": args.get("drive_file_id")})
+
+        def _ler_pdf(pdf, cartao):
+            from google.genai import types
+
+            return extrair_pdf(ctx.db, ctx.genai_client, types, pdf, cartao)
+
+        resultado = importar(
+            ctx.db, dados, nome,
+            cartao=args.get("cartao"), vencimento=args.get("vencimento"),
+            extrair_pdf_fn=_ler_pdf,
+            origem={"arquivo": nome, "drive_file_id": id_do_drive(args.get("drive_file_id")),
+                    "importado_em": datetime.now(timezone.utc).isoformat()},
+        )
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Importacao nao confirmada: {resultado['motivo']}.", **resultado}
+    return resultado
 
 
 # `perfil_pessoal` de `obter_estado_atual`: listas curtas e texto aparado --
@@ -2955,6 +2985,7 @@ _HANDLERS: dict = {
     "remover_anexo": remover_anexo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
+    "importar_fatura_cartao": importar_fatura_cartao,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
