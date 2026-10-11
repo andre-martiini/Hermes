@@ -110,10 +110,17 @@ def _senhas_do_cartao(db, cartao: str) -> list[str]:
         if nome != cartao:
             continue
         config = find_password_config(db, remetente)
-        if config:
+        if not config:
+            continue
+        try:
             senha = read_password_secret(projeto, config["secret_id"])
-            if senha:
-                senhas.append(senha)
+        except Exception as exc:  # noqa: BLE001
+            # Sem a senha, o PDF ainda pode abrir (o baixado do app da Caixa vem
+            # sem senha); se nao abrir, o erro de PDF protegido diz o motivo.
+            print(f"[ImportarFatura] Senha de {cartao} indisponivel: {type(exc).__name__}")
+            continue
+        if senha:
+            senhas.append(senha)
     return senhas
 
 

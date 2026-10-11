@@ -281,3 +281,19 @@ class TestConsultaSeparaOsCartoes(unittest.TestCase):
     def test_filtro_por_cartao(self):
         r = fatura_cartao.consultar(self.db, competencia="2026-10", cartao="elo-caixa")
         self.assertEqual((r["total_gasto"], r["total_lancamentos"]), (50.0, 1))
+
+
+class TestSenhaIndisponivel(unittest.TestCase):
+    def test_segue_sem_senha(self):
+        from unittest import mock
+
+        with mock.patch("bill_pdf_passwords.find_password_config", return_value={"secret_id": "s"}), \
+             mock.patch("bill_pdf_passwords.read_password_secret", side_effect=PermissionError("403")):
+            self.assertEqual(imp._senhas_do_cartao(_Db(), "elo-caixa"), [])
+
+    def test_usa_a_senha_quando_ha(self):
+        from unittest import mock
+
+        with mock.patch("bill_pdf_passwords.find_password_config", return_value={"secret_id": "s"}), \
+             mock.patch("bill_pdf_passwords.read_password_secret", return_value="1234"):
+            self.assertEqual(imp._senhas_do_cartao(_Db(), "elo-caixa"), ["1234"])

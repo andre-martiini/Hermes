@@ -342,7 +342,8 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
 
 def consultar(db, *, competencia: str | None = None, desde: str | None = None,
               estabelecimento: str | None = None, apenas_parceladas: bool = False,
-              limite: int = 200, cartao: str | None = None) -> dict:
+              limite: int = 200, cartao: str | None = None,
+              categoria: str | None = None) -> dict:
     """Lancamentos por periodo e/ou estabelecimento, com totais por estabelecimento.
 
     Devolve dado agregado junto com a lista porque o agregado e o que quase sempre
@@ -355,6 +356,11 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
     elif desde:
         consulta = consulta.where("competencia", ">=", str(desde))
 
+    import categorias_cartao
+
+    regras = categorias_cartao.carregar_regras(db)
+    categoria_alvo = categorias_cartao.normalizar(categoria) if categoria else None
+
     itens = []
     alvo = (estabelecimento or "").strip().lower()
     for snap in consulta.limit(2000).stream():
@@ -366,6 +372,10 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         if alvo and alvo not in str(item.get("estabelecimento", "")).lower():
             continue
         if cartao and _cartao_do_item(item) != cartao:
+            continue
+        item.update(categorias_cartao.classificar(item.get("estabelecimento", ""), regras))
+        item.pop("regra", None)
+        if categoria_alvo and categorias_cartao.normalizar(item["categoria"]) != categoria_alvo:
             continue
         itens.append(item)
 
@@ -384,15 +394,31 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
     ranking = sorted(por_estabelecimento.values(), key=lambda x: -x["total"])
 
     por_cartao: dict[str, float] = {}
+    por_categoria: dict[str, dict] = {}
+    por_natureza: dict[str, float] = {}
+    sem_categoria: dict[str, dict] = {}
     for item in itens:
         chave = _cartao_do_item(item)
         por_cartao[chave] = round(por_cartao.get(chave, 0.0) + item["valor"], 2)
+        cat = por_categoria.setdefault(item["categoria"], {"categoria": item["categoria"], "total": 0.0, "lancamentos": 0})
+        cat["total"] = round(cat["total"] + item["valor"], 2)
+        cat["lancamentos"] += 1
+        natureza = item["natureza"] or "sem natureza"
+        por_natureza[natureza] = round(por_natureza.get(natureza, 0.0) + item["valor"], 2)
+        if item["categoria"] == categorias_cartao.SEM_CATEGORIA:
+            sem = sem_categoria.setdefault(item["estabelecimento"], {"estabelecimento": item["estabelecimento"], "total": 0.0, "lancamentos": 0})
+            sem["total"] = round(sem["total"] + item["valor"], 2)
+            sem["lancamentos"] += 1
 
     total_encargos = round(sum(i["valor"] for i in encargos), 2)
     return {
         "total_lancamentos": len(itens),
         "total_gasto": round(sum(i["valor"] for i in itens), 2),
         "por_cartao": por_cartao,
+        # Soma de por_categoria = total_gasto (inclui "Sem categoria"). Encargos ficam fora, como no total.
+        "por_categoria": sorted(por_categoria.values(), key=lambda x: -x["total"]),
+        "por_natureza": por_natureza,
+        "sem_categoria": sorted(sem_categoria.values(), key=lambda x: -x["total"])[:15],
         # Separado de proposito: IOF e juros sao custo real, mas nao sao gasto
         # num estabelecimento — misturar esconde os dois.
         "total_encargos": total_encargos,
@@ -404,7 +430,7 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         "filtros": {
             "competencia": competencia, "desde": desde,
             "estabelecimento": estabelecimento, "apenas_parceladas": apenas_parceladas,
-            "cartao": cartao,
+            "cartao": cartao, "categoria": categoria,
         },
     }
 
