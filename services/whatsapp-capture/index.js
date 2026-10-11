@@ -11,6 +11,7 @@ import { detectarMencao } from './mentions.js';
 import { criarExecutorCoalescido } from './coalescido.js';
 import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes.js';
 import { criarInicializador } from './inicializacao.js';
+import { ehPaginaQuebrada, criarRecuperadorDePagina } from './pagina_quebrada.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -362,6 +363,8 @@ async function syncChatRegistry() {
             + `, ${resolvidos} telefone(s) resolvido(s).`);
     } catch (err) {
         console.error('[Chats] Erro ao sincronizar registro de chats:', err);
+        // 11/10/2026: com o frame desanexado este erro se repetia até reinício manual.
+        if (ehPaginaQuebrada(err)) paginaQuebrada('sync_chats');
     } finally {
         isSyncingChats = false;
     }
@@ -385,6 +388,7 @@ client.on('qr', (qr) => {
 client.on('ready', async () => {
     console.log('WhatsApp client is ready!');
     isClientReady = true;
+    recuperadorPagina.liberar();
     writeHeartbeat();
     // No `ready` o WhatsApp Web pode ainda não ter hidratado: sem o lid, tenta de novo no mesmo atraso do registro de chats.
     solicitarOutbox().catch((e) => console.error('[Outbox] Falha na rodada do ready:', e));
@@ -1002,6 +1006,19 @@ const abrirWhatsApp = criarInicializador({
     destruir: () => client.destroy(),
     alertar: sendTelegramAlert,
 });
+
+// 11/10/2026: página quebrada ("detached Frame") não dispara 'disconnected';
+// sem isto o worker seguia "ready" com todo envio falhando. Ver pagina_quebrada.js.
+const recuperadorPagina = criarRecuperadorDePagina({
+    destruir: () => client.destroy(),
+    abrir: abrirWhatsApp,
+});
+function paginaQuebrada(origem) {
+    isClientReady = false;
+    writeHeartbeat();
+    recuperadorPagina.recuperar(origem)
+        .catch((e) => console.error('[Pagina] Falha na recuperação:', e));
+}
 abrirWhatsApp('boot');
 
 // Varredura horária de reparo de mídia (além da passada pós-ready) — recupera
@@ -1047,6 +1064,41 @@ async function resolverDestino(toNumber) {
     return wid._serialized;
 }
 
+// 11/10/2026: página quebrada devolve o envio à fila; na 3ª tentativa desiste.
+const MAX_TENTATIVAS_PAGINA = 3;
+
+// Saúde do envio em system/whatsapp_worker (lido por saude_whatsapp no backend):
+// o heartbeat só diz que o processo vive; isto diz se o envio funciona.
+function registrarEnvio(erro) {
+    const agora = admin.firestore.Timestamp.now();
+    const campos = erro == null
+        ? { last_send_success_at: agora, consecutive_send_failures: 0 }
+        : {
+            last_send_failure_at: agora,
+            last_send_error: String(erro).slice(0, 200),
+            consecutive_send_failures: FieldValue.increment(1),
+        };
+    db.collection('system').doc('whatsapp_worker').set(campos, { merge: true })
+        .catch((e) => console.error('[Outbox] Falha ao gravar estatística de envio:', e));
+}
+
+// Falha definitiva avisa o dono uma vez por outbox (`failure_alerted_at`).
+async function avisarFalhaDefinitiva(doc, data, motivo) {
+    if (data.failure_alerted_at) return;
+    try {
+        await doc.ref.update({ failure_alerted_at: admin.firestore.Timestamp.now() });
+    } catch (e) {
+        console.error('[Outbox] Falha ao marcar alerta de falha:', e);
+    }
+    const destino = data.destinatario_nome || data.chat_name || data.to_number || '(sem destino)';
+    const conteudo = String(data.content || '');
+    const trecho = conteudo.length > 60 ? `${conteudo.slice(0, 60)}…` : conteudo;
+    await sendTelegramAlert(
+        `❌ Gaspar WhatsApp: envio para ${destino} falhou (${String(motivo).slice(0, 160)}) — `
+        + `outbox ${doc.id}, nada foi entregue.${trecho ? ` Início: "${trecho}"` : ''}`
+    );
+}
+
 async function claimOutboxMessage(doc) {
     const lockId = `${process.pid}-${Date.now()}-${doc.id}`;
     const claimed = await db.runTransaction(async (tx) => {
@@ -1067,7 +1119,7 @@ async function claimOutboxMessage(doc) {
                 failed_at: admin.firestore.Timestamp.now(),
                 updated_at: admin.firestore.Timestamp.now()
             });
-            return null;
+            return { ...data, invalido: true };
         }
 
         tx.update(doc.ref, {
@@ -1119,6 +1171,10 @@ async function rodarOutboxUmaVez() {
             if (!data) {
                 continue;
             }
+            if (data.invalido) {
+                await avisarFalhaDefinitiva(doc, data, 'sem destino ou sem conteúdo');
+                continue;
+            }
 
             const toNumber = data.to_number;
             const content = data.content;
@@ -1138,6 +1194,7 @@ async function rodarOutboxUmaVez() {
                     updated_at: admin.firestore.Timestamp.now()
                 });
                 console.log(`Message sent to ${toNumber} (${destino})`);
+                registrarEnvio(null);
 
             } catch (error) {
                 // A excecao do WhatsApp Web vem minificada — o erro real das duas
@@ -1146,15 +1203,39 @@ async function rodarOutboxUmaVez() {
                 // investigacao possivel sem precisar do log do processo.
                 const detalhe = error?.message || String(error);
                 console.error(`Failed to send message to ${toNumber}:`, error);
+                registrarEnvio(detalhe);
+
+                // 11/10/2026: página quebrada não é culpa do destino — devolve à
+                // fila, recria a página e para o lote (o resto falharia igual); o
+                // 'ready' seguinte reenvia. `attempts` já subiu no claim.
+                const quebrada = ehPaginaQuebrada(error);
+                const tentativas = (Number(data.attempts) || 0) + 1;
+                if (quebrada && tentativas < MAX_TENTATIVAS_PAGINA) {
+                    await doc.ref.update({
+                        status: 'pending',
+                        error_message: `Página do WhatsApp Web quebrada (${detalhe.slice(0, 120)}); `
+                            + `reabrindo e tentando de novo (tentativa ${tentativas}/${MAX_TENTATIVAS_PAGINA}).`,
+                        updated_at: admin.firestore.Timestamp.now()
+                    });
+                    paginaQuebrada('outbox');
+                    break;
+                }
+
+                const motivo = detalhe.length > 2 ? detalhe
+                    : `WhatsApp Web recusou o envio (erro minificado "${detalhe}") — `
+                      + 'geralmente destino invalido ou numero fora do WhatsApp.';
                 await doc.ref.update({
                     status: 'failed',
-                    error_message: detalhe.length > 2 ? detalhe
-                        : `WhatsApp Web recusou o envio (erro minificado "${detalhe}") — `
-                          + 'geralmente destino invalido ou numero fora do WhatsApp.',
+                    error_message: motivo,
                     error_origem: String(error?.stack || '').split(/\r?\n/)[1]?.trim() || null,
                     failed_at: admin.firestore.Timestamp.now(),
                     updated_at: admin.firestore.Timestamp.now()
                 });
+                await avisarFalhaDefinitiva(doc, data, motivo);
+                if (quebrada) {
+                    paginaQuebrada('outbox');
+                    break;
+                }
             }
         }
     } catch (err) {

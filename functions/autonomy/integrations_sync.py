@@ -31,10 +31,11 @@ usado no resto do pacote de autonomia."""
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from .integrations import IntegrationHealth, montar_saude_integracao
+from .integrations import IntegrationHealth, IntegrationStatus, montar_saude_integracao
 
 #: Nome de erro usado quando o doc de sync marca `status="error"` mas não
 #: guarda nenhuma mensagem utilizável (não deveria acontecer hoje -- todo
@@ -375,7 +376,37 @@ def saude_gmail(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Integr
     )
 
 
-def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> IntegrationHealth:
+#: Heartbeat do worker (`system/whatsapp_worker.last_seen`, a cada 5 min) mais
+#: velho que isto = worker parado ou travado.
+WORKER_HEARTBEAT_VELHO_SEGUNDOS = 10 * 60
+
+
+def _motivo_envio_degradado(worker: Mapping[str, Any], heartbeat_at: datetime) -> str | None:
+    """11/10/2026: envios falhando com "detached Frame" e o worker dizendo
+    `ready: true` -- a frescor da ingestão não enxerga isso. Lê as estatísticas
+    de envio que o worker grava em `system/whatsapp_worker`."""
+    falhas = worker.get("consecutive_send_failures") or 0
+    ultima_falha = _extrair_instante(worker.get("last_send_failure_at"))
+    ultimo_ok = _extrair_instante(worker.get("last_send_success_at"))
+    if (
+        isinstance(falhas, (int, float)) and falhas >= 2
+        and ultima_falha is not None
+        and (ultimo_ok is None or ultima_falha > ultimo_ok)
+    ):
+        erro = str(worker.get("last_send_error") or "").strip()[:120]
+        return f"{int(falhas)} envios seguidos do WhatsApp falharam" + (f" (último erro: {erro})" if erro else "")
+    visto = _extrair_instante(worker.get("last_seen"))
+    if visto is not None and (heartbeat_at - visto).total_seconds() > WORKER_HEARTBEAT_VELHO_SEGUNDOS:
+        minutos = int((heartbeat_at - visto).total_seconds() // 60)
+        return f"worker do WhatsApp sem heartbeat há {minutos} min"
+    return None
+
+
+def saude_whatsapp(
+    doc: Mapping[str, Any] | None,
+    heartbeat_at: datetime,
+    worker_doc: Mapping[str, Any] | None = None,
+) -> IntegrationHealth:
     """`system/whatsapp_ingest` -- cursor de dados (`last_processed_at`,
     `last_processed_doc_id` como desempate, irrelevante para saúde/frescor) e,
     desde a correção abaixo, um heartbeat de SUCESSO DE CONSULTA
@@ -424,7 +455,7 @@ def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
     referencia = doc.get("last_query_success_at")
     if referencia is None:
         referencia = doc.get("last_processed_at")
-    return montar_saude_integracao(
+    saude = montar_saude_integracao(
         integration="whatsapp",
         heartbeat_at=heartbeat_at,
         last_success_at=_sem_referencia_futura(_extrair_instante(referencia), heartbeat_at),
@@ -432,6 +463,15 @@ def saude_whatsapp(doc: Mapping[str, Any] | None, heartbeat_at: datetime) -> Int
         limite_degradado_segundos=limite_degradado,
         limite_indisponivel_segundos=limite_indisponivel,
     )
+    # Envio quebrado ou worker parado piora para DEGRADED (nunca UNAVAILABLE:
+    # a captura pode seguir viva). UNKNOWN/UNAVAILABLE ficam como estão -- o
+    # __post_init__ não aceita DEGRADED sem leitura de referência.
+    motivo = _motivo_envio_degradado(worker_doc or {}, heartbeat_at)
+    if motivo is None:
+        return saude
+    if saude.status == IntegrationStatus.HEALTHY:
+        return replace(saude, status=IntegrationStatus.DEGRADED, motivo=motivo)
+    return replace(saude, motivo=motivo)
 
 
 def saude_sem_sincronizacao_persistida(integration: str, heartbeat_at: datetime) -> IntegrationHealth:

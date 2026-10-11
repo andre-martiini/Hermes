@@ -284,6 +284,9 @@ class IntegrationHealth:
     lag_seconds: float | None = None
     error_code: str | None = None
     capabilities: Mapping[str, Any] = field(default_factory=dict)
+    # 11/10/2026: frase legível de por que o status piorou além do frescor
+    # (ex.: envios do WhatsApp falhando). Opcional, fora do contrato da seção 5.
+    motivo: str | None = None
 
     def __post_init__(self) -> None:
         if not str(self.integration).strip():

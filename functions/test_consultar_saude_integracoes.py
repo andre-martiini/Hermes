@@ -89,6 +89,21 @@ class TestConsultarSaudeIntegracoes(unittest.TestCase):
         self.assertEqual(calendar["status"], "unavailable")
         self.assertEqual(calendar["error_code"], "falhou")
 
+    def test_whatsapp_le_o_worker_e_expoe_motivo(self):
+        ctx = _ctx({
+            "whatsapp_ingest": {"last_query_success_at": _AGORA - timedelta(minutes=10)},
+            "whatsapp_worker": {
+                "last_seen": _AGORA - timedelta(minutes=1),
+                "consecutive_send_failures": 2,
+                "last_send_failure_at": _AGORA - timedelta(minutes=1),
+                "last_send_error": "Attempted to use detached Frame",
+            },
+        })
+        resultado = json.loads(hermes_tools._consultar_saude_integracoes(ctx, {}))
+        whatsapp = next(i for i in resultado["integracoes"] if i["integration"] == "whatsapp")
+        self.assertEqual(whatsapp["status"], "degraded")
+        self.assertIn("detached Frame", whatsapp["motivo"])
+
     def test_contacts_le_o_doc_pelo_id_correto(self):
         recente = (_AGORA - timedelta(hours=1)).isoformat()
         ctx = _ctx({CONTACTS_SYNC_STATE_DOC_ID: {"ultima_execucao": recente}})

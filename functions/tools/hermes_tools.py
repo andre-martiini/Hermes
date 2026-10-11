@@ -533,12 +533,13 @@ def _coletar_saudes_integracoes(ctx: ToolContext):
     contacts_doc = sistema.document(CONTACTS_SYNC_STATE_DOC_ID).get().to_dict()
     gmail_doc = sistema.document("gmail_sync").get().to_dict()
     whatsapp_doc = sistema.document("whatsapp_ingest").get().to_dict()
+    whatsapp_worker_doc = sistema.document("whatsapp_worker").get().to_dict()
 
     saudes = [
         saude_calendar(calendar_doc, heartbeat_at),
         saude_contacts(contacts_doc, heartbeat_at),
         saude_gmail(gmail_doc, heartbeat_at),
-        saude_whatsapp(whatsapp_doc, heartbeat_at),
+        saude_whatsapp(whatsapp_doc, heartbeat_at, whatsapp_worker_doc),
         saude_sem_sincronizacao_persistida("sipac", heartbeat_at),
         saude_sem_sincronizacao_persistida("financas", heartbeat_at),
         saude_sem_sincronizacao_persistida("repositorio", heartbeat_at),
@@ -560,6 +561,7 @@ def _serializar_saudes_integracoes(heartbeat_at, saudes) -> dict:
                 "coverage_until": s.coverage_until.isoformat() if s.coverage_until else None,
                 "lag_seconds": s.lag_seconds,
                 "error_code": s.error_code,
+                "motivo": s.motivo,
             }
             for s in saudes
         ],
