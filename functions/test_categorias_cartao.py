@@ -155,3 +155,45 @@ class TestReleituraQueNaoBate(unittest.TestCase):
             r = hermes_tools.gerenciar_categorias_cartao(
                 ctx, {"acao": "definir", "padrao": "uber", "categoria": "Transporte"})
         self.assertIn("nao foi confirmada", r["erro"])
+
+
+class TestFeira(unittest.TestCase):
+    """Feira do Centro de Vitoria: sabado de manha, bancas com nome de pessoa."""
+
+    SABADO, DOMINGO, QUARTA = "2026-10-24", "2026-10-25", "2026-10-21"
+
+    def _lanc(self, nome, valor, data, db=None):
+        return cc.classificar_lancamento({"estabelecimento": nome, "valor": valor, "data": data},
+                                         cc.carregar_regras(db or _Db()))
+
+    def test_bancas_confirmadas_por_regra_em_qualquer_dia(self):
+        self.assertEqual(self._lanc("CECILIAERPFONTAIN", 38.5, self.QUARTA)["categoria"], "Feira")
+        self.assertEqual(self._lanc("VALDECI ANTONIO ZAHN Domingos Mart", 22.4, self.QUARTA)["categoria"], "Feira")
+
+    def test_compra_pequena_sem_regra_no_fim_de_semana_e_feira_inferida(self):
+        for data in (self.SABADO, self.DOMINGO):
+            r = self._lanc("IVO BREMENKAMP FERREIR", 18.5, data)
+            self.assertEqual(r["categoria"], "Feira")
+            self.assertIn("inferida", r)
+
+    def test_dia_de_semana_nao_infere(self):
+        self.assertEqual(self._lanc("IVO BREMENKAMP FERREIR", 18.5, self.QUARTA)["categoria"], cc.SEM_CATEGORIA)
+
+    def test_compra_grande_nao_infere(self):
+        self.assertEqual(self._lanc("EmilyDaSilvaAlves", 650.0, self.DOMINGO)["categoria"], cc.SEM_CATEGORIA)
+
+    def test_loja_de_artes_nao_e_feira(self):
+        self.assertEqual(self._lanc("JB ARTESANATOS", 40.0, self.SABADO)["categoria"], cc.SEM_CATEGORIA)
+        self.assertEqual(self._lanc("DBN ARTES LTDA", 100.0, self.SABADO)["categoria"], cc.SEM_CATEGORIA)
+
+    def test_regra_vence_a_inferencia(self):
+        self.assertEqual(self._lanc("Uber UBER TRIP", 20.0, self.SABADO)["categoria"], "Transporte")
+        self.assertEqual(self._lanc("338 S VITORIA ES", 149.95, self.SABADO)["categoria"], "Vestuário e calçados")
+        db = _Db()
+        cc.definir(db, "ivo bremenkamp", "Restaurantes e lanches")
+        r = self._lanc("IVO BREMENKAMP FERREIR", 18.5, self.SABADO, db)
+        self.assertEqual(r["categoria"], "Restaurantes e lanches")
+        self.assertNotIn("inferida", r)
+
+    def test_data_ruim_nao_quebra(self):
+        self.assertEqual(self._lanc("FULANO", 10.0, None)["categoria"], cc.SEM_CATEGORIA)

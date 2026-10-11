@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 COLECAO = "cartao_regras_categoria"
 SEM_CATEGORIA = "Sem categoria"
@@ -24,6 +24,7 @@ NATUREZAS = ("pessoal", "projeto", "misto")
 
 CATEGORIAS = (
     "Mercado",
+    "Feira",
     "Restaurantes e lanches",
     "Transporte",
     "IA e software",
@@ -66,10 +67,13 @@ REGRAS_PADRAO: tuple[tuple[str, str, str, int], ...] = (
     ("carone", "Mercado", _P, 1), ("sup", "Mercado", _P, 1), ("mercadinho", "Mercado", _P, 1),
     ("mini mercado", "Mercado", _P, 1), ("mercado soma", "Mercado", _P, 1),
     ("mercado sete", "Mercado", _P, 1), ("horti", "Mercado", _P, 1), ("hortifruti", "Mercado", _P, 1),
-    ("hortalicas", "Mercado", _P, 1), ("hortalicaswol", "Mercado", _P, 1), ("feira", "Mercado", _P, 1),
+    ("hortalicas", "Mercado", _P, 1), ("hortalicaswol", "Mercado", _P, 1),
     ("varejao", "Mercado", _P, 1), ("baratao", "Mercado", _P, 1), ("condimentos", "Mercado", _P, 1),
     ("greenvix", "Mercado", _P, 1), ("bubach", "Mercado", _P, 1), ("leodoqueijo", "Mercado", _P, 1),
     ("frescoco", "Mercado", _P, 1), ("distribuidora pollet", "Mercado", _P, 1),
+    # Feira (Centro de Vitoria, sabado de manha): bancas confirmadas pelo dono em 11/10/2026.
+    ("feira", "Feira", _P, 1), ("ceciliaerpfontain", "Feira", _P, 1),
+    ("cecilia erp fontain", "Feira", _P, 1), ("valdeci antonio zahn", "Feira", _P, 1),
     # Restaurantes e lanches
     ("ifd", "Restaurantes e lanches", _P, 1), ("ifood", "Restaurantes e lanches", _P, 1),
     ("restaurante", "Restaurantes e lanches", _P, 1), ("pizzaria", "Restaurantes e lanches", _P, 1),
@@ -108,6 +112,7 @@ REGRAS_PADRAO: tuple[tuple[str, str, str, int], ...] = (
     ("riachuelo", "Vestuário e calçados", _P, 1), ("calcados", "Vestuário e calçados", _P, 1),
     ("centauro", "Vestuário e calçados", _P, 1), ("territorio da moda", "Vestuário e calçados", _P, 1),
     ("noivas", "Vestuário e calçados", _P, 1), ("bagaggio", "Vestuário e calçados", _P, 1),
+    ("338 s vitoria", "Vestuário e calçados", _P, 1),
     ("lojas avenida", "Vestuário e calçados", _P, 1), ("cea", "Vestuário e calçados", _P, 1),
     ("malubaby", "Vestuário e calçados", _P, 1), ("joalheria", "Vestuário e calçados", _P, 1),
     ("totebag", "Vestuário e calçados", _P, 1), ("aviamentos", "Vestuário e calçados", _P, 1),
@@ -189,6 +194,35 @@ def classificar(estabelecimento: str, regras: list[dict]) -> dict:
     if melhor is None:
         return {"categoria": SEM_CATEGORIA, "natureza": None, "regra": None}
     return {"categoria": melhor["categoria"], "natureza": melhor["natureza"], "regra": melhor["padrao"]}
+
+
+# Feira sem regra: a banca e quase sempre uma pessoa com maquininha, um nome que
+# nenhuma regra conhece, e a compra e pequena e no fim de semana (a feira do
+# Centro de Vitoria e no sabado de manha, as vezes no domingo). Fora disso, a
+# compra continua "Sem categoria": o teto deixa de fora as compras grandes e
+# unicas de fim de semana (R$ 650, R$ 299,90 em 2026).
+TETO_FEIRA = 150.0
+# Lojas de fim de semana que nao sao banca de feira.
+_NAO_FEIRA = {"artes", "artesanato", "artesanatos"}
+
+
+def _fim_de_semana(data_iso) -> bool:
+    try:
+        return date.fromisoformat(str(data_iso)[:10]).weekday() >= 5
+    except ValueError:
+        return False
+
+
+def classificar_lancamento(item: dict, regras: list[dict]) -> dict:
+    """Categoria de um lancamento: regra do estabelecimento; sem regra, feira inferida."""
+    resultado = classificar(item.get("estabelecimento", ""), regras)
+    valor = item.get("valor") or 0
+    palavras = set(normalizar(item.get("estabelecimento", "")).split())
+    if (resultado["categoria"] == SEM_CATEGORIA and 0 < valor <= TETO_FEIRA
+            and _fim_de_semana(item.get("data")) and not (palavras & _NAO_FEIRA)):
+        return {"categoria": "Feira", "natureza": "pessoal", "regra": None,
+                "inferida": "compra pequena sem regra no fim de semana"}
+    return resultado
 
 
 def definir(db, padrao: str, categoria: str, natureza: str = "pessoal") -> dict:
