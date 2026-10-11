@@ -26,6 +26,12 @@ hermes_tools.py, exposta tanto a clientes MCP quanto ao copiloto web) e por
 `resolver_conflito_memoria` (MCP, callable `confirmarConflitoMemoria` e o
 copiloto web) -- passa a gravar `origem_fato`.
 
+RESOLVIDO (P06 sub-entrega própria, posterior a esta): o terceiro bullet de
+"NÃO tocado por esta sub-entrega" abaixo (`telegram_message_tools.py::
+salvar_memoria_global`, motor Telegram legado) foi unificado com
+`_save_memory_node` numa sub-entrega seguinte -- ver o próprio bullet,
+mantido como registro histórico do achado original.
+
 `resolver_conflito_memoria` só age após `ultima_decisao_humana` explícita
 (o usuário escolhe `manter_existente`/`substituir_pelo_novo` depois que a
 automação é obrigada a parar e perguntar) em QUALQUER canal -- por isso
@@ -48,6 +54,18 @@ assumir `DECLARACAO_HUMANA` para os dois:
   acione `salvar_memoria_global`... silenciosamente" -- o PRÓPRIO MODELO
   decide gravar por ter identificado um padrão, sem exigir que o usuário
   tenha dito aquilo literalmente. `INFERENCIA_AGENTE`.
+
+TERCEIRO canal, auditado numa sub-entrega posterior quando
+`telegram_message_tools.py::salvar_memoria_global` (código DIFERENTE, motor
+Telegram legado -- ver "NÃO tocado" abaixo, RESOLVIDO) foi unificado com
+`_save_memory_node`:
+- `canal="telegram"` (motor Telegram legado, `telegram_message_tools.py`,
+  docstring da própria closure `salvar_memoria_global`): "Persiste fato
+  durável na memória global do Gaspar. Apenas para regras estáveis e
+  preferências permanentes." -- mesmo espírito do contrato "web": o MODELO
+  decide gravar por identificar um fato durável, sem exigir afirmação
+  literal do usuário. `INFERENCIA_AGENTE`, mesmo fallback que qualquer
+  canal não-"mcp" já recebia por padrão.
 
 `origem_fato_para_canal_de_salvar_memoria` resolve essa distinção a partir
 de `ctx.canal` (`tools/tool_context.py`), sem inferir `tipo`/`origem_humana`
@@ -88,6 +106,30 @@ NÃO tocado por esta sub-entrega, registrado como pendência:
   Descoberta ao investigar esta sub-entrega; não corrigida aqui porque
   unificar os dois caminhos de escrita é maior que "acrescentar um campo" --
   candidato a achado/pendência próprio.
+  RESOLVIDO (sub-entrega própria, posterior): agora delega para
+  `_save_memory_node` como os outros dois canais, com
+  `origem_fato_para_canal_de_salvar_memoria("telegram")` (cai em
+  `INFERENCIA_AGENTE`, mesmo contrato de "web" -- a docstring da tool no
+  Telegram não exige afirmação literal do usuário). Ganha de brinde: o
+  resumo "MEMÓRIA GLOBAL ATIVA" injetado no system prompt do Telegram
+  (`telegram_handlers_core.py`) só lia os campos `fato`/`categoria` deste
+  esquema legado, então ficava CEGO para memórias gravadas pelos canais
+  MCP/web (esquema canônico `texto_memoria`/`tipo`) -- corrigido na mesma
+  sub-entrega com um fallback simétrico (`_fato_e_categoria_de_memoria`),
+  mesmo espírito do fallback que `copilot_context.py::_format_recent_memories`
+  já fazia para o mesmo par de esquemas. ACHADO REAL de revisão adversarial
+  independente sobre essa unificação: `_save_memory_node` pode devolver
+  `status="conflict"`, que o canal web/MCP trata de verdade (sessão +
+  `resolver_conflito_memoria`) mas o Telegram não tem nenhum mecanismo
+  equivalente -- sem tratamento, o fato novo seria descartado
+  silenciosamente (pior do que o motor legado anterior, que sempre
+  salvava). Corrigido na mesma sub-entrega:
+  `telegram_message_tools.py::salvar_memoria_global` resolve `conflict`
+  automaticamente a favor do fato mais recente (`force_update_id`, mesma
+  operação de "substituir_pelo_novo" de `resolver_conflito_memoria`, só
+  que sem esperar confirmação humana -- este canal nunca esperou
+  confirmação para salvar memória, então não é uma regressão de
+  comportamento, só fecha a lacuna).
 - "Validade" (a segunda metade do passo 1) corresponde ao passo 4 do pacote
   ("Modelar fatos temporais e relação supersedes") e não é modelada aqui --
   `memoria_status` já existe (sempre "ativa" hoje, nunca lido nem transicionado
@@ -144,20 +186,24 @@ def origem_fato_de_leitura(doc: dict | None) -> str:
 
 
 def origem_fato_para_canal_de_salvar_memoria(canal: str | None) -> str:
-    """Proveniência de um fato NOVO criado via `salvar_memoria_global`
-    (`tools/hermes_tools.py::_salvar_memoria_global`), a partir do `canal` do
-    `ToolContext` que fez a chamada.
+    """Proveniência de um fato NOVO criado via `salvar_memoria_global`, a
+    partir do canal que fez a chamada -- `ctx.canal` do `ToolContext`
+    (`tools/hermes_tools.py::_salvar_memoria_global`, MCP/web) ou o literal
+    `"telegram"` passado por `telegram_message_tools.py::salvar_memoria_global`
+    (motor Telegram legado, unificado numa sub-entrega própria -- ver
+    docstring do módulo).
 
-    Só resolve os dois canais que hoje chegam a essa tool (ver docstring do
-    módulo): `"mcp"` -> `DECLARACAO_HUMANA` (contrato do servidor MCP exige
-    afirmação do usuário); qualquer outro canal (hoje só `"web"`, o copiloto)
-    -> `INFERENCIA_AGENTE` (o system prompt do copiloto web pede para o
-    MODELO identificar o fato durável, sem exigir uma afirmação literal do
-    usuário). Um canal novo que chegue a `salvar_memoria_global` no futuro
-    cai no mesmo default de `INFERENCIA_AGENTE` até alguém auditar o texto
-    do system prompt desse canal especificamente -- `DECLARACAO_HUMANA`
-    nunca deve ser o default silencioso para um canal não auditado, porque é
-    a afirmação mais forte das duas (fato literalmente dito pelo usuário).
+    Hoje resolve os três canais auditados (ver docstring do módulo):
+    `"mcp"` -> `DECLARACAO_HUMANA` (contrato do servidor MCP exige afirmação
+    do usuário); `"web"` e `"telegram"` -> `INFERENCIA_AGENTE` (nos dois, o
+    texto que instrui a tool pede para o MODELO identificar o fato durável,
+    sem exigir uma afirmação literal do usuário -- ver os três contratos
+    citados na docstring do módulo). Um canal novo que chegue a
+    `salvar_memoria_global` no futuro cai no mesmo default de
+    `INFERENCIA_AGENTE` até alguém auditar o texto do system prompt desse
+    canal especificamente -- `DECLARACAO_HUMANA` nunca deve ser o default
+    silencioso para um canal não auditado, porque é a afirmação mais forte
+    das duas (fato literalmente dito pelo usuário).
     """
     return DECLARACAO_HUMANA if canal == "mcp" else INFERENCIA_AGENTE
 

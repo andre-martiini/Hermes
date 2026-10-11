@@ -185,6 +185,32 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
     return https_fn.Response("OK", status=200)
 
 
+def _fato_e_categoria_de_memoria(doc: dict) -> tuple[str, str]:
+    """Resolve (fato, categoria) de um doc de `knowledge_nodes` já lido, para
+    o resumo "MEMÓRIA GLOBAL ATIVA" injetado no system prompt do Telegram em
+    `_process_telegram_message` abaixo (P06 do plano de autonomia,
+    docs/plano-hermes-autonomo-2026-09-06.md, achado da sub-entrega que
+    unificou `telegram_message_tools.py::salvar_memoria_global` com
+    `main._save_memory_node` -- ver `autonomy/context.py`).
+
+    Antes desta sub-entrega este bloco só lia `fato`/`categoria` -- o
+    esquema PRÓPRIO que o motor Telegram legado gravava diretamente em
+    `knowledge_nodes`, sem passar por `_save_memory_node`. Isso deixava este
+    resumo CEGO para qualquer memória gravada pelos canais MCP/web (que
+    sempre usaram o esquema canônico de `_save_memory_node`,
+    `texto_memoria`/`tipo`, nunca `fato`/`categoria`) -- um fato salvo pelo
+    copiloto web nunca aparecia aqui, só os salvos pelo próprio Telegram.
+    Agora que o Telegram também grava pelo esquema canônico (mesma
+    sub-entrega), aceitar os dois nomes de campo, com `fato`/`categoria`
+    primeiro por compatibilidade com qualquer doc legado ainda não
+    migrado, resolve os dois lados: memórias de QUALQUER canal passam a
+    aparecer aqui. Mesmo padrão de fallback já usado em
+    `copilot_context.py::_format_recent_memories` para o campo de texto."""
+    fato = doc.get("fato") or doc.get("texto_memoria") or ""
+    categoria = doc.get("categoria") or doc.get("tipo") or ""
+    return fato, categoria
+
+
 def _process_telegram_message(db, data: dict):
     """Full processing pipeline for one incoming Telegram message."""
     from google.genai import types
@@ -549,8 +575,7 @@ def _process_telegram_message(db, data: dict):
             mem_lines = []
             for m_doc in memory_docs:
                 m = m_doc.to_dict() or {}
-                fato = m.get("fato", "")
-                cat = m.get("categoria", "")
+                fato, cat = _fato_e_categoria_de_memoria(m)
                 if fato:
                     mem_lines.append(f"- [{cat}] {fato}")
             if mem_lines:
