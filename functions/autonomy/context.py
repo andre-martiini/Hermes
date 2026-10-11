@@ -24,7 +24,10 @@ próprio passo 1 para fatos gravados antes desta sub-entrega, que não têm
 Só `main._save_memory_node` -- usado por `salvar_memoria_global` (tools/
 hermes_tools.py, exposta tanto a clientes MCP quanto ao copiloto web) e por
 `resolver_conflito_memoria` (MCP, callable `confirmarConflitoMemoria` e o
-copiloto web) -- passa a gravar `origem_fato`.
+copiloto web) -- passa a gravar `origem_fato`. (Esta enumeração de
+chamadores é de quando este módulo foi escrito, P06 sub-entrega 1/N -- a
+sub-entrega seguinte, descrita abaixo, acrescenta um terceiro chamador,
+`telegram_message_tools.py::salvar_memoria_global`.)
 
 `resolver_conflito_memoria` só age após `ultima_decisao_humana` explícita
 (o usuário escolhe `manter_existente`/`substituir_pelo_novo` depois que a
@@ -73,6 +76,24 @@ preservado para não quebrar um cliente MCP que ainda não manda o parâmetro
 forma, então o fallback para canal="mcp" continua correto mesmo sem o
 parâmetro).
 
+## Sub-entrega seguinte (P06 sub-entrega 2/N)
+
+`telegram_message_tools.py::salvar_memoria_global` (motor Telegram legado,
+fallback quando o copiloto web falha) passou a chamar `_save_memory_node`
+também -- terceiro chamador deste módulo, usando `canal="telegram"` em
+`origem_fato_para_canal_de_salvar_memoria`. Esse canal não tinha sido
+auditado quando este módulo foi escrito (ver pendência removida abaixo, que
+esta sub-entrega resolve) -- cai no mesmo default de `INFERENCIA_AGENTE` já
+documentado acima para "qualquer canal que não seja mcp", sem precisar de
+nenhuma mudança neste módulo: a função já cobria esse caso por construção.
+Diferente de `tools/hermes_tools.py::_salvar_memoria_global`, este chamador
+NÃO usa `origem_fato_para_salvar_memoria`/`usuario_afirmou_diretamente` --
+o texto desta ferramenta especificamente ("Apenas para regras estáveis e
+preferências permanentes") não foi auditado quanto a exigir ou não
+afirmação literal do usuário, então adicionar esse parâmetro extra é
+trabalho de uma sub-entrega própria que faça essa auditoria primeiro, não
+algo a assumir por semelhança com os outros dois canais.
+
 NÃO tocado por esta sub-entrega, registrado como pendência:
 - `knowledge_graph.py` (`_crystallize_task` e o fluxo de nós conceituais de
   procedimento): escreve em `knowledge_nodes` com uma FORMA DIFERENTE de
@@ -80,14 +101,6 @@ NÃO tocado por esta sub-entrega, registrado como pendência:
   corresponde ao passo 8 do pacote (mapa de POPs), não ao passo 1. Marcar
   esses nós como `resumo_derivado` é trabalho de uma sub-entrega própria que
   decida a forma final desses nós.
-- `telegram_message_tools.py::salvar_memoria_global` (motor Telegram legado,
-  fallback quando o copiloto web falha -- ver `telegram_handlers_core.py`,
-  "Fallback para motor Telegram"): escreve direto em `knowledge_nodes` com um
-  esquema PRÓPRIO e divergente (`fato`/`categoria`/`origem` como campos
-  soltos, sem embedding, sem dedup, sem passar por `_save_memory_node`).
-  Descoberta ao investigar esta sub-entrega; não corrigida aqui porque
-  unificar os dois caminhos de escrita é maior que "acrescentar um campo" --
-  candidato a achado/pendência próprio.
 - "Validade" (a segunda metade do passo 1) corresponde ao passo 4 do pacote
   ("Modelar fatos temporais e relação supersedes") e não é modelada aqui --
   `memoria_status` já existe (sempre "ativa" hoje, nunca lido nem transicionado
@@ -148,10 +161,11 @@ def origem_fato_para_canal_de_salvar_memoria(canal: str | None) -> str:
     (`tools/hermes_tools.py::_salvar_memoria_global`), a partir do `canal` do
     `ToolContext` que fez a chamada.
 
-    Só resolve os dois canais que hoje chegam a essa tool (ver docstring do
-    módulo): `"mcp"` -> `DECLARACAO_HUMANA` (contrato do servidor MCP exige
-    afirmação do usuário); qualquer outro canal (hoje só `"web"`, o copiloto)
-    -> `INFERENCIA_AGENTE` (o system prompt do copiloto web pede para o
+    Só resolve especialmente o canal `"mcp"` (ver docstring do módulo):
+    `"mcp"` -> `DECLARACAO_HUMANA` (contrato do servidor MCP exige afirmação
+    do usuário); qualquer outro canal (hoje `"web"`, o copiloto, e
+    `"telegram"`, o motor Telegram legado -- ver "Sub-entrega seguinte"
+    acima) -> `INFERENCIA_AGENTE` (o texto da tool nesses canais pede para o
     MODELO identificar o fato durável, sem exigir uma afirmação literal do
     usuário). Um canal novo que chegue a `salvar_memoria_global` no futuro
     cai no mesmo default de `INFERENCIA_AGENTE` até alguém auditar o texto
