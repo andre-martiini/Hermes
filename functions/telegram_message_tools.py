@@ -5,7 +5,7 @@ por area -- hermes_core_logic.py e telegram_utils.py cresceram alem do teto de
 ~64000 tokens de saida por chamada de escrita do Argos; ver decisao do Andre em
 2026-09-08). Split puramente mecanico: nenhuma linha de logica foi reescrita, so
 movida para dentro de `build_telegram_tool_closures(...)`, uma factory function
-que recebe exatamente as variaveis externas que os 21 closures capturam (nomes
+que recebe exatamente as variaveis externas que os 25 closures capturam (nomes
 identicos aos originais, preservados de proposito -- ver ATENCAO abaixo) e
 devolve `tools_list`.
 
@@ -32,7 +32,7 @@ from firebase_admin import firestore
 from telegram_utils import _get_api_keys, _normalize_for_matching, normalizar_area_tematica
 
 def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, request_acao_id, internal_hermes_request, explicit_web_request, _areas_validas):
-    """Monta e devolve tools_list: os 21 closures de function-calling do Gemini para o Telegram."""
+    """Monta e devolve tools_list: os 25 closures de function-calling do Gemini para o Telegram."""
     # --- Tool definitions ---
     def consultar_historico_acoes(
         query: str,
@@ -583,19 +583,116 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
 
     def salvar_memoria_global(fato: str, categoria: str):
         """Persiste fato durável na memória global do Gaspar. Apenas para regras estáveis e preferências permanentes."""
+        # P06 sub-entrega 2/N (docs/plano-hermes-autonomo-2026-09-06.md,
+        # pacote P06, passo 1) -- fecha a pendência registrada na docstring
+        # de autonomy/context.py (P06 sub-entrega 1/N): antes desta
+        # sub-entrega, este closure (motor Telegram legado, fallback quando
+        # o copiloto web falha -- ver telegram_handlers_core.py, "Fallback
+        # para motor Telegram") escrevia direto em `knowledge_nodes` com um
+        # esquema PRÓPRIO e divergente (`fato`/`categoria`/`origem` soltos),
+        # sem `origem_fato`, sem embedding e sem dedup/conflito -- o mesmo
+        # fato podia ser salvo várias vezes por este canal, sem nenhuma
+        # proteção. `_save_memory_node` (main.py) é o escritor real já usado
+        # pelo servidor MCP e pelo copiloto web
+        # (tools/hermes_tools.py::_salvar_memoria_global) -- reaproveitá-lo
+        # aqui unifica o esquema gravado em `knowledge_nodes` e ganha a
+        # detecção de duplicata/conflito que este motor nunca teve. Esse
+        # "conflito" é um status novo que ESTE canal nunca produzia antes
+        # (só "saved"/"error") -- por isso o closure `resolver_conflito_memoria`
+        # abaixo é adicionado NA MESMA sub-entrega: sem ele, um conflito
+        # detectado aqui não teria nenhuma ferramenta deste motor para
+        # resolvê-lo (achado real de revisão adversarial independente desta
+        # sub-entrega), e o fato novo ficaria preso sem ser gravado.
+        #
+        # Import local (não no topo do módulo) para evitar import circular:
+        # main.py não importa telegram_message_tools diretamente, mas
+        # importa (nível de módulo) hermes_core_logic, que importa
+        # telegram_handlers_core, que importa este módulo -- um
+        # `from main import ...` no topo deste arquivo formaria um ciclo na
+        # cadeia main -> hermes_core_logic -> telegram_handlers_core ->
+        # telegram_message_tools -> main. Mesmo padrão já usado por
+        # agendar_lembrete_acao (acima) com tools.telegram_extended.
+        from main import _save_memory_node
+        from autonomy.context import origem_fato_para_canal_de_salvar_memoria
+
         try:
-            import uuid as _uuid
-            node_id = str(_uuid.uuid4())[:16]
-            db.collection("knowledge_nodes").document(node_id).set({
-                "id": node_id,
-                "fato": fato,
-                "categoria": categoria,
-                "data_criacao": datetime.now(timezone.utc).isoformat(),
-                "origem": "telegram",
-            })
-            return json.dumps({"status": "saved", "id": node_id}, ensure_ascii=False)
+            gemini_key = (_get_api_keys(db) or {}).get("gemini_api_key")
+            if not gemini_key:
+                return json.dumps({
+                    "status": "error",
+                    "reason": "gemini_api_key_nao_configurada",
+                }, ensure_ascii=False)
+            # "telegram" é um canal ainda não auditado (ver docstring de
+            # origem_fato_para_canal_de_salvar_memoria em autonomy/context.py)
+            # -- cai no default seguro INFERENCIA_AGENTE, nunca
+            # DECLARACAO_HUMANA, mesmo este sendo o motor de fallback do
+            # copiloto web (cujo próprio texto de system prompt também já é
+            # INFERENCIA_AGENTE): o texto desta ferramenta especificamente
+            # ("Apenas para regras estáveis e preferências permanentes") não
+            # foi auditado quanto a exigir ou não afirmação literal do
+            # usuário, então não deve herdar a classificação mais forte das
+            # duas por suposição.
+            resultado = _save_memory_node(
+                db=db,
+                api_key=gemini_key,
+                fato=fato,
+                categoria=categoria,
+                session_id=session.get("chat_id"),
+                origem_fato=origem_fato_para_canal_de_salvar_memoria("telegram"),
+            )
+            return json.dumps(resultado, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+    def resolver_conflito_memoria(
+        memoria_id: str,
+        decisao: str,
+        fato_atualizado: str = "",
+        categoria: str = "fato_isolado",
+    ):
+        """Resolve um conflito explícito de memória após confirmação do usuário. decisao aceita: manter_existente, substituir_pelo_novo."""
+        # P06 sub-entrega 2/N -- adicionado junto com a mudança de
+        # `salvar_memoria_global` acima (ver seu comentário): sem este
+        # closure, um status "conflict" devolvido por `_save_memory_node`
+        # (agora alcançável por este motor) não tinha nenhuma ferramenta
+        # deste engine para ser resolvido -- o fato novo ficava preso,
+        # nunca gravado, sem possibilidade de o usuário decidir. A lógica de
+        # resolução em si já existe e já é testada em
+        # `tools/telegram_extended.py::execute("resolver_conflito_memoria", ...)`
+        # (P03 sub-entrega 19/N) -- reaproveitada aqui por delegação, mesmo
+        # padrão de `agendar_lembrete_acao` (acima) para o mesmo módulo, em
+        # vez de duplicar a implementação.
+        #
+        # LIMITAÇÃO CONHECIDA, NÃO RESOLVIDA (achado real de revisão
+        # adversarial independente, 2ª rodada desta sub-entrega): o
+        # `memoria_id` que o MODELO precisa repassar aqui (devolvido pelo
+        # "conflict" de `salvar_memoria_global`, acima) não é persistido
+        # entre turnos neste motor -- diferente do copiloto web, que grava
+        # `pendingMemoryConflict` na sessão (main.py) e o copiloto web
+        # relê no turno seguinte, e diferente de `propor_lancamento_financeiro`
+        # (mesmo módulo, abaixo), que grava a proposta pendente em
+        # `session["pending_confirmations"]` em vez de depender do modelo
+        # carregar um ID opaco entre turnos. `telegram_handlers_core.py`
+        # só persiste o TEXTO final de cada turno no histórico da sessão,
+        # não as partes de function-call/response -- se o texto visível ao
+        # usuário não repetir o `memoria_id`, ele se perde ao fim do turno.
+        # Na prática, o modelo pode recuperar o mesmo conflito chamando
+        # `salvar_memoria_global` de novo com o mesmo `fato` (o texto do
+        # usuário continua no histórico) para obter um `memoria_id` novo,
+        # mas nada no código garante esse comportamento -- fica a critério
+        # do modelo. Corrigir de verdade exige um mecanismo de confirmação
+        # pendente por sessão igual ao de `propor_lancamento_financeiro`,
+        # maior que o escopo desta sub-entrega -- a registrar como pendência
+        # própria no diário desta sub-entrega (docs/autonomia/execucao.md).
+        from tools.telegram_extended import execute
+
+        slots = {
+            "memoria_id": memoria_id,
+            "decisao": decisao,
+            "fato_atualizado": fato_atualizado,
+            "categoria": categoria,
+        }
+        return execute("resolver_conflito_memoria", slots, db)
 
     def registrar_correcao_procedimento(
         area_tematica: str,
@@ -919,6 +1016,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         reagendar_acoes_em_lote,
         editar_acoes_em_lote,
         salvar_memoria_global,
+        resolver_conflito_memoria,
         registrar_correcao_procedimento,
         buscar_e_analisar_email,
         consultar_financas_v2,
