@@ -1210,6 +1210,7 @@ async function rodarOutboxUmaVez() {
                     const recentes = await chat.fetchMessages({ limit: 30, fromMe: true });
                     const achada = jaFoiEnviada(recentes, content, incertoDesde);
                     if (achada) {
+                        entregue = { destino, id: achada.id?.id || null };  // falha ao gravar abaixo não vira "não entregue"
                         await doc.ref.update({
                             status: 'sent',
                             sent_at: admin.firestore.Timestamp.fromMillis(Number(achada.timestamp) * 1000),
@@ -1259,6 +1260,7 @@ async function rodarOutboxUmaVez() {
                         await sendTelegramAlert(`⚠️ Gaspar WhatsApp: a mensagem do outbox ${doc.id} FOI enviada, `
                             + 'mas não consegui registrar isso na fila. Não reenvie.');
                     }
+                    await registrarEnvio(null);  // saiu: conta como sucesso para a saúde
                     continue;
                 }
                 // A excecao do WhatsApp Web vem minificada — o erro real das duas
