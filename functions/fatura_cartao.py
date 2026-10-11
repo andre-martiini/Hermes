@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 COL_FATURAS = "fatura_cartao"
@@ -410,11 +411,27 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
     hoje = datetime.now(timezone.utc)
     futuro: dict[str, dict] = {}
 
+    # So a fatura mais recente de cada cartao entra. A mesma compra parcelada
+    # aparece em toda fatura (3/10, 4/10, 5/10...), e projetar a partir de todas
+    # contava cada mes futuro uma vez por fatura importada: R$ 20.642 projetados
+    # contra R$ 4.729 que o banco informava em out/2026.
+    itens = []
+    mais_recente: dict[str, str] = {}
     for snap in db.collection(COL_ITENS).where("parcelado", "==", True).limit(3000).stream():
         item = snap.to_dict() or {}
-        atual, total = item.get("parcela_atual"), item.get("parcela_total")
         competencia = str(item.get("competencia") or "")
-        if not (atual and total and total > atual and re.fullmatch(r"\d{4}-\d{2}", competencia)):
+        if not re.fullmatch(r"\d{4}-\d{2}", competencia):
+            continue
+        cartao = _cartao_do_item(item)
+        itens.append((cartao, competencia, item))
+        if competencia > mais_recente.get(cartao, ""):
+            mais_recente[cartao] = competencia
+
+    for cartao, competencia, item in itens:
+        if competencia != mais_recente[cartao]:
+            continue
+        atual, total = item.get("parcela_atual"), item.get("parcela_total")
+        if not (atual and total and total > atual):
             continue
 
         ano, mes = int(competencia[:4]), int(competencia[5:7])
@@ -432,6 +449,7 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
             })
 
     meses_ordenados = [futuro[k] for k in sorted(futuro)][:meses]
+    fonte = {c: f"fatura {comp}" for c, comp in sorted(mais_recente.items())}
     for m in meses_ordenados:
         m["parcelas"].sort(key=lambda p: -p["valor"])
         m["qtd_parcelas"] = len(m["parcelas"])
@@ -441,7 +459,19 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
         "meses": meses_ordenados,
         "total_comprometido": round(sum(m["total"] for m in meses_ordenados), 2),
         "gerado_em": hoje.strftime("%Y-%m-%d"),
+        "base": fonte,
+        "observacao": ("So parcelas ja lancadas na fatura mais recente de cada cartao; "
+                       "compras novas e assinaturas nao entram."),
     }
+
+
+def _cartao_do_item(item: dict) -> str:
+    cartao = item.get("cartao")
+    if cartao:
+        return str(cartao)
+    fatura_id = str(item.get("fatura_id") or "")
+    return fatura_id[:-8] if re.search(r"-\d{4}-\d{2}$", fatura_id) else fatura_id or "?"
+
 
 
 # --------------------------------------------------------------------------
@@ -450,6 +480,23 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
 
 # Como achar o card de `fixed_bills` que corresponde a cada cartao.
 _DESCRICAO_DO_CARTAO = {"elo-caixa": "elo"}
+
+
+def campos_do_boleto_no_card(campos: dict, card_atual: dict) -> dict:
+    """O leitor de boleto nao troca o total que veio do PDF da fatura.
+
+    A fatura e lida lancamento por lancamento e o total confere com a soma; o
+    boleto e um numero achado no e-mail, as vezes o pagamento minimo.
+    """
+    if (card_atual or {}).get("amount_origem") == "fatura_cartao":
+        return {k: v for k, v in campos.items() if k != "amount"}
+    return campos
+
+
+def _palavras(texto) -> set[str]:
+    sem_acento = unicodedata.normalize("NFKD", str(texto or ""))
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return set(re.sub(r"[^a-z0-9]+", " ", sem_acento.lower()).split())
 
 
 def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
@@ -474,10 +521,12 @@ def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
 
     marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao)
     alterados = []
+    # `mes` da fatura vai de 1 a 12; `fixed_bills.month` vai de 0 a 11. Sem o -1
+    # a fatura com vencimento em setembro corrigia o card de outubro.
     for snap in (db.collection("fixed_bills")
-                 .where("month", "==", mes).where("year", "==", ano).stream()):
+                 .where("month", "==", int(mes) - 1).where("year", "==", ano).stream()):
         dados = snap.to_dict() or {}
-        if marcador not in str(dados.get("description", "")).lower():
+        if marcador not in _palavras(dados.get("description", "")):
             continue
         anterior = dados.get("amount")
         if anterior == total:
