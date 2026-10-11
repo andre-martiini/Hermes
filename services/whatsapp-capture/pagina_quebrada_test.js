@@ -35,6 +35,7 @@ test('detecções simultâneas disparam uma recuperação só até o ready', asy
     const r = criarRecuperadorDePagina({
         destruir: async () => chamadas.push('destruir'),
         abrir: async (origem) => chamadas.push(origem),
+        intervaloMinimoMs: 0, // o intervalo tem teste próprio
         log: silencioso,
     });
     const resultados = await Promise.all([r.recuperar('outbox'), r.recuperar('outbox'), r.recuperar('chats')]);
@@ -64,4 +65,26 @@ test('destroy que falha ou trava não impede reabrir', async () => {
     });
     await trava.recuperar('outbox');
     assert.deepEqual(abertos, ['recuperacao_pagina', 'recuperacao_pagina']);
+});
+
+test('quebra logo depois de recuperar espera o intervalo mínimo (sem loop)', async () => {
+    let t = 0;
+    const agendados = [];
+    const abertas = [];
+    const r = criarRecuperadorDePagina({
+        destruir: async () => {}, abrir: async (o) => { abertas.push(o); },
+        intervaloMinimoMs: 300_000, agora: () => t,
+        agendar: (fn, ms) => agendados.push({ fn, ms }), log: { warn() {}, error() {} },
+    });
+    assert.equal(await r.recuperar('envio'), true);
+    r.liberar();
+    t = 60_000; // quebrou de novo 1 min depois
+    assert.equal(await r.recuperar('envio'), false);
+    assert.deepEqual(abertas, ['recuperacao_pagina']);
+    assert.equal(agendados.length, 1);
+    assert.equal(agendados[0].ms, 240_000);
+    t = 300_000;
+    agendados[0].fn();
+    await new Promise((res) => setImmediate(res));
+    assert.equal(abertas.length, 2);
 });

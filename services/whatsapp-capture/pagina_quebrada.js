@@ -23,12 +23,27 @@ export function ehPaginaQuebrada(erro) {
 // Várias detecções juntas (o resto do lote de envio, o sync de chats) disparam
 // uma recuperação só. A trava sai no próximo 'ready' (`liberar`); se abrir
 // falhar, o inicializador já tenta de novo sozinho, então não precisa soltar antes.
-export function criarRecuperadorDePagina({ destruir, abrir, prazoDestruirMs = 15_000, log = console }) {
+//
+// Intervalo mínimo entre recuperações: se a página quebrar de novo logo depois de
+// reabrir, recriar sem pausa viraria um loop. Dentro do intervalo, a recuperação
+// fica agendada para quando ele vencer (uma só).
+export function criarRecuperadorDePagina({
+    destruir, abrir, prazoDestruirMs = 15_000, intervaloMinimoMs = 5 * 60_000,
+    agora = Date.now, agendar = setTimeout, log = console,
+}) {
     let recuperando = false;
+    let ultimaMs = -Infinity;
 
     async function recuperar(origem) {
         if (recuperando) return false;
         recuperando = true;
+        const falta = ultimaMs + intervaloMinimoMs - agora();
+        if (falta > 0) {
+            log.warn(`[Pagina] Página quebrada de novo (${origem}); recrio em ${Math.round(falta / 1000)}s.`);
+            agendar(() => { recuperando = false; recuperar(`${origem}, adiada`); }, falta);
+            return false;
+        }
+        ultimaMs = agora();
         log.warn(`[Pagina] Página do WhatsApp Web quebrada (${origem}); recriando.`);
         try {
             // Best-effort e com prazo: com a página morta o destroy pode travar.
