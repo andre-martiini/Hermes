@@ -462,8 +462,8 @@ HEAD confirmado ao início desta execução).
 
 
 
-PLACEHOLDER_LINE_1
-PLACEHOLDER_LINE_2
+
+
 O bloco P06 sub-entrega 1/N foi movido, em 2026-10-04, para um
 QUINQUAGÉSIMO NONO arquivo de arquivo,
 docs/autonomia/execucao-archive-p06sub1.md — pela tarefa agendada de
