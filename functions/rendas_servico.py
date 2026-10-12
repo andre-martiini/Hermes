@@ -10,10 +10,13 @@ recebida (sem o 13o), os servicos sao as parcelas pendentes pela data prevista.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 STATUS_ATIVOS = ("Ativo", "Em Pausa")
 LIMITE_ACABANDO = 2
+# O mes trabalhado e pago no mes seguinte: o PLS MEC, prorrogado ate dezembro/2026,
+# tem a ultima parcela em 08/01/2027. So passa disso e erro de cadastro.
+DEFASAGEM_PAGAMENTO = timedelta(days=45)
 
 
 def _data(valor) -> date | None:
@@ -51,7 +54,7 @@ def resumir_contrato(servico: dict, hoje: date) -> dict:
     if parcelas and not pendentes and servico.get("status") in STATUS_ATIVOS:
         inconsistencias.append("todas as parcelas pagas, mas o contrato continua ativo")
     termino = _data(servico.get("data_termino"))
-    if mensal and termino and ultima and ultima > termino:
+    if mensal and termino and ultima and ultima > termino + DEFASAGEM_PAGAMENTO:
         inconsistencias.append(f"parcela em {ultima.isoformat()} depois do término do contrato ({termino.isoformat()})")
     total = _num(servico.get("valor_total"))
     soma = round(sum(_num(p.get("valor")) for p in parcelas), 2)
