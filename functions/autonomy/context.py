@@ -75,11 +75,20 @@ parâmetro).
 
 NÃO tocado por esta sub-entrega, registrado como pendência:
 - `knowledge_graph.py` (`_crystallize_task` e o fluxo de nós conceituais de
-  procedimento): escreve em `knowledge_nodes` com uma FORMA DIFERENTE de
-  documento (sem `tipo`/`texto_memoria`; nós de procedimento, não de fato) e
-  corresponde ao passo 8 do pacote (mapa de POPs), não ao passo 1. Marcar
-  esses nós como `resumo_derivado` é trabalho de uma sub-entrega própria que
-  decida a forma final desses nós.
+  procedimento): RESOLVIDO (P06 sub-entrega 2/N) só para a CRIAÇÃO de nó
+  inédito -- `_dual_pass_find_or_create_node` agora grava
+  `origem_fato=RESUMO_DERIVADO` no bloco "Cria nó inédito" (o resumo do
+  diário da tarefa, gerado pela LLM em `_crystallize_task`, é por definição
+  um resumo derivado -- mesma categoria, sem ambiguidade a resolver). O
+  caminho de ANEXAR a um nó já existente (decisão "ANEXAR:<id>" do
+  Dual-Pass) continua sem nenhuma escrita no Firestore, então não toca na
+  proveniência que o nó anexado já tinha -- decisão deliberada, mesmo
+  espírito de "só o caminho de criação grava proveniência" já usado em
+  `main._save_memory_node`. A FORMA do documento (sem `tipo`/`texto_memoria`;
+  nós de procedimento, não de fato) continua diferente da de
+  `_save_memory_node`, e o mapa de POPs em si (passo 8 do pacote) continua
+  fora do escopo -- essa sub-entrega só adicionou a chave de proveniência ao
+  dict já existente.
 - `telegram_message_tools.py::salvar_memoria_global` (motor Telegram legado,
   fallback quando o copiloto web falha -- ver `telegram_handlers_core.py`,
   "Fallback para motor Telegram"): escreve direto em `knowledge_nodes` com um

@@ -52,6 +52,7 @@ from gemini_cost_controls import (
     embed_content_logged,
     generate_content_logged,
 )
+from autonomy.context import RESUMO_DERIVADO
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -1073,6 +1074,7 @@ Responda APENAS com uma das opções acima, sem mais texto."""
         "n_tasks": 0,
         "task_ids": [],
         "resumo": summary[:600],
+        "origem_fato": RESUMO_DERIVADO,
         "data_criacao": now,
         "data_atualizacao": now,
     })
