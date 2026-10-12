@@ -458,7 +458,13 @@ re-arquivamento desde o quinquagésimo sétimo arquivo). Nenhum conteúdo
 foi alterado — o bloco já estava com `estado: validado` (confirmado
 pelo próprio commit `87277d9` em `origin/main`, "P05 sub-entrega 17/N:
 reconciliação do outbox de eventos (passo 10) (#407)", já presente no
-HEAD confirmado ao início desta execução).FIVEBLANKSFOLLOW O bloco P06 sub-entrega 1/N foi movido, em 2026-10-04, para um
+HEAD confirmado ao início desta execução).
+
+
+
+PLACEHOLDER_LINE_1
+PLACEHOLDER_LINE_2
+O bloco P06 sub-entrega 1/N foi movido, em 2026-10-04, para um
 QUINQUAGÉSIMO NONO arquivo de arquivo,
 docs/autonomia/execucao-archive-p06sub1.md — pela tarefa agendada de
 avanço autônomo, ao acrescentar a entrada da sub-entrega P05 18/N (o
