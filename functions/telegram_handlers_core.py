@@ -48,6 +48,7 @@ from telegram_message_tools import build_telegram_tool_closures
 from telegram_utils import (
     _CONFIRM_ACAO_KEYBOARD,
     _CONFIRM_FINANCEIRO_KEYBOARD,
+    _CONFIRM_MEMORIA_KEYBOARD,
     _CONFIRM_WHATSAPP_KEYBOARD,
     _HEALTH_RED_FLAG_MESSAGE,
     _MAX_FILE_BYTES,
@@ -658,6 +659,11 @@ def _process_telegram_message(db, data: dict):
         inline_keyboard = _CONFIRM_FINANCEIRO_KEYBOARD
     elif latest_session.get("_pending_confirm_type") == "whatsapp":
         inline_keyboard = _CONFIRM_WHATSAPP_KEYBOARD
+    elif latest_session.get("_pending_confirm_type") == "memoria_conflito":
+        # P06 sub-entrega 3/N -- conflito de memória gravado por
+        # `salvar_memoria_global` (telegram_message_tools.py) quando
+        # `_save_memory_node` devolve "conflict"; ver comentário lá.
+        inline_keyboard = _CONFIRM_MEMORIA_KEYBOARD
 
     # --- Send response ---
     # Text goes out first; session is persisted after so it doesn't block the user.
