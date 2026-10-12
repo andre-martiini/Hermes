@@ -18,6 +18,7 @@ telegram_handlers_core -- mesmo padrao documentado em telegram_utils.py. Um
 intercepta uma chamada feita de dentro de uma funcao deste arquivo.
 """
 import html
+import json
 from datetime import datetime, timezone
 
 from autonomy import policy as autonomy_policy
@@ -252,6 +253,172 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
         _save_session(db, chat_id, session)
         response_text = "❌ Envio de WhatsApp descartado."
         _persist_callback_turn("Botão: cancelar WhatsApp", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "confirm_memoria_manter":
+        # P06 sub-entrega 3/N -- resolve direto pelo botão, em vez de
+        # depender do modelo repassar `memoria_id` numa 2ª chamada de
+        # ferramenta (ver comentário de `salvar_memoria_global` em
+        # telegram_message_tools.py). `pending` vem de
+        # `session["pending_confirmations"]["memoria_conflito"]`, gravado
+        # por aquele closure quando `_save_memory_node` devolve "conflict".
+        #
+        # Toast otimista ("Mantendo...") disparado ANTES de validar
+        # `pending` -- mesmo padrão já usado por confirm_financeiro/
+        # confirm_acao/confirm_whatsapp acima neste arquivo (achado de
+        # revisão adversarial independente desta sub-entrega, não
+        # corrigido aqui para não divergir desses 3 fluxos existentes só
+        # neste botão novo; severidade baixa, o texto final enviado por
+        # `_send_telegram_message` sempre reflete o resultado real).
+        _answer_callback_query(token, query_id, "Mantendo o fato existente...")
+        pending = session.get("pending_confirmations", {}).get("memoria_conflito")
+        if not pending:
+            response_text = "⚠️ Nenhum conflito de memória pendente encontrado ou o prazo expirou."
+            _persist_callback_turn("Botão: manter memória existente", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        # `categoria` aqui é a do FATO NOVO (descartado nesta decisão) --
+        # achado real de revisão adversarial independente desta
+        # sub-entrega: `execute("resolver_conflito_memoria", ...)` hoje
+        # ignora esse campo por completo quando decisao="manter_existente"
+        # (só grava conflito_resolvido_em/ultima_decisao_humana, ver
+        # tools/telegram_extended.py), então isto não é um bug de
+        # comportamento HOJE -- mas enviar a categoria do fato rejeitado
+        # mesmo assim seria um dado semanticamente errado se aquele código
+        # um dia passar a usar o campo. Usa `categoria_existente` (a do nó
+        # que de fato permanece) em vez de `categoria`.
+        try:
+            from tools.telegram_extended import execute
+            resultado_json = execute("resolver_conflito_memoria", {
+                "memoria_id": pending.get("memory_id"),
+                "decisao": "manter_existente",
+                "fato_atualizado": "",
+                "categoria": pending.get("categoria_existente") or "fato_isolado",
+            }, db)
+        except Exception as e:
+            response_text = f"❌ Erro ao resolver conflito de memória: {html.escape(str(e))}"
+            _persist_callback_turn("Botão: manter memória existente", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        # Achado real de uma 2ª rodada de revisão adversarial independente:
+        # `execute(...)` pode devolver um JSON com status "error" (ex.:
+        # `memoria_id` apagado/inexistente) SEM lançar excecão -- o
+        # try/except acima sozinho não pega isso, e sem este check o botão
+        # reportaria sucesso falso e ainda limparia a pendência (impedindo
+        # uma nova tentativa). `resolver_conflito_memoria` (closure-
+        # ferramenta irmão, telegram_message_tools.py) já faz esse mesmo
+        # parsing de status antes de decidir limpar -- replicado aqui.
+        try:
+            status_resultado = json.loads(resultado_json).get("status")
+        except (ValueError, TypeError, AttributeError):
+            status_resultado = None
+        if status_resultado not in ("resolved", "updated"):
+            response_text = (
+                "❌ Não foi possível resolver o conflito de memória "
+                f"(resposta inesperada: {html.escape(str(status_resultado))})."
+            )
+            _persist_callback_turn("Botão: manter memória existente", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        response_text = (
+            "✅ <b>Fato existente mantido.</b>\n"
+            f"• Mantido: {html.escape(pending.get('existing_text') or '(sem texto registrado)')}\n"
+            f"• Descartado: {html.escape(pending.get('fato_atualizado') or '')}"
+        )
+        # Limpeza da pendência/sessão separada da chamada a `execute` acima
+        # (achado real de revisão adversarial independente desta
+        # sub-entrega): se `execute` já tiver resolvido o conflito de
+        # verdade no Firestore mas `_save_session` falhar (ex.: blip de
+        # rede), isso NÃO é uma falha da resolução -- reportar como erro
+        # nesse caso seria uma mensagem falsa ao usuário. A pendência pode
+        # ficar obsoleta na sessão persistida (o botão reaparece, um novo
+        # toque reenvia a mesma decisão -- idempotente do lado do
+        # Firestore, já que é só um merge de campos fixos), mas o usuário
+        # não é informado de uma falha que não ocorreu.
+        try:
+            session.get("pending_confirmations", {}).pop("memoria_conflito", None)
+            if session.get("_pending_confirm_type") == "memoria_conflito":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+        except Exception as e:
+            print(f"[TelegramCallback] Conflito de memória resolvido, mas falha ao salvar sessão: {e}")
+            response_text += "\n⚠️ A operação foi concluída, mas houve um problema ao atualizar a sessão."
+
+        _persist_callback_turn("Botão: manter memória existente", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "confirm_memoria_substituir":
+        # P06 sub-entrega 3/N -- mesmo raciocínio de confirm_memoria_manter
+        # acima, decisão "substituir_pelo_novo" (aqui `categoria` É a do
+        # fato novo, correta para este ramo -- `fato_atualizado`/
+        # `categoria` do fato proposto são exatamente o que
+        # `execute("resolver_conflito_memoria", ...)` grava quando
+        # substitui).
+        _answer_callback_query(token, query_id, "Substituindo pelo novo fato...")
+        pending = session.get("pending_confirmations", {}).get("memoria_conflito")
+        if not pending:
+            response_text = "⚠️ Nenhum conflito de memória pendente encontrado ou o prazo expirou."
+            _persist_callback_turn("Botão: substituir memória pelo novo fato", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        try:
+            from tools.telegram_extended import execute
+            resultado_json = execute("resolver_conflito_memoria", {
+                "memoria_id": pending.get("memory_id"),
+                "decisao": "substituir_pelo_novo",
+                "fato_atualizado": pending.get("fato_atualizado") or "",
+                "categoria": pending.get("categoria") or "fato_isolado",
+            }, db)
+        except Exception as e:
+            response_text = f"❌ Erro ao resolver conflito de memória: {html.escape(str(e))}"
+            _persist_callback_turn("Botão: substituir memória pelo novo fato", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        # Achado real de uma 2ª rodada de revisão adversarial independente:
+        # para "substituir_pelo_novo", `execute(...)` propaga o resultado
+        # de `main._save_memory_node(force_update_id=...)`, que devolve
+        # `{"status": "error", "reason": "memory_not_found"}` SEM lançar
+        # excecão se o nó tiver sido apagado/alterado entre a detecção do
+        # conflito e o toque no botão (a pendência pode viver vários
+        # turnos) -- "updated" é o status real de sucesso aqui, nunca
+        # "resolved" (esse é só de "manter_existente"). Sem este check, o
+        # botão reportaria sucesso falso e limparia a pendência mesmo
+        # assim.
+        try:
+            status_resultado = json.loads(resultado_json).get("status")
+        except (ValueError, TypeError, AttributeError):
+            status_resultado = None
+        if status_resultado not in ("resolved", "updated"):
+            response_text = (
+                "❌ Não foi possível resolver o conflito de memória "
+                f"(resposta inesperada: {html.escape(str(status_resultado))})."
+            )
+            _persist_callback_turn("Botão: substituir memória pelo novo fato", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return True
+
+        response_text = (
+            "✅ <b>Memória atualizada com o novo fato.</b>\n"
+            f"• Novo texto: {html.escape(pending.get('fato_atualizado') or '')}\n"
+            f"• Texto anterior: {html.escape(pending.get('existing_text') or '(sem texto registrado)')}"
+        )
+        # Mesmo raciocínio de confirm_memoria_manter acima: limpeza
+        # separada da chamada a `execute` que já teve sucesso.
+        try:
+            session.get("pending_confirmations", {}).pop("memoria_conflito", None)
+            if session.get("_pending_confirm_type") == "memoria_conflito":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+        except Exception as e:
+            print(f"[TelegramCallback] Conflito de memória resolvido, mas falha ao salvar sessão: {e}")
+            response_text += "\n⚠️ A operação foi concluída, mas houve um problema ao atualizar a sessão."
+
+        _persist_callback_turn("Botão: substituir memória pelo novo fato", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
     elif data.startswith("wa_cancel:"):
