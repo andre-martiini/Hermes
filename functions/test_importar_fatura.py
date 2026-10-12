@@ -72,8 +72,10 @@ class _Query:
     def limit(self, _n):
         return self
 
-    def document(self, doc_id):
-        return _Ref(self._banco, self._colecao, doc_id)
+    def document(self, doc_id=None):
+        import uuid
+
+        return _Ref(self._banco, self._colecao, doc_id or uuid.uuid4().hex[:20])
 
     def stream(self):
         tabela = self._banco.get(self._colecao, {})

@@ -1,0 +1,18 @@
+{
+  "name": "consultar_historico_financeiro",
+  "description": "Histórico mensal do financeiro, vários meses numa chamada: renda total e por fonte (Ifes, serviços, outras), contas e aportes, saldo previsto e realizado, gasto no cartão por categoria e natureza, reserva e metas. 'comparativo' traz uma linha por mês para comparar; 'meses' traz o retrato completo. Mês fechado vem congelado; mês não fechado é calculado na hora. Somente leitura",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "mes_inicio": {
+        "type": "string",
+        "description": "Primeiro mês, YYYY-MM. Padrão: 11 meses antes de mes_fim (12 meses no total)"
+      },
+      "mes_fim": {
+        "type": "string",
+        "description": "Último mês, YYYY-MM. Padrão: o mês atual"
+      }
+    },
+    "required": []
+  }
+}

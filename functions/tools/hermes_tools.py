@@ -2048,6 +2048,47 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
     )
 
 
+def _hoje_brasilia():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def consultar_historico_financeiro(ctx: ToolContext, args: dict):
+    """Retrato de cada mes (renda por fonte, contas, cartao por categoria, saldo), de mes_inicio a mes_fim."""
+    import historico_financeiro as hf
+
+    hoje = _hoje_brasilia()
+    fim = args.get("mes_fim") or f"{hoje.year:04d}-{hoje.month:02d}"
+    try:
+        if args.get("mes_inicio"):
+            inicio = args["mes_inicio"]
+        else:
+            mes0, ano = hf.comp.ler(fim)
+            mes0 -= 11
+            while mes0 < 0:
+                ano, mes0 = ano - 1, mes0 + 12
+            inicio = hf.comp.periodo(mes0, ano)["competencia"]
+        return hf.consultar(ctx.db, inicio, fim, hoje=hoje)
+    except ValueError as exc:
+        return {"erro": str(exc)}
+
+
+def fechar_mes_financeiro(ctx: ToolContext, args: dict):
+    """Congela o retrato de um mes encerrado; refazer exige retificar=true e motivo."""
+    import historico_financeiro as hf
+
+    try:
+        resultado = hf.fechar_mes(ctx.db, str(args.get("competencia") or ""), hoje=_hoje_brasilia(),
+                                  retificar=bool(args.get("retificar")), motivo=args.get("motivo") or "")
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] == "falhou":
+        return {"erro": f"Fechamento nao confirmado: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
 def consultar_rendas_servico(ctx: ToolContext, args: dict):
     """Contratos de servico ativos (quanto falta, quando acaba) e renda dos proximos meses."""
     from datetime import datetime
@@ -3051,6 +3092,8 @@ _HANDLERS: dict = {
     "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
     "atualizar_reserva_emergencia": atualizar_reserva_emergencia,
     "consultar_rendas_servico": consultar_rendas_servico,
+    "consultar_historico_financeiro": consultar_historico_financeiro,
+    "fechar_mes_financeiro": fechar_mes_financeiro,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,

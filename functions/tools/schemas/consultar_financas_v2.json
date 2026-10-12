@@ -4,9 +4,13 @@
     "parameters": {
         "type": "object",
         "properties": {
+            "competencia": {
+                "type": "string",
+                "description": "Mês da consulta no formato YYYY-MM (ex.: '2026-10' = outubro de 2026). Tem precedência sobre mes/ano"
+            },
             "mes": {
                 "type": "integer",
-                "description": "Mês da consulta (0-11, onde 0 é Janeiro e 11 é Dezembro). Se não fornecido, usa o mês atual."
+                "description": "Mês da consulta (0-11, onde 0 é Janeiro e 11 é Dezembro). Se não fornecido, usa o mês atual. Prefira competencia."
             },
             "ano": {
                 "type": "integer",
