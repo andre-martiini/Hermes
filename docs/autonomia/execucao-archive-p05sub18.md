@@ -1,6 +1,6 @@
 # Arquivo de execução — P05 sub-entrega 18/N
 
-Bloco movido de docs/autonomia/execucao.md em 12/10/2026, pela tarefa agendada de avanço autônomo, ao acrescentar a entrada da sub-entrega P06 2/N — o arquivo ativo estava em 53006 bytes, acima do limite usual de ~50KB, sem re-arquivamento desde o quinquagésimo nono arquivo de arquivo, execucao-archive-p06sub1.md. Nenhum conteúdo foi alterado — o bloco já estava com `estado: bloqueado` (diferente de `validado`, padrão da maioria dos arquivamentos anteriores — esta sub-entrega não confirma se a PR #419 foi mesclada ou não antes de arquivar; só move o bloco como estava, exatamente como ele já se encontrava em execucao.md).
+Bloco movido de docs/autonomia/execucao.md em 12/10/2026, pela tarefa agendada de avanço autônomo, ao acrescentar a entrada da sub-entrega P06 3/N — o arquivo ativo estava em 53006 bytes, acima do limite usual de ~50KB, sem re-arquivamento desde o quinquagésimo nono arquivo de arquivo, execucao-archive-p06sub1.md. Nenhum conteúdo foi alterado — o bloco já estava com `estado: bloqueado` (diferente de `validado`, padrão da maioria dos arquivamentos anteriores — esta sub-entrega não confirma se a PR #419 foi mesclada ou não antes de arquivar; só move o bloco como estava, exatamente como ele já se encontrava em execucao.md).
 
 ---
 
