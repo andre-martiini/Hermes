@@ -2048,6 +2048,17 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
     )
 
 
+def consultar_rendas_servico(ctx: ToolContext, args: dict):
+    """Contratos de servico ativos (quanto falta, quando acaba) e renda dos proximos meses."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import rendas_servico
+
+    meses = max(1, min(int(args.get("meses") or 6), 24))
+    return rendas_servico.resumo(ctx.db, datetime.now(ZoneInfo("America/Sao_Paulo")).date(), meses)
+
+
 def atualizar_reserva_emergencia(ctx: ToolContext, args: dict):
     """Valor atual e/ou alvo da reserva de emergencia, com historico."""
     from reserva_emergencia import atualizar
@@ -3039,6 +3050,7 @@ _HANDLERS: dict = {
     "importar_fatura_cartao": importar_fatura_cartao,
     "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
     "atualizar_reserva_emergencia": atualizar_reserva_emergencia,
+    "consultar_rendas_servico": consultar_rendas_servico,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
