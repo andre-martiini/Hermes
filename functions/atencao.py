@@ -520,6 +520,15 @@ def detectar_atencao_financeiro(
         return []
 
     itens = avaliar_contas_vencendo(contas, hoje_dt)
+    # Contrato de servico mensal com 2 parcelas ou menos a receber. Falha aqui
+    # nao pode calar o aviso de conta vencendo.
+    try:
+        import rendas_servico
+
+        resumos = [rendas_servico.resumir_contrato(c, hoje_dt) for c in rendas_servico.contratos_ativos(db)]
+        itens += rendas_servico.itens_atencao(resumos, hoje_dt)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[AtencaoFinanceiro] Rendas de servico indisponiveis: {exc}")
     if itens:
         _persistir_itens_atencao(db, itens)
     return itens

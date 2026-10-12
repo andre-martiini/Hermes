@@ -1051,6 +1051,26 @@ def execute(tool_name: str, slots: dict, db) -> str:
             if d.get("isReceived"):
                 total_received_income += amount
 
+        # Renda de servico ganha a posicao no contrato ("7/12", quantas faltam,
+        # quando acaba): sem isso "Parcela 7" nao diz se a renda continua.
+        try:
+            import rendas_servico
+
+            servicos_cache: dict = {}
+            for d in income:
+                sid, pid = d.get("service_id"), d.get("parcela_id")
+                if not (sid and pid):
+                    continue
+                if sid not in servicos_cache:
+                    snap = db.collection("servicos").document(sid).get()
+                    servicos_cache[sid] = snap.to_dict() if snap.exists else None
+                if servicos_cache[sid]:
+                    posicao = rendas_servico.posicao_da_parcela(servicos_cache[sid], pid)
+                    if posicao:
+                        d.update(posicao)
+        except Exception as exc:  # noqa: BLE001 — enriquecimento nunca derruba a consulta
+            print(f"[consultar_financas_v2] posicao das rendas de servico indisponivel: {exc}")
+
         goals = []
         for doc in goals_docs:
             d = doc.to_dict()

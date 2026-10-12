@@ -134,6 +134,7 @@ _CATALOG: dict[str, str] = {
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
     "importar_fatura_cartao": "Importa a fatura do cartao de um arquivo no Drive (PDF do Elo ou CSV da XP) e acerta a conta do mes",
+    "consultar_rendas_servico": "Contratos de servico ativos (parcelas pagas e restantes, quando acabam) e a renda prevista dos proximos meses, Ifes separado de servicos",
     "atualizar_reserva_emergencia": "Atualiza o valor atual e/ou o alvo da reserva de emergencia, com historico e releitura",
     "gerenciar_categorias_cartao": "Lista, define ou desliga as regras que dao categoria e natureza (pessoal/projeto/misto) aos lancamentos do cartao",
     # WhatsApp: a consolidacao ja existia e so era acionavel pela Caixa de

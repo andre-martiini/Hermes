@@ -1106,6 +1106,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — projeção determinística sobre dados já gravados", dados_sensiveis_categoria="financeiro",
     ),
+    "consultar_rendas_servico": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — resumo determinístico de servicos e income_entries já gravados",
+        dados_sensiveis_categoria="financeiro pessoal",
+    ),
     "atualizar_reserva_emergencia": ToolInventoryEntry(
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "a própria tool relê finance_settings/config e só devolve sucesso se os valores baterem",
