@@ -459,11 +459,13 @@ foi alterado — o bloco já estava com `estado: validado` (confirmado
 pelo próprio commit `87277d9` em `origin/main`, "P05 sub-entrega 17/N:
 reconciliação do outbox de eventos (passo 10) (#407)", já presente no
 HEAD confirmado ao início desta execução).
-LINHA462BLANK
-LINHA463BLANK
-LINHA464BLANK
-LINHA465BLANK
-LINHA466BLANK
+
+X1
+X2
+X3
+X4
+X5
+
 O bloco P06 sub-entrega 1/N foi movido, em 2026-10-04, para um
 QUINQUAGÉSIMO NONO arquivo de arquivo,
 docs/autonomia/execucao-archive-p06sub1.md — pela tarefa agendada de
