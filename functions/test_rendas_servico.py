@@ -67,6 +67,12 @@ class TestContrato(unittest.TestCase):
         self.assertIn("parcelas somam R$ 17500.00", texto)
         self.assertIn("365 dias", texto)
 
+    def test_ultima_parcela_no_mes_seguinte_ao_termino_e_normal(self):
+        prorrogado = dict(PLS, valor_total=10500, data_termino="2026-12-31",
+                          parcelas=_parcelas([("2026-11-08", "pendente"), ("2026-12-08", "pendente"),
+                                              ("2027-01-08", "pendente")], valor=3500.0))
+        self.assertEqual(rs.resumir_contrato(prorrogado, HOJE)["inconsistencias"], [])
+
     def test_todas_pagas_e_ainda_ativo(self):
         pago = dict(WORKSHOP, parcelas=[dict(WORKSHOP["parcelas"][0], status="pago")])
         self.assertIn("todas as parcelas pagas", rs.resumir_contrato(pago, HOJE)["inconsistencias"][0])
