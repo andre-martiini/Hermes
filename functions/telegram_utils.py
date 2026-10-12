@@ -1992,6 +1992,13 @@ _CONFIRM_FINANCEIRO_KEYBOARD = [
     ]
 ]
 
+_CONFIRM_MEMORIA_KEYBOARD = [
+    [
+        {"text": "✅ Manter o existente", "callback_data": "confirm_memoria_manter"},
+        {"text": "🔄 Substituir pelo novo", "callback_data": "confirm_memoria_substituir"}
+    ]
+]
+
 _CONFIRM_WHATSAPP_KEYBOARD = [
     [
         {"text": "✅ Confirmar Envio", "callback_data": "confirm_whatsapp"},

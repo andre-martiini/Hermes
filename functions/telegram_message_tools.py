@@ -640,6 +640,52 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 session_id=session.get("chat_id"),
                 origem_fato=origem_fato_para_canal_de_salvar_memoria("telegram"),
             )
+            # P06 sub-entrega 3/N -- fecha a LIMITAÇÃO CONHECIDA registrada
+            # pela P06 sub-entrega 2/N no closure `resolver_conflito_memoria`
+            # abaixo: quando `_save_memory_node` devolve "conflict", o
+            # `memory_id` não sobrevivia ao fim do turno (este motor só
+            # persiste o TEXTO final de cada turno, nunca as partes de
+            # function-call/response), então o modelo precisava carregar um
+            # ID opaco entre turnos sem nenhuma garantia de código. Em vez
+            # disso, o conflito passa a ser gravado em
+            # `session["pending_confirmations"]` -- mesmo mecanismo já usado
+            # por `propor_lancamento_financeiro`/`propor_acao_para_confirmacao`/
+            # `schedule_whatsapp_message` (abaixo neste arquivo) -- e
+            # resolvido por botão inline (`_CONFIRM_MEMORIA_KEYBOARD` em
+            # telegram_utils.py; `confirm_memoria_manter`/
+            # `confirm_memoria_substituir` em
+            # telegram_callbacks_confirmacoes.py), não mais por uma 2ª
+            # chamada de ferramenta do modelo repetindo o `memory_id`. O
+            # closure `resolver_conflito_memoria` abaixo continua existindo,
+            # inalterado, como caminho alternativo por ferramenta -- deixa
+            # de ser o ÚNICO caminho, mas não foi removido.
+            if resultado.get("status") == "conflict":
+                # "categoria" aqui é a categoria do FATO NOVO proposto (o
+                # parâmetro desta função) -- só faz sentido para a decisão
+                # "substituir_pelo_novo". "categoria_existente" (achado
+                # real de revisão adversarial independente desta
+                # sub-entrega) é a categoria do nó que SERIA mantido na
+                # decisão "manter_existente" -- guardada separada para o
+                # callback de "manter" nunca reenviar, por acidente, a
+                # categoria do fato que está sendo descartado (mesmo
+                # `tools/telegram_extended.py::execute` hoje ignorando
+                # `categoria` nesse ramo -- ver comentário em
+                # telegram_callbacks_confirmacoes.py). Fallback para
+                # "fato_isolado" (neutro), nunca para `categoria` (fato
+                # novo) -- achado real de uma 2ª rodada de revisão
+                # adversarial: `_save_memory_node` sempre devolve
+                # `categoria_existente` no ramo "conflict" hoje (ver
+                # main.py), mas se algum dia não devolver, cair de volta
+                # para `categoria` reintroduziria exatamente o mesmo erro
+                # semântico que este campo foi criado para evitar.
+                session.setdefault("pending_confirmations", {})["memoria_conflito"] = {
+                    "memory_id": resultado.get("memory_id"),
+                    "fato_atualizado": resultado.get("proposed_text") or fato,
+                    "categoria": categoria,
+                    "categoria_existente": resultado.get("categoria_existente") or "fato_isolado",
+                    "existing_text": resultado.get("existing_text") or "",
+                }
+                session["_pending_confirm_type"] = "memoria_conflito"
             return json.dumps(resultado, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
@@ -663,27 +709,48 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         # padrão de `agendar_lembrete_acao` (acima) para o mesmo módulo, em
         # vez de duplicar a implementação.
         #
-        # LIMITAÇÃO CONHECIDA, NÃO RESOLVIDA (achado real de revisão
-        # adversarial independente, 2ª rodada desta sub-entrega): o
-        # `memoria_id` que o MODELO precisa repassar aqui (devolvido pelo
-        # "conflict" de `salvar_memoria_global`, acima) não é persistido
-        # entre turnos neste motor -- diferente do copiloto web, que grava
-        # `pendingMemoryConflict` na sessão (main.py) e o copiloto web
-        # relê no turno seguinte, e diferente de `propor_lancamento_financeiro`
-        # (mesmo módulo, abaixo), que grava a proposta pendente em
-        # `session["pending_confirmations"]` em vez de depender do modelo
-        # carregar um ID opaco entre turnos. `telegram_handlers_core.py`
-        # só persiste o TEXTO final de cada turno no histórico da sessão,
-        # não as partes de function-call/response -- se o texto visível ao
-        # usuário não repetir o `memoria_id`, ele se perde ao fim do turno.
-        # Na prática, o modelo pode recuperar o mesmo conflito chamando
-        # `salvar_memoria_global` de novo com o mesmo `fato` (o texto do
-        # usuário continua no histórico) para obter um `memoria_id` novo,
-        # mas nada no código garante esse comportamento -- fica a critério
-        # do modelo. Corrigir de verdade exige um mecanismo de confirmação
-        # pendente por sessão igual ao de `propor_lancamento_financeiro`,
-        # maior que o escopo desta sub-entrega -- a registrar como pendência
-        # própria no diário desta sub-entrega (docs/autonomia/execucao.md).
+        # RESOLVIDO pela P06 sub-entrega 3/N (era LIMITAÇÃO CONHECIDA, NÃO
+        # RESOLVIDA, registrada por esta própria sub-entrega 2/N): o
+        # `memoria_id` que o MODELO precisava repassar aqui (devolvido pelo
+        # "conflict" de `salvar_memoria_global`, acima) não era persistido
+        # entre turnos neste motor -- `telegram_handlers_core.py` só
+        # persiste o TEXTO final de cada turno no histórico da sessão, não
+        # as partes de function-call/response, então um `memoria_id` que o
+        # texto visível ao usuário não repetisse se perdia ao fim do turno.
+        # O caminho PADRÃO deixou de depender disso: `salvar_memoria_global`
+        # agora grava o conflito em `session["pending_confirmations"]`
+        # (mesmo mecanismo de `propor_lancamento_financeiro`, abaixo neste
+        # arquivo) e um botão inline (`_CONFIRM_MEMORIA_KEYBOARD`,
+        # telegram_utils.py) resolve direto pelo `confirm_memoria_manter`/
+        # `confirm_memoria_substituir` em telegram_callbacks_confirmacoes.py
+        # -- sem o modelo precisar carregar nenhum ID entre turnos. Este
+        # closure continua existindo como caminho alternativo por
+        # ferramenta (ex.: um cliente MCP, ou se o modelo decidir resolver
+        # antes do usuário tocar no botão) -- ainda sujeito à mesma
+        # limitação cross-turn se usado dessa forma, mas deixou de ser o
+        # único caminho disponível.
+        #
+        # Limpeza da pendência por botão ao final (achado real de revisão
+        # adversarial independente desta sub-entrega): sem isto, se ESTE
+        # caminho alternativo resolvesse o MESMO conflito que
+        # `salvar_memoria_global` registrou em
+        # `session["pending_confirmations"]["memoria_conflito"]`, a
+        # pendência ficaria órfã -- `telegram_handlers_core.py` continuaria
+        # anexando `_CONFIRM_MEMORIA_KEYBOARD` às respostas seguintes,
+        # oferecendo um botão para um conflito já resolvido (e, se tocado,
+        # chamando `execute` de novo sobre o mesmo `memoria_id`). Comparar
+        # o `memoria_id` antes de limpar evita apagar a pendência de um
+        # OUTRO conflito que por acaso esteja pendente ao mesmo tempo.
+        # `session["_pending_confirm_type"] = None` em vez de `.pop(...)`
+        # é deliberado: o pipeline de mensagens
+        # (telegram_handlers_core.py::_process_telegram_message) só
+        # propaga `_pending_confirm_type` de `session` para a sessão
+        # relida do Firestore (`latest_session`) quando a chave "está
+        # presente" em `session` -- `.pop(...)` removeria a chave e faria
+        # essa sincronização ser silenciosamente pulada, deixando
+        # `latest_session` com um `_pending_confirm_type` antigo (lido do
+        # Firestore) e o teclado reaparecendo mesmo com
+        # `pending_confirmations` já limpo.
         from tools.telegram_extended import execute
 
         slots = {
@@ -692,7 +759,29 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
             "fato_atualizado": fato_atualizado,
             "categoria": categoria,
         }
-        return execute("resolver_conflito_memoria", slots, db)
+        resultado_json = execute("resolver_conflito_memoria", slots, db)
+        try:
+            pendente = (session.get("pending_confirmations") or {}).get("memoria_conflito")
+            # "resolved" (decisao="manter_existente", literal em
+            # tools/telegram_extended.py) e "updated" (decisao=
+            # "substituir_pelo_novo", devolvido por
+            # main._save_memory_node(force_update_id=...) -- "resolved"
+            # NUNCA aparece nesse 2º caso, ver main.py) -- achado real de
+            # revisão adversarial independente desta sub-entrega: a 1ª
+            # versão deste fix só reconhecia "resolved", então a limpeza
+            # nunca disparava para "substituir_pelo_novo" bem-sucedido.
+            status_resultado = json.loads(resultado_json).get("status")
+            resolvido_com_sucesso = status_resultado in ("resolved", "updated")
+            if pendente and pendente.get("memory_id") == memoria_id and resolvido_com_sucesso:
+                session["pending_confirmations"].pop("memoria_conflito", None)
+                if session.get("_pending_confirm_type") == "memoria_conflito":
+                    session["_pending_confirm_type"] = None
+        except Exception:
+            # Best-effort: uma falha ao limpar a pendência (ex.: JSON
+            # inesperado de `execute`) não deve mascarar o resultado real
+            # da resolução, já obtido com sucesso acima.
+            pass
+        return resultado_json
 
     def registrar_correcao_procedimento(
         area_tematica: str,

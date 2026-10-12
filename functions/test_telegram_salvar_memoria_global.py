@@ -30,6 +30,17 @@ já é testada em `test_telegram_extended.py::TestResolverConflitoMemoriaIdempot
 (P03 sub-entrega 19/N) -- os testes aqui cobrem só a DELEGAÇÃO do closure
 novo para `tools.telegram_extended.execute`, não reimplementam aquela
 cobertura.
+
+`TestTelegramSalvarMemoriaGlobalConflitoGravaPendingConfirmations` cobre a
+mudança da P06 sub-entrega 3/N: quando `_save_memory_node` devolve
+"conflict", `salvar_memoria_global` agora grava o conflito em
+`session["pending_confirmations"]["memoria_conflito"]` (mesmo mecanismo de
+`propor_lancamento_financeiro`) em vez de depender só do modelo repassar
+`memoria_id` numa 2ª chamada de ferramenta -- fecha a LIMITAÇÃO CONHECIDA
+registrada pela sub-entrega 2/N. A resolução por botão em si (callbacks
+`confirm_memoria_manter`/`confirm_memoria_substituir`) é testada em
+`test_telegram_callbacks_confirmacoes_memoria.py`, não aqui -- este arquivo
+cobre só o closure que GRAVA a pendência, não quem a CONSOME.
 """
 
 import ast
@@ -166,21 +177,150 @@ class TestTelegramSalvarMemoriaGlobalReal(unittest.TestCase):
         self.assertEqual(resultado["reason"], "Firestore indisponível")
 
 
-class TestTelegramResolverConflitoMemoriaReal(unittest.TestCase):
-    """Cobre só a DELEGAÇÃO do closure novo `resolver_conflito_memoria`
-    (motor Telegram) para `tools.telegram_extended.execute` -- a lógica de
-    resolução em si já é testada em
-    test_telegram_extended.py::TestResolverConflitoMemoriaIdempotente."""
+class TestTelegramSalvarMemoriaGlobalConflitoGravaPendingConfirmations(unittest.TestCase):
+    """P06 sub-entrega 3/N: `salvar_memoria_global` passa a gravar o
+    conflito em `session['pending_confirmations']['memoria_conflito']`
+    quando `_save_memory_node` devolve status "conflict" -- fecha a
+    limitação cross-turn do `memoria_id` registrada pela sub-entrega 2/N
+    (ver comentário do closure em telegram_message_tools.py). A resolução
+    por botão em si é testada em
+    test_telegram_callbacks_confirmacoes_memoria.py, não aqui."""
 
     def setUp(self):
         self.db = _MockDb()
+        self.session = {"chat_id": "123456789"}
+        self.salvar_memoria_global = _extrair_closure_salvar_memoria_global(
+            self.db, self.session, lambda _db: {"gemini_api_key": "fake-key"}
+        )
+
+    def test_conflito_grava_pending_confirmations_com_os_campos_certos(self):
+        # "categoria" (parâmetro, fato NOVO proposto) e "categoria_existente"
+        # (campo do resultado, fato que SERIA mantido) propositalmente
+        # diferentes -- achado real de revisão adversarial independente
+        # desta sub-entrega: um teste anterior usava o mesmo valor nos dois
+        # lugares e não conseguia detectar os dois campos sendo trocados
+        # entre si.
+        conflito = {
+            "status": "conflict",
+            "memory_id": "mem-existente-1",
+            "categoria_existente": "fato_isolado",
+            "existing_text": "André prefere almoçar depois das 13h.",
+            "similarity": 0.91,
+            "proposed_text": "André prefere almoçar depois das 13h30.",
+        }
+        with mock.patch.object(main, "_save_memory_node", return_value=conflito):
+            resultado_json = self.salvar_memoria_global(
+                "André prefere almoçar depois das 13h30.", "preferencia"
+            )
+
+        resultado = json.loads(resultado_json)
+        self.assertEqual(resultado["status"], "conflict")
+
+        pendente = self.session.get("pending_confirmations", {}).get("memoria_conflito")
+        self.assertIsNotNone(pendente)
+        self.assertEqual(pendente["memory_id"], "mem-existente-1")
+        self.assertEqual(pendente["fato_atualizado"], "André prefere almoçar depois das 13h30.")
+        self.assertEqual(pendente["categoria"], "preferencia")
+        self.assertEqual(pendente["categoria_existente"], "fato_isolado")
+        self.assertEqual(pendente["existing_text"], "André prefere almoçar depois das 13h.")
+        self.assertEqual(self.session.get("_pending_confirm_type"), "memoria_conflito")
+
+    def test_conflito_sem_categoria_existente_usa_fallback_neutro_nao_a_categoria_do_fato_novo(self):
+        """Achado real de uma 2ª rodada de revisão adversarial: a 1ª versão
+        deste fallback usava `categoria` (a do fato NOVO, descartado na
+        decisão "manter_existente") quando `categoria_existente` estava
+        ausente -- reintroduzindo o mesmo erro semântico que esse campo
+        foi criado para evitar. O fallback correto é neutro
+        ("fato_isolado"), nunca a categoria do fato novo."""
+        conflito = {
+            "status": "conflict",
+            "memory_id": "mem-existente-3",
+            "existing_text": "texto antigo",
+            "proposed_text": "texto novo",
+        }
+        with mock.patch.object(main, "_save_memory_node", return_value=conflito):
+            self.salvar_memoria_global("texto novo", "preferencia")
+
+        pendente = self.session["pending_confirmations"]["memoria_conflito"]
+        self.assertEqual(pendente["categoria_existente"], "fato_isolado")
+        self.assertNotEqual(pendente["categoria_existente"], "preferencia")
+
+    def test_conflito_sem_proposed_text_usa_o_fato_original_como_fallback(self):
+        """`_save_memory_node` sempre devolve `proposed_text` no ramo
+        "conflict" real (ver main.py), mas o closure não deve depender só
+        disso -- se um mock/stub devolver o campo vazio ou ausente, o fato
+        originalmente passado para `salvar_memoria_global` ainda deve ser
+        usado como `fato_atualizado` pendente."""
+        conflito = {
+            "status": "conflict",
+            "memory_id": "mem-existente-2",
+            "existing_text": "texto antigo",
+            "proposed_text": "",
+        }
+        with mock.patch.object(main, "_save_memory_node", return_value=conflito):
+            self.salvar_memoria_global("fato novo proposto", "fato_isolado")
+
+        pendente = self.session["pending_confirmations"]["memoria_conflito"]
+        self.assertEqual(pendente["fato_atualizado"], "fato novo proposto")
+
+    def test_status_saved_sem_conflito_nao_grava_nenhuma_pendencia(self):
+        """Caminho feliz (sem conflito) não deve tocar
+        pending_confirmations -- só o ramo "conflict" grava a pendência
+        nova desta sub-entrega."""
+        with _patch_embedding_e_similares() as mocks:
+            mocks["get_embedding"].return_value = [0.1, 0.2, 0.3]
+            mocks["_find_similar_memory_nodes"].return_value = []
+            self.salvar_memoria_global("fato qualquer sem conflito", "fato_isolado")
+
+        self.assertNotIn("pending_confirmations", self.session)
+        self.assertNotIn("_pending_confirm_type", self.session)
+
+    def test_status_ignored_duplicado_nao_grava_nenhuma_pendencia(self):
+        self.db.collection("knowledge_nodes").document("mem-existente").set({
+            "texto_memoria": "fato repetido",
+        })
+        with _patch_embedding_e_similares() as mocks:
+            mocks["get_embedding"].return_value = [0.1, 0.2, 0.3]
+            mocks["_find_similar_memory_nodes"].return_value = [{
+                "id": "mem-existente",
+                "similarity": 0.99,
+                "data": self.db.collection("knowledge_nodes")._docs["mem-existente"],
+            }]
+            self.salvar_memoria_global("fato repetido", "fato_isolado")
+
+        self.assertNotIn("pending_confirmations", self.session)
+
+    def test_status_error_nao_grava_nenhuma_pendencia(self):
+        with mock.patch.object(main, "_save_memory_node", side_effect=RuntimeError("boom")):
+            self.salvar_memoria_global("fato qualquer", "fato_isolado")
+
+        self.assertNotIn("pending_confirmations", self.session)
+
+
+class TestTelegramResolverConflitoMemoriaReal(unittest.TestCase):
+    """Cobre a DELEGAÇÃO do closure novo `resolver_conflito_memoria`
+    (motor Telegram) para `tools.telegram_extended.execute` -- a lógica de
+    resolução em si já é testada em
+    test_telegram_extended.py::TestResolverConflitoMemoriaIdempotente --
+    e, desde a P06 sub-entrega 3/N, a limpeza de
+    `session["pending_confirmations"]["memoria_conflito"]` quando este
+    caminho alternativo por ferramenta resolve o MESMO conflito que o
+    botão inline (`confirm_memoria_manter`/`confirm_memoria_substituir`,
+    telegram_callbacks_confirmacoes.py) também resolveria -- achado real
+    de revisão adversarial independente desta sub-entrega: sem essa
+    limpeza, a pendência ficava órfã e o teclado reaparecia para um
+    conflito já resolvido."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.session = {"chat_id": "123456789"}
         arvore = ast.parse(inspect.getsource(telegram_message_tools.build_telegram_tool_closures))
         no = next(
             n for n in arvore.body[0].body
             if isinstance(n, ast.FunctionDef) and n.name == "resolver_conflito_memoria"
         )
         modulo = ast.Module(body=[no], type_ignores=[])
-        namespace = {"db": self.db}
+        namespace = {"db": self.db, "session": self.session, "json": json}
         exec(
             compile(ast.fix_missing_locations(modulo), "<closure-resolver-conflito-memoria-telegram-real>", "exec"),
             namespace,
@@ -205,8 +345,16 @@ class TestTelegramResolverConflitoMemoriaReal(unittest.TestCase):
         self.assertEqual(json.loads(resultado)["status"], "resolved")
 
     def test_argumentos_opcionais_chegam_nos_slots(self):
+        # "updated" (nunca "resolved") é o status real que
+        # `tools/telegram_extended.py::execute` devolve para
+        # "substituir_pelo_novo" -- propaga de
+        # `main._save_memory_node(force_update_id=...)`. Usar o status
+        # real aqui (em vez do "resolved" de "manter_existente") é o que
+        # expôs o achado da 2ª rodada de revisão adversarial coberto em
+        # `test_resolve_substituir_pelo_novo_com_status_updated_limpa_pending_confirmations`
+        # abaixo -- este teste aqui continua focado só nos slots.
         with mock.patch("tools.telegram_extended.execute") as mock_execute:
-            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "replaced_existing"})
+            mock_execute.return_value = json.dumps({"status": "updated", "decision": "replaced_existing"})
             self.resolver_conflito_memoria(
                 "mem-2", "substituir_pelo_novo", fato_atualizado="fato corrigido", categoria="preferencia",
             )
@@ -221,6 +369,96 @@ class TestTelegramResolverConflitoMemoriaReal(unittest.TestCase):
             },
             self.db,
         )
+
+    def test_resolve_a_mesma_pendencia_do_botao_limpa_pending_confirmations(self):
+        """Achado real de revisão adversarial independente desta
+        sub-entrega: se este caminho alternativo por ferramenta resolver o
+        MESMO conflito que `salvar_memoria_global` registrou em
+        `session["pending_confirmations"]["memoria_conflito"]`, a
+        pendência não pode ficar órfã -- senão o teclado inline
+        (`_CONFIRM_MEMORIA_KEYBOARD`) continuaria aparecendo nas respostas
+        seguintes, oferecendo um botão para um conflito já resolvido."""
+        self.session["pending_confirmations"] = {
+            "memoria_conflito": {"memory_id": "mem-1", "fato_atualizado": "x", "categoria": "fato_isolado"}
+        }
+        self.session["_pending_confirm_type"] = "memoria_conflito"
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "kept_existing"})
+            self.resolver_conflito_memoria("mem-1", "manter_existente")
+
+        self.assertNotIn("memoria_conflito", self.session.get("pending_confirmations", {}))
+        # Não usa .pop(...) de propósito (ver comentário do closure): o
+        # pipeline de telegram_handlers_core.py só sincroniza
+        # `_pending_confirm_type` de volta para a sessão relida do
+        # Firestore quando a chave CONTINUA presente em `session` -- aqui
+        # ela deve existir, com valor None, não ter sido removida.
+        self.assertIn("_pending_confirm_type", self.session)
+        self.assertIsNone(self.session["_pending_confirm_type"])
+
+    def test_resolve_substituir_pelo_novo_com_status_updated_limpa_pending_confirmations(self):
+        """Achado real de uma 2ª rodada de revisão adversarial
+        independente: a 1ª versão deste fix só reconhecia
+        `status == "resolved"` como sucesso, mas
+        `tools/telegram_extended.py::execute("resolver_conflito_memoria",
+        {"decisao": "substituir_pelo_novo", ...}, db)` nunca devolve
+        "resolved" -- propaga o resultado de
+        `main._save_memory_node(force_update_id=...)`, cujo status de
+        sucesso é "updated" (ver main.py). A limpeza da pendência NUNCA
+        disparava para "substituir_pelo_novo" até este teste existir."""
+        self.session["pending_confirmations"] = {
+            "memoria_conflito": {"memory_id": "mem-1", "fato_atualizado": "x", "categoria": "fato_isolado"}
+        }
+        self.session["_pending_confirm_type"] = "memoria_conflito"
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({
+                "status": "updated", "memory_id": "mem-1", "decision": "replaced_existing",
+            })
+            self.resolver_conflito_memoria("mem-1", "substituir_pelo_novo", fato_atualizado="novo texto")
+
+        self.assertNotIn("memoria_conflito", self.session.get("pending_confirmations", {}))
+        self.assertIn("_pending_confirm_type", self.session)
+        self.assertIsNone(self.session["_pending_confirm_type"])
+
+    def test_resolve_memoria_id_diferente_do_pendente_nao_limpa_a_pendencia(self):
+        """Dois conflitos pendentes "ao mesmo tempo" (hipotético, mas não
+        impossível) não devem se apagar um ao outro -- só o `memoria_id`
+        que de fato bate com o resolvido é limpo."""
+        self.session["pending_confirmations"] = {
+            "memoria_conflito": {"memory_id": "mem-DIFERENTE", "fato_atualizado": "x", "categoria": "fato_isolado"}
+        }
+        self.session["_pending_confirm_type"] = "memoria_conflito"
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "kept_existing"})
+            self.resolver_conflito_memoria("mem-1", "manter_existente")
+
+        self.assertIn("memoria_conflito", self.session["pending_confirmations"])
+        self.assertEqual(self.session["_pending_confirm_type"], "memoria_conflito")
+
+    def test_resultado_error_de_execute_nao_limpa_a_pendencia(self):
+        """Só um "resolved" de verdade limpa a pendência -- um "error"
+        (ex.: decisão inválida, memoria_id inexistente) não deve apagar o
+        rascunho que o botão ainda pode resolver depois."""
+        self.session["pending_confirmations"] = {
+            "memoria_conflito": {"memory_id": "mem-1", "fato_atualizado": "x", "categoria": "fato_isolado"}
+        }
+        self.session["_pending_confirm_type"] = "memoria_conflito"
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "error", "reason": "memory_not_found"})
+            self.resolver_conflito_memoria("mem-1", "manter_existente")
+
+        self.assertIn("memoria_conflito", self.session["pending_confirmations"])
+        self.assertEqual(self.session["_pending_confirm_type"], "memoria_conflito")
+
+    def test_sem_pendencia_ativa_nao_lanca_e_devolve_resultado_normal(self):
+        """Chamado sem nenhuma pendência na sessão (ex.: um cliente MCP,
+        sem session["pending_confirmations"]) -- não deve lançar nem
+        alterar nada, só devolver o resultado de `execute` normalmente."""
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "kept_existing"})
+            resultado = self.resolver_conflito_memoria("mem-1", "manter_existente")
+
+        self.assertEqual(json.loads(resultado)["status"], "resolved")
+        self.assertNotIn("pending_confirmations", self.session)
 
 
 class TestTelegramMemoriaClosuresRegistradas(unittest.TestCase):
