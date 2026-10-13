@@ -52,6 +52,7 @@ from gemini_cost_controls import (
     embed_content_logged,
     generate_content_logged,
 )
+from autonomy.context import RESUMO_DERIVADO
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -1075,6 +1076,17 @@ Responda APENAS com uma das opções acima, sem mais texto."""
         "resumo": summary[:600],
         "data_criacao": now,
         "data_atualizacao": now,
+        # P06 sub-entrega 3/N (docs/plano-hermes-autonomo-2026-09-06.md,
+        # pacote P06, passo 8 -- só a metade "nó inédito"; ver
+        # autonomy/context.py): o resumo cristalizado vem do diário da
+        # tarefa, resumido pela LLM em _build_clean_diary/_derive_node_title,
+        # nunca de uma afirmação literal do usuário -- RESUMO_DERIVADO, não
+        # DECLARACAO_HUMANA/INFERENCIA_AGENTE. O caminho de ANEXAR a um nó já
+        # existente (acima) não grava nada aqui de propósito: não cria
+        # documento novo, e sobrescrever a proveniência original de um nó
+        # existente a cada tarefa anexada misturaria a origem do nó com a da
+        # enésima tarefa que só contribuiu para o centróide.
+        "origem_fato": RESUMO_DERIVADO,
     })
     print(f"[KG Fase2] Nó inédito criado: {new_id}")
     return new_id, 1.0
@@ -2623,7 +2635,7 @@ def get_artefato_raw_text(req: https_fn.CallableRequest):
         return {
             "texto_bruto": "",
             "truncated": False,
-            "aviso": "Este artefato foi indexado antes da ativação do Raio-X. Reprocesse para disponibilizar o texto bruto.",
+            "aviso": "Este artefato foi indexado antes da ativação do Raio-X. Reprocese para disponibilizar o texto bruto.",
         }
 
     truncated = len(texto) > ARTEFATO_CHAR_CAP
