@@ -14789,7 +14789,7 @@ from morning_summary import gerar_resumo_matinal, gerarResumoMatinal
 
 # Import monthly recurring actions job
 from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
-from historico_financeiro import fechar_mes_financeiro as fechar_mes_financeiro_agendado  # noqa: F401
+from historico_financeiro import fechar_mes_financeiro  # noqa: F401 — rotina agendada (dia 10)
 
 # Import attention queue action detector job
 from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detectar_atencao_saude
