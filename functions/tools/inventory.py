@@ -1139,6 +1139,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="regra com ID determinístico pelo padrão normalizado: definir de novo sobrescreve; remover grava "
         "ativo=false (desliga também a regra padrão do código com o mesmo padrão) e definir de novo religa.",
     ),
+    "importar_contracheque": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o contracheque gravado e confere rubricas x totais impressos",
+        rede_servico="Google Drive (download) e Gemini (leitura do PDF)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="financeiro pessoal (sem CPF, matrícula nem conta)",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="um documento por mês em contracheques/{YYYY-MM}; reimportar o mesmo mês substitui.",
+    ),
     "importar_fatura_cartao": ToolInventoryEntry(
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "a própria tool relê cabeçalho e lançamentos gravados e só devolve sucesso se baterem",

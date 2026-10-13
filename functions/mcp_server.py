@@ -204,6 +204,8 @@ _TOOLS_LONGAS: set[str] = {
     # Fatura em PDF passa pelo Gemini (dezenas de segundos); o CSV e instantaneo,
     # mas a tool e uma so.
     "importar_fatura_cartao",
+    # Contracheque em PDF: leitura pelo Gemini.
+    "importar_contracheque",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60

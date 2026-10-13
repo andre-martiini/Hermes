@@ -132,10 +132,26 @@ def montar_mes(db, competencia: str) -> dict:
             "por_natureza": fatura.get("por_natureza"),
         },
         "custo_ia": custo_ia(db, competencia),
+        "contracheque": _contracheque_do_mes(db, competencia),
+        "saude": _saude(db, competencia),
         "reserva_emergencia": {"atual": _num(config.get("emergencyReserveCurrent")),
                                "alvo": _num(config.get("emergencyReserveTarget"))},
         "metas": metas,
     }
+
+
+def _contracheque_do_mes(db, competencia: str) -> dict | None:
+    """Totais do contracheque deste mes (o salario cai no mes seguinte)."""
+    registro = db.collection("contracheques").document(competencia).get().to_dict()
+    if not registro:
+        return None
+    return {k: registro.get(k) for k in ("bruto", "desconto", "liquido", "per_capita_saude", "confere")}
+
+
+def _saude(db, competencia: str) -> dict | None:
+    import contracheque
+
+    return contracheque.saude_liquida(db, competencia)
 
 
 def _resumo_versao(retrato: dict) -> dict:

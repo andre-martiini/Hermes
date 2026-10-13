@@ -1,0 +1,14 @@
+{
+  "name": "importar_contracheque",
+  "description": "Importa o contracheque do Ifes (PDF do Sigepe no Drive): rendimentos e descontos por rubrica, bruto, desconto, líquido e o per capita de saúde suplementar. Confere a soma das rubricas com os totais impressos e compara o líquido com a 'Remuneração IFES' lançada no mês seguinte. Não grava nome, CPF, matrícula nem conta. Reimportar o mesmo mês substitui. Roda como job: busque o resultado com consultar_job",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "drive_file_id": {
+        "type": "string",
+        "description": "ID do PDF no Drive, ou o link drive.google.com/file/d/<id>/view"
+      }
+    },
+    "required": ["drive_file_id"]
+  }
+}
