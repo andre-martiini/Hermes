@@ -96,24 +96,33 @@ algo a assumir por semelhança com os outros dois canais.
 
 NÃO tocado por esta sub-entrega, registrado como pendência:
 - `knowledge_graph.py` (`_crystallize_task` e o fluxo de nós conceituais de
-  procedimento): RESOLVIDO (P06 sub-entrega 3/N) só para a CRIAÇÃO de nó
-  inédito -- `_dual_pass_find_or_create_node` agora grava
-  `origem_fato=RESUMO_DERIVADO` no bloco "Cria nó inédito" (o resumo do
-  diário da tarefa, gerado pela LLM em `_crystallize_task`, é por definição
-  um resumo derivado -- mesma categoria, sem ambiguidade a resolver). O
-  caminho de ANEXAR a um nó já existente (decisão "ANEXAR:<id>" do
-  Dual-Pass) continua sem nenhuma escrita no Firestore, então não toca na
-  proveniência que o nó anexado já tinha -- decisão deliberada, mesmo
-  espírito de "só o caminho de criação grava proveniência" já usado em
-  `main._save_memory_node`. A FORMA do documento (sem `tipo`/`texto_memoria`;
-  nós de procedimento, não de fato) continua diferente da de
-  `_save_memory_node`, e o mapa de POPs em si (passo 8 do pacote) continua
-  fora do escopo -- essa sub-entrega só adicionou a chave de proveniência ao
-  dict já existente.
+  procedimento): escreve em `knowledge_nodes` com uma FORMA DIFERENTE de
+  documento (sem `tipo`/`texto_memoria`; nós de procedimento, não de fato) e
+  corresponde ao passo 8 do pacote (mapa de POPs), não ao passo 1. Marcar
+  esses nós como `resumo_derivado` é trabalho de uma sub-entrega própria que
+  decida a forma final desses nós.
 - "Validade" (a segunda metade do passo 1) corresponde ao passo 4 do pacote
   ("Modelar fatos temporais e relação supersedes") e não é modelada aqui --
   `memoria_status` já existe (sempre "ativa" hoje, nunca lido nem transicionado
   em nenhum lugar do código) e fica como está, sem colisão com este módulo.
+
+## Nota de acompanhamento (P06 sub-entrega 3/N, 13/10/2026)
+
+A pendência de `knowledge_graph.py` acima (bloco "NÃO tocado") foi
+PARCIALMENTE resolvida por esta sub-entrega: `_dual_pass_find_or_create_node`
+agora grava `origem_fato=RESUMO_DERIVADO` no bloco "Cria nó inédito" (o
+resumo do diário da tarefa, gerado pela LLM em `_crystallize_task`, é por
+definição um resumo derivado -- mesma categoria, sem ambiguidade a
+resolver). O caminho de ANEXAR a um nó já existente (decisão "ANEXAR:<id>"
+do Dual-Pass) continua sem nenhuma escrita no Firestore, então não toca na
+proveniência que o nó anexado já tinha -- decisão deliberada, mesmo
+espírito de "só o caminho de criação grava proveniência" já usado em
+`main._save_memory_node`. A FORMA do documento (sem `tipo`/`texto_memoria`;
+nós de procedimento, não de fato) continua diferente da de
+`_save_memory_node`, e o mapa de POPs em si (passo 8 do pacote) continua
+fora do escopo -- esta sub-entrega só adicionou a chave de proveniência ao
+dict já existente no bloco de criação. Ver `docs/autonomia/execucao.md`,
+bloco "P06 sub-entrega 3/N", para o relato completo.
 """
 
 from __future__ import annotations
