@@ -133,6 +133,7 @@ _CATALOG: dict[str, str] = {
     # ja esta comprometido nos meses seguintes.
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
+    "importar_contracheque": "Importa o contracheque do Ifes (PDF no Drive) por rubrica, com o per capita de saude, sem dados pessoais",
     "importar_fatura_cartao": "Importa a fatura do cartao de um arquivo no Drive (PDF do Elo ou CSV da XP) e acerta a conta do mes",
     "consultar_historico_financeiro": "Historico mensal do financeiro (renda por fonte, contas, cartao por categoria, saldo, reserva) de varios meses numa chamada",
     "fechar_mes_financeiro": "Congela o retrato de um mes financeiro encerrado; refazer exige retificacao com motivo",
@@ -285,6 +286,7 @@ _ASYNC_TOOLS: set[str] = {
     "editar_imagem",
     # Fatura em PDF: leitura pelo Gemini.
     "importar_fatura_cartao",
+    "importar_contracheque",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -338,6 +340,7 @@ _VOICE_EXCLUDED: set[str] = {
     "video_cancelar",
     # Importar fatura parte de um arquivo do Drive, que nao se dita.
     "importar_fatura_cartao",
+    "importar_contracheque",
     # Valor de dinheiro por voz nao (mesmo motivo das escritas de investimento).
     "atualizar_reserva_emergencia",
 }

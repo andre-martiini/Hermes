@@ -2161,6 +2161,30 @@ def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
     return projetar_parcelas(ctx.db, meses=int(args.get("meses") or 12))
 
 
+def importar_contracheque(ctx: ToolContext, args: dict):
+    """Contracheque do Ifes (PDF no Drive) por rubrica, sem dados pessoais."""
+    from datetime import datetime, timezone
+
+    import contracheque
+    from tools.anexar_arquivo import _do_drive, id_do_drive
+
+    try:
+        dados, nome = _do_drive({"drive_file_id": args.get("drive_file_id")})
+        if not dados.lstrip().startswith(b"%PDF-"):
+            return {"erro": f"'{nome}' nao e PDF."}
+        from google.genai import types
+
+        registro = contracheque.normalizar(contracheque.extrair(ctx.genai_client, types, dados))
+        resultado = contracheque.gravar(ctx.db, registro, origem={
+            "arquivo": nome, "drive_file_id": id_do_drive(args.get("drive_file_id")),
+            "origem": "arquivo", "registrado_em": datetime.now(timezone.utc).isoformat()})
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Contracheque nao confirmado: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
 def importar_fatura_cartao(ctx: ToolContext, args: dict):
     """Fatura do cartao a partir de um arquivo no Drive (PDF do Elo, CSV da XP)."""
     from datetime import datetime, timezone
@@ -3089,6 +3113,7 @@ _HANDLERS: dict = {
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
     "importar_fatura_cartao": importar_fatura_cartao,
+    "importar_contracheque": importar_contracheque,
     "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
     "atualizar_reserva_emergencia": atualizar_reserva_emergencia,
     "consultar_rendas_servico": consultar_rendas_servico,
