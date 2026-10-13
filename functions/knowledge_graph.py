@@ -1078,9 +1078,10 @@ Responda APENAS com uma das opções acima, sem mais texto."""
         "data_atualizacao": now,
         # P06 sub-entrega 3/N (docs/plano-hermes-autonomo-2026-09-06.md,
         # pacote P06, passo 8 -- só a metade "nó inédito"; ver
-        # autonomy/context.py): o resumo cristalizado vem do diário da
-        # tarefa, resumido pela LLM em _build_clean_diary/_derive_node_title,
-        # nunca de uma afirmação literal do usuário -- RESUMO_DERIVADO, não
+        # autonomy/context.py): este `summary` é o resumo que _crystallize_task
+        # gera via LLM (summary_prompt/summary_response, acima, a partir do
+        # diário limpo de _build_clean_diary) -- nunca de uma afirmação
+        # literal do usuário -- RESUMO_DERIVADO, não
         # DECLARACAO_HUMANA/INFERENCIA_AGENTE. O caminho de ANEXAR a um nó já
         # existente (acima) não grava nada aqui de propósito: não cria
         # documento novo, e sobrescrever a proveniência original de um nó
