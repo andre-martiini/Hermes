@@ -40,10 +40,21 @@ nesse valor pendente. `TestTelegramConflitoDeMemoriaPersistenteEntreTurnos`
 cobre o ciclo completo (conflito -> pendência gravada -> resolução sem
 repassar o id -> pendência limpa), e `TestTelegramResolverConflitoMemoriaReal`
 foi estendida com o mesmo fallback isoladamente. 3 rodadas de revisão
-adversarial encontraram, cada uma, um achado real sobre essa mesma 3/N
-(pendência apagada mesmo em falha; "ignored" tratado como sucesso;
+adversarial interna encontraram, cada uma, um achado real sobre essa mesma
+3/N (pendência apagada mesmo em falha; "ignored" tratado como sucesso;
 corrupção com dois conflitos concorrentes) -- os testes correspondentes
-estão anotados com qual rodada os motivou.
+estão anotados com qual rodada os motivou. Uma 4ª rodada interna não achou
+nada (critério de parada atingido), mas o revisor automático Codex, na
+própria PR aberta, encontrou mais 1 achado real (não coberto pelas 4
+rodadas internas): `categoria="fato_isolado"` passado explicitamente pelo
+modelo era indistinguível do valor omitido (mesmo valor do default
+antigo) e podia ser sobrescrito sem necessidade pelo fallback de
+pendente -- corrigido trocando o default do parâmetro para `""` (mesmo
+sentinela de "omitido" de `fato_atualizado`) e só aplicando o default real
+"fato_isolado" depois do fallback; `test_categoria_explicita_fato_isolado_prevalece_sobre_pendente`
+e `test_categoria_omitida_sem_pendente_cai_no_default_fato_isolado` cobrem
+esse achado, e uma 5ª rodada de revisão adversarial interna (focada só
+nesse fix) não achou nada de novo.
 """
 
 import ast
@@ -370,6 +381,61 @@ class TestTelegramResolverConflitoMemoriaReal(unittest.TestCase):
         # memoria_id explícito != pendente -- a pendência (de um OUTRO
         # conflito) não é apagada; pode ainda estar à espera de resolução.
         self.assertIn("memoria_conflito", self.session["pending_confirmations"])
+
+    def test_categoria_explicita_fato_isolado_prevalece_sobre_pendente(self):
+        """Achado real do revisor automático Codex na própria PR desta
+        sub-entrega (não de uma das 4 rodadas de revisão adversarial
+        interna, que já tinham encerrado quando o comentário chegou):
+        `categoria` tinha default "fato_isolado" (igual ao valor literal),
+        então um valor explícito do modelo igual ao default era
+        indistinguível de uma omissão -- o fallback de pendente sobrescrevia
+        uma escolha explícita do modelo sem necessidade. Aqui o pendente
+        (mesmo memoria_id) tem categoria "preferencia", mas o modelo passa
+        "fato_isolado" explicitamente -- deve prevalecer, nunca ser trocado
+        pelo "preferencia" do pendente."""
+        self.session["pending_confirmations"] = {
+            "memoria_conflito": {"memoria_id": "mem-1", "fato": "x", "categoria": "preferencia"},
+        }
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "replaced_existing"})
+            self.resolver_conflito_memoria(
+                decisao="substituir_pelo_novo",
+                memoria_id="mem-1",
+                fato_atualizado="fato novo",
+                categoria="fato_isolado",
+            )
+
+        mock_execute.assert_called_once_with(
+            "resolver_conflito_memoria",
+            {
+                "memoria_id": "mem-1",
+                "decisao": "substituir_pelo_novo",
+                "fato_atualizado": "fato novo",
+                "categoria": "fato_isolado",
+            },
+            self.db,
+        )
+
+    def test_categoria_omitida_sem_pendente_cai_no_default_fato_isolado(self):
+        """Sem `categoria` e sem pendente (ou pendente sem campo
+        `categoria`), o comportamento de sempre se mantém: default
+        "fato_isolado" -- o novo sentinela "" só troca COMO o default é
+        aplicado (depois do fallback de pendente, não antes), nunca o
+        valor final num caso sem pendente."""
+        with mock.patch("tools.telegram_extended.execute") as mock_execute:
+            mock_execute.return_value = json.dumps({"status": "resolved", "decision": "kept_existing"})
+            self.resolver_conflito_memoria(decisao="manter_existente", memoria_id="mem-1")
+
+        mock_execute.assert_called_once_with(
+            "resolver_conflito_memoria",
+            {
+                "memoria_id": "mem-1",
+                "decisao": "manter_existente",
+                "fato_atualizado": "",
+                "categoria": "fato_isolado",
+            },
+            self.db,
+        )
 
     def test_sem_memoria_id_e_sem_pendente_devolve_erro_sem_chamar_execute(self):
         """Sem fallback disponível, a chamada não pode seguir para
