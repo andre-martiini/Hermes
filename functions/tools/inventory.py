@@ -1106,6 +1106,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — projeção determinística sobre dados já gravados", dados_sensiveis_categoria="financeiro",
     ),
+    "consultar_historico_financeiro": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — mês fechado vem congelado de financeiro_historico; o resto é calculado dos dados gravados",
+        dados_sensiveis_categoria="financeiro pessoal",
+    ),
+    "fechar_mes_financeiro": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o retrato gravado e só devolve sucesso se a versão bater",
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="mês já fechado não muda sem retificar=true e motivo; a retificação guarda os totais da versão anterior.",
+    ),
     "consultar_rendas_servico": ToolInventoryEntry(
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — resumo determinístico de servicos e income_entries já gravados",

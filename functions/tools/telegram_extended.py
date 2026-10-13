@@ -1000,16 +1000,12 @@ def execute(tool_name: str, slots: dict, db) -> str:
         return json.dumps({"success": True, "person_id": pessoa_ref.id}, ensure_ascii=False)
 
     if tool_name == "consultar_financas_v2":
-        mes = slots.get("mes")
-        ano = slots.get("ano")
-        now = datetime.now()
-        if mes is None:
-            mes = now.month - 1  # JS month is 0-indexed
-            if mes < 0:
-                mes = 11
-                ano = (ano or now.year) - 1
-        if ano is None:
-            ano = now.year
+        import competencia as _competencia
+
+        try:
+            mes, ano = _competencia.resolver(slots)  # mes 0-11, como esta gravado
+        except ValueError as exc:
+            return "ERRO|" + json.dumps({"erro": str(exc)}, ensure_ascii=False)
 
         # Fetch data
         bills_docs = db.collection("fixed_bills").where("month", "==", mes).where("year", "==", ano).stream()
@@ -1097,7 +1093,9 @@ def execute(tool_name: str, slots: dict, db) -> str:
         goals = aquisicoes["metas"]
 
         summary = {
-            "periodo": {"mes": int(mes), "ano": int(ano)},
+            # `mes` segue 0-11 (como gravado); `competencia` e `mes_nome` evitam
+            # ler setembro como agosto, como aconteceu em 01/10/2026.
+            "periodo": _competencia.periodo(mes, ano),
             "resumo": {
                 "total_renda": total_income,
                 "renda_recebida": total_received_income,
@@ -1138,11 +1136,13 @@ def execute(tool_name: str, slots: dict, db) -> str:
         valor = float(slots.get("valor") or 0)
         categoria = str(slots.get("categoria") or "Geral").strip()
         
+        import competencia as _competencia
+
         now = datetime.now()
-        mes = slots.get("mes")
-        if mes is None:
-            mes = now.month - 1
-        ano = slots.get("ano") or now.year
+        try:
+            mes, ano = _competencia.resolver(slots, now)
+        except ValueError as exc:
+            return "ERRO|" + json.dumps({"success": False, "reason": str(exc)}, ensure_ascii=False)
         data_iso = slots.get("data") or now.isoformat()
 
         if tipo == "renda":
