@@ -825,6 +825,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 "area_tematica": area_tematica,
                 "titulo_procedimento": titulo_procedimento,
                 "correcao_descrita": correcao_descrita,
+                "novo_conteudo_proposto": novo_conteudo_proposto,
                 "justificativa_usuario": justificativa,
                 "status": "pendente",
                 "data_criacao": firestore.SERVER_TIMESTAMP,
