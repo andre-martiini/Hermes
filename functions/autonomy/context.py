@@ -94,13 +94,29 @@ afirmação literal do usuário, então adicionar esse parâmetro extra é
 trabalho de uma sub-entrega própria que faça essa auditoria primeiro, não
 algo a assumir por semelhança com os outros dois canais.
 
+## Sub-entrega seguinte (P06 sub-entrega 3/N)
+
+`knowledge_graph.py::_dual_pass_find_or_create_node` (passo 8 do pacote,
+mapa de POPs/nós conceituais de procedimento) passou a gravar `origem_fato`
+no caminho de CRIAR um nó inédito -- sempre `RESUMO_DERIVADO`, nunca
+`DECLARACAO_HUMANA`/`INFERENCIA_AGENTE`: o conteúdo gravado é o resumo do
+diário da tarefa, já resumido pela LLM (`_build_clean_diary` +
+`_derive_node_title`), não uma afirmação literal do usuário nem uma
+inferência da LLM sobre o que o usuário quis dizer -- os dois eixos que
+`origem_fato_para_canal_de_salvar_memoria`/`origem_fato_para_salvar_memoria`
+(acima) resolvem para `salvar_memoria_global` não se aplicam aqui, por isso
+este chamador não usa nenhuma das duas funções, só a constante direto.
+
+Essa sub-entrega resolve SÓ a metade "nó inédito" da pendência abaixo. O
+caminho de ANEXAR a um nó já existente (mesma função, candidato aceito pela
+LLM) continua sem gravar nem sobrescrever `origem_fato` -- de propósito: não
+cria documento novo, e sobrescrever a proveniência original do nó a cada
+tarefa que só contribuiu para o centróide misturaria a origem do nó (de
+quando ele foi criado) com a da enésima tarefa anexada depois. `_crystallize_task`
+(o restante do fluxo de nós conceituais de procedimento que usa este
+resultado) não foi tocado.
+
 NÃO tocado por esta sub-entrega, registrado como pendência:
-- `knowledge_graph.py` (`_crystallize_task` e o fluxo de nós conceituais de
-  procedimento): escreve em `knowledge_nodes` com uma FORMA DIFERENTE de
-  documento (sem `tipo`/`texto_memoria`; nós de procedimento, não de fato) e
-  corresponde ao passo 8 do pacote (mapa de POPs), não ao passo 1. Marcar
-  esses nós como `resumo_derivado` é trabalho de uma sub-entrega própria que
-  decida a forma final desses nós.
 - "Validade" (a segunda metade do passo 1) corresponde ao passo 4 do pacote
   ("Modelar fatos temporais e relação supersedes") e não é modelada aqui --
   `memoria_status` já existe (sempre "ativa" hoje, nunca lido nem transicionado
