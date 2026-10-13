@@ -6,9 +6,12 @@ validade aos novos fatos; ler memória antiga com origem legacy_unknown."
 Lógica pura -- sem I/O, mesmo padrão incremental usado para abrir P04
 (`autonomy/requests.py`) e P05 (`autonomy/events.py`): vocabulário e regra de
 leitura primeiro, testável sem Firestore. Este módulo não decide ONDE o
-campo é escrito (isso é `main._save_memory_node`) nem quem consome a
-proveniência para responder (isso é `obter_contexto_operacional`/
-`consultar_memoria_contextual`, passo 6 do pacote, ainda não implementados).
+campo é escrito (isso é `main._save_memory_node` e, desde a sub-entrega
+3/N abaixo, também `knowledge_graph.py::_dual_pass_find_or_create_node` --
+este último grava a constante direto, sem passar por nenhuma função deste
+módulo) nem quem consome a proveniência para responder (isso é
+`obter_contexto_operacional`/`consultar_memoria_contextual`, passo 6 do
+pacote, ainda não implementados).
 
 ## Taxonomia
 
