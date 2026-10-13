@@ -2635,7 +2635,7 @@ def get_artefato_raw_text(req: https_fn.CallableRequest):
         return {
             "texto_bruto": "",
             "truncated": False,
-            "aviso": "Este artefato foi indexado antes da ativação do Raio-X. Reprocese para disponibilizar o texto bruto.",
+            "aviso": "Este artefato foi indexado antes da ativação do Raio-X. Reprocesse para disponibilizar o texto bruto.",
         }
 
     truncated = len(texto) > ARTEFATO_CHAR_CAP
