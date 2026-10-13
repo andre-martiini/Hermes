@@ -1,6 +1,6 @@
 {
   "name": "consultar_historico_financeiro",
-  "description": "Histórico mensal do financeiro, vários meses numa chamada: renda total e por fonte (Ifes, serviços, outras), contas e aportes, saldo previsto e realizado, gasto no cartão por categoria e natureza, reserva e metas. 'comparativo' traz uma linha por mês para comparar; 'meses' traz o retrato completo. Mês fechado vem congelado; mês não fechado é calculado na hora. Somente leitura",
+  "description": "Histórico mensal do financeiro, vários meses numa chamada: renda total e por fonte (Ifes, serviços, outras), contas e aportes, saldo previsto e realizado, gasto no cartão por categoria e natureza, reserva e metas. 'comparativo' traz uma linha por mês para comparar; 'meses' traz o retrato completo. Mês fechado vem congelado; mês não fechado é calculado na hora. Somente leitura. Cada mês traz também custo_ia: gasto em IA e software no cartão por fornecedor, com a meta do Google Cloud (R$ 100/mês)",
   "parameters": {
     "type": "object",
     "properties": {

@@ -66,8 +66,8 @@ class _Query:
         self._banco, self._colecao, self._filtros = banco, colecao, filtros
 
     def where(self, campo, op, valor):
-        assert op == "=="
-        return _Query(self._banco, self._colecao, self._filtros + ((campo, valor),))
+        assert op in ("==", ">=")
+        return _Query(self._banco, self._colecao, self._filtros + ((campo, op, valor),))
 
     def limit(self, _n):
         return self
@@ -79,8 +79,16 @@ class _Query:
 
     def stream(self):
         tabela = self._banco.get(self._colecao, {})
-        return [_Snap(_Ref(self._banco, self._colecao, i), d) for i, d in list(tabela.items())
-                if all(d.get(c) == v for c, v in self._filtros)]
+        def passa(d):
+            for campo, op, valor in self._filtros:
+                atual = d.get(campo)
+                if op == "==" and atual != valor:
+                    return False
+                if op == ">=" and str(atual or "") < str(valor):
+                    return False
+            return True
+
+        return [_Snap(_Ref(self._banco, self._colecao, i), d) for i, d in list(tabela.items()) if passa(d)]
 
 
 class _Lote:

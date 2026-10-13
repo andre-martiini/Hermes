@@ -27,6 +27,43 @@ MAX_MESES = 24
 CATEGORIAS_APORTE = ("Poupança", "Investimento")
 FONTES = {"Renda Principal": "ifes", "Serviço Particular": "servicos", "Bolsa": "servicos"}
 
+# Custo de IA e nuvem (item 14): o dono espera a API do Gaspar (Google Cloud)
+# abaixo de R$ 100/mes depois das correcoes de set-out/2026 (R$ 276,83 na fatura
+# de 05/09 e R$ 466,35 na de 05/10).
+META_GOOGLE_CLOUD = 100.0
+_FORNECEDORES_IA = (
+    ("google cloud", "Google Cloud"), ("anthropic", "Anthropic (Claude)"), ("claude", "Anthropic (Claude)"),
+    ("openai", "OpenAI (ChatGPT)"), ("chatgpt", "OpenAI (ChatGPT)"), ("elevenlabs", "ElevenLabs"),
+    ("aqua voice", "Aqua Voice"), ("typesafe", "Typesafe AI"), ("microsoft", "Microsoft"), ("kling", "Kling"),
+)
+
+
+def _fornecedor(estabelecimento: str) -> str:
+    import categorias_cartao
+
+    texto = f" {categorias_cartao.normalizar(estabelecimento)} "
+    for chave, nome in _FORNECEDORES_IA:
+        if f" {chave} " in texto:
+            return nome
+    return str(estabelecimento or "outro").strip()
+
+
+def custo_ia(db, competencia: str) -> dict:
+    """Gasto do mes em IA e software no cartao, por fornecedor, com a meta do Google Cloud."""
+    import fatura_cartao
+
+    fatura = fatura_cartao.consultar(db, competencia=competencia, categoria="IA e software", limite=2000)
+    por_fornecedor: dict[str, float] = {}
+    for item in fatura.get("lancamentos") or []:
+        nome = _fornecedor(item.get("estabelecimento", ""))
+        por_fornecedor[nome] = round(por_fornecedor.get(nome, 0.0) + _num(item.get("valor")), 2)
+    google = por_fornecedor.get("Google Cloud", 0.0)
+    return {
+        "total": round(sum(por_fornecedor.values()), 2),
+        "por_fornecedor": dict(sorted(por_fornecedor.items(), key=lambda kv: -kv[1])),
+        "google_cloud": {"valor": google, "meta": META_GOOGLE_CLOUD, "acima_da_meta": google > META_GOOGLE_CLOUD},
+    }
+
 
 def _num(valor) -> float:
     try:
@@ -59,8 +96,10 @@ def montar_mes(db, competencia: str) -> dict:
     mes0, ano = comp.ler(competencia)
     contas = [s.to_dict() or {} for s in db.collection("fixed_bills")
               .where("month", "==", mes0).where("year", "==", ano).stream()]
-    rendas = [s.to_dict() or {} for s in db.collection("income_entries")
-              .where("month", "==", mes0).where("year", "==", ano).where("status", "==", "active").stream()]
+    # Mesma regra da tela e de consultar_financas_v2: so a renda excluida sai.
+    rendas = [d for d in (s.to_dict() or {} for s in db.collection("income_entries")
+                          .where("month", "==", mes0).where("year", "==", ano).stream())
+              if d.get("status") != "deleted"]
 
     por_fonte = {"ifes": 0.0, "servicos": 0.0, "outras": 0.0}
     for r in rendas:
@@ -92,6 +131,7 @@ def montar_mes(db, competencia: str) -> dict:
                               for c in fatura.get("por_categoria") or []],
             "por_natureza": fatura.get("por_natureza"),
         },
+        "custo_ia": custo_ia(db, competencia),
         "reserva_emergencia": {"atual": _num(config.get("emergencyReserveCurrent")),
                                "alvo": _num(config.get("emergencyReserveTarget"))},
         "metas": metas,
@@ -155,6 +195,8 @@ def consultar(db, mes_inicio: str, mes_fim: str, *, hoje: date) -> dict:
     comparativo = [{"competencia": m["periodo"]["competencia"], "mes_nome": m["periodo"]["mes_nome"],
                     "renda": m["renda"]["total"], "contas": m["contas"]["total"],
                     "saldo": m["saldo"]["previsto"], "cartao": m["cartao"]["total_gasto"],
+                    # Retrato congelado antes do item 14 nao tem custo_ia.
+                    "custo_ia": (m.get("custo_ia") or {}).get("total"),
                     "situacao": m["situacao"]} for m in meses]
     return {"comparativo": comparativo, "meses": meses}
 
