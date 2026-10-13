@@ -116,11 +116,17 @@ def projetar(contratos_brutos: list[dict], renda_ifes: float, hoje: date, meses:
 
 
 def renda_ifes_atual(db) -> tuple[float, str | None]:
-    """Ultima "Renda Principal" recebida (valor, competencia YYYY-MM)."""
+    """Ultimo salario do Ifes recebido (valor, competencia YYYY-MM).
+
+    Pelo nome do lancamento, nao pela categoria: "Renda Principal" tambem tem
+    diarias, reembolsos e restituicao (ver fontes_renda).
+    """
+    import fontes_renda
+
     melhor = None
-    for snap in db.collection("income_entries").where("category", "==", "Renda Principal").stream():
+    for snap in db.collection("income_entries").stream():
         d = snap.to_dict() or {}
-        if not d.get("isReceived") or d.get("status") == "deleted":
+        if not d.get("isReceived") or d.get("status") == "deleted" or not fontes_renda.e_salario_ifes(d):
             continue
         chave = (int(d.get("year") or 0), int(d.get("month") or 0))
         if melhor is None or chave > melhor[0]:

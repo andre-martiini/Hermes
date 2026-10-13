@@ -110,11 +110,13 @@ def renda_lancada(db, competencia: str) -> tuple[float | None, str]:
     """"Remuneracao IFES" lancada no mes seguinte ao do contracheque (quando o salario cai)."""
     mes0, ano = comp.ler(competencia)
     mes0, ano = (0, ano + 1) if mes0 == 11 else (mes0 + 1, ano)
+    import fontes_renda
+
     total = None
     for snap in (db.collection("income_entries").where("month", "==", mes0)
-                 .where("year", "==", ano).where("category", "==", "Renda Principal").stream()):
+                 .where("year", "==", ano).stream()):
         d = snap.to_dict() or {}
-        if d.get("status") == "deleted":
+        if d.get("status") == "deleted" or not fontes_renda.e_salario_ifes(d):
             continue
         total = round((total or 0.0) + _num(d.get("amount")), 2)
     return total, comp.periodo(mes0, ano)["competencia"]

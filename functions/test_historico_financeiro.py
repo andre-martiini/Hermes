@@ -26,8 +26,8 @@ def _db_setembro():
             "out": {"description": "Fatura Elo", "amount": 3814.14, "month": 9, "year": 2026, "isPaid": True},
         },
         "income_entries": {
-            "ifes": {"amount": 9096.95, "month": 8, "year": 2026, "status": "active", "isReceived": True,
-                     "category": "Renda Principal"},
+            "ifes": {"description": "Remuneração IFES", "amount": 9096.95, "month": 8, "year": 2026,
+                     "status": "active", "isReceived": True, "category": "Renda Principal"},
             "sigex": {"amount": 4500, "month": 8, "year": 2026, "status": "active", "isReceived": True,
                       "category": "Serviço Particular"},
             "apagada": {"amount": 4500, "month": 8, "year": 2026, "status": "deleted", "isReceived": True,

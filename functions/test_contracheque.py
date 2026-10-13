@@ -62,9 +62,13 @@ class TestLeitura(unittest.TestCase):
 def _db():
     return _Db({
         "income_entries": {
-            "fev": {"amount": 8344.66, "month": 1, "year": 2026, "category": "Renda Principal"},
-            "excluida": {"amount": 999, "month": 1, "year": 2026, "category": "Renda Principal",
-                         "status": "deleted"},
+            "fev": {"description": "Remuneração IFES", "amount": 8344.66, "month": 1, "year": 2026,
+                    "category": "Renda Principal"},
+            # Mesma categoria, mas nao e salario (caso real de fev/2026).
+            "diarias": {"description": "Diárias Facto", "amount": 980, "month": 1, "year": 2026,
+                        "category": "Renda Principal"},
+            "excluida": {"description": "Remuneração IFES", "amount": 999, "month": 1, "year": 2026,
+                         "category": "Renda Principal", "status": "deleted"},
         },
         "fixed_bills": {
             "plano": {"description": "Allcare plano de saúde", "amount": 3069.76, "month": 0, "year": 2026},
