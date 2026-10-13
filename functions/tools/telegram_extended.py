@@ -1009,7 +1009,12 @@ def execute(tool_name: str, slots: dict, db) -> str:
 
         # Fetch data
         bills_docs = db.collection("fixed_bills").where("month", "==", mes).where("year", "==", ano).stream()
-        income_docs = db.collection("income_entries").where("month", "==", mes).where("year", "==", ano).where("status", "==", "active").stream()
+        # Renda sem `status` (lancamentos antigos, ex.: fev/2026) e renda valida,
+        # como na tela (index.tsx filtra so `status !== 'deleted'`). Filtrar por
+        # `== "active"` sumia com R$ 14.824,66 de fevereiro.
+        income_docs = [doc for doc in db.collection("income_entries").where("month", "==", mes)
+                       .where("year", "==", ano).stream()
+                       if (doc.to_dict() or {}).get("status") != "deleted"]
         goals_docs = db.collection("finance_goals").stream()
         settings_doc = db.collection("finance_settings").document("config").get()
 

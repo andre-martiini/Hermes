@@ -287,7 +287,7 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
             "competencia": competencia,
             "ano": ano,
             "mes": mes,
-            "data": str(item.get("data") or "").strip() or None,
+            "data": corrigir_ano_da_compra(str(item.get("data") or "").strip() or None, vencimento),
             "estabelecimento": estabelecimento,
             "valor": valor,
             "parcela_atual": _inteiro(item.get("parcela_atual")),
@@ -340,6 +340,70 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
 # Consulta
 # --------------------------------------------------------------------------
 
+def corrigir_ano_da_compra(data: str | None, vencimento: str | None) -> str | None:
+    """A compra nao acontece depois do vencimento da fatura em que e cobrada.
+
+    O prompt manda usar "o ano da competencia" quando o extrato so traz dia e mes,
+    e o modelo erra o ano na virada: na fatura de 05/02/2026, compras de janeiro
+    de 2026 vieram como 2027 e as de dezembro de 2025 como dezembro de 2026 (120
+    lancamentos em out/2026). Volta o ano ate a data ficar antes do vencimento.
+    """
+    if not (data and vencimento and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(vencimento)[:10])):
+        return data
+    venc = str(vencimento)[:10]
+    for _ in range(3):
+        if data <= venc:
+            return data
+        data = f"{int(data[:4]) - 1:04d}{data[4:]}"
+    return data
+
+
+def _vencimentos(db) -> dict[str, str]:
+    return {snap.id: (snap.to_dict() or {}).get("vencimento")
+            for snap in db.collection(COL_FATURAS).stream()}
+
+
+def conciliar(db, competencia: str) -> list[dict]:
+    """Fatura de cada cartao contra a conta "Fatura ..." do mes do vencimento.
+
+    Fecha a conta: fatura bruta = pago + saldo em aberto. A conta do mes guarda o
+    valor cheio da fatura (corrigido pelo PDF) e, quando o Pix a baixou,
+    `valor_pago`; sem `valor_pago`, conta paga vale o proprio valor.
+    """
+    import competencia as _competencia
+
+    mes0, ano = _competencia.ler(competencia)
+    contas = [(snap.id, snap.to_dict() or {}) for snap in db.collection("fixed_bills")
+              .where("month", "==", mes0).where("year", "==", ano).stream()]
+    saida = []
+    for snap in db.collection(COL_FATURAS).where("competencia", "==", competencia).stream():
+        cabecalho = snap.to_dict() or {}
+        cartao = cabecalho.get("cartao") or snap.id[:-8]
+        marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao)
+        total = cabecalho.get("total") or 0.0
+        candidatas = [(i, c) for i, c in contas if marcador in _palavras(c.get("description", ""))]
+        if not candidatas:
+            saida.append({"cartao": cartao, "competencia": competencia, "vencimento": cabecalho.get("vencimento"),
+                          "fatura_total": total, "obrigacao": None, "pago": 0.0,
+                          "saldo_em_aberto": round(total, 2),
+                          "observacao": "nenhuma conta do mes para esta fatura"})
+            continue
+        doc_id, conta = max(candidatas, key=lambda par: float(par[1].get("amount") or 0))
+        valor = float(conta.get("amount") or 0)
+        pago = float(conta.get("valor_pago") or (valor if conta.get("isPaid") else 0))
+        saida.append({
+            "cartao": cartao, "competencia": competencia, "vencimento": cabecalho.get("vencimento"),
+            "fatura_total": round(total, 2),
+            "obrigacao": {"id": doc_id, "descricao": conta.get("description"), "valor": round(valor, 2),
+                          "paga": bool(conta.get("isPaid")), "data_pagamento": conta.get("data_pagamento")},
+            "pago": round(pago, 2),
+            "saldo_em_aberto": round(total - pago, 2),
+            "diferenca_conta_x_fatura": round(valor - total, 2),
+        })
+    return saida
+
+
 def consultar(db, *, competencia: str | None = None, desde: str | None = None,
               estabelecimento: str | None = None, apenas_parceladas: bool = False,
               limite: int = 200, cartao: str | None = None,
@@ -378,6 +442,13 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         if categoria_alvo and categorias_cartao.normalizar(item["categoria"]) != categoria_alvo:
             continue
         itens.append(item)
+
+    vencimentos = _vencimentos(db)
+    for item in itens:
+        cobranca = vencimentos.get(item.get("fatura_id"))
+        item["data"] = corrigir_ano_da_compra(item.get("data"), cobranca)
+        item["data_compra"] = item["data"]
+        item["data_cobranca"] = cobranca
 
     itens.sort(key=lambda i: (str(i.get("competencia") or ""), str(i.get("data") or "")))
 
@@ -419,6 +490,8 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         "por_categoria": sorted(por_categoria.values(), key=lambda x: -x["total"]),
         "por_natureza": por_natureza,
         "sem_categoria": sorted(sem_categoria.values(), key=lambda x: -x["total"])[:15],
+        # Fatura de cada cartao contra a conta do mes: so com uma competencia.
+        "conciliacao": conciliar(db, competencia) if competencia else None,
         # Separado de proposito: IOF e juros sao custo real, mas nao sao gasto
         # num estabelecimento — misturar esconde os dois.
         "total_encargos": total_encargos,

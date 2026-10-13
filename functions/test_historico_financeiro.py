@@ -194,3 +194,24 @@ class TestFerramentas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRendaSemStatus(unittest.TestCase):
+    """Fev/2026: quatro rendas gravadas sem `status` (R$ 14.824,66) sumiam das consultas."""
+
+    def _db(self):
+        return _Db({"income_entries": {
+            "a": {"amount": 10324.66, "month": 1, "year": 2026, "category": "Renda Principal", "isReceived": True},
+            "b": {"amount": 4500, "month": 1, "year": 2026, "status": "active", "isReceived": True},
+            "c": {"amount": 999, "month": 1, "year": 2026, "status": "deleted", "isReceived": True},
+        }, "finance_settings": {"config": {}}})
+
+    def test_historico_conta_renda_sem_status_e_ignora_a_excluida(self):
+        r = hf.montar_mes(self._db(), "2026-02")
+        self.assertEqual(r["renda"]["total"], 14824.66)
+
+    def test_consulta_de_financas_tambem(self):
+        from tools import telegram_extended
+
+        r = json.loads(telegram_extended.execute("consultar_financas_v2", {"competencia": "2026-02"}, db=self._db()))
+        self.assertAlmostEqual(r["resumo"]["total_renda"], 14824.66, places=2)
