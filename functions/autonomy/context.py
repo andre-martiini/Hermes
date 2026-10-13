@@ -102,10 +102,11 @@ algo a assumir por semelhança com os outros dois canais.
 `knowledge_graph.py::_dual_pass_find_or_create_node` (passo 8 do pacote,
 mapa de POPs/nós conceituais de procedimento) passou a gravar `origem_fato`
 no caminho de CRIAR um nó inédito -- sempre `RESUMO_DERIVADO`, nunca
-`DECLARACAO_HUMANA`/`INFERENCIA_AGENTE`: o conteúdo gravado é o resumo do
-diário da tarefa, já resumido pela LLM (`_build_clean_diary` +
-`_derive_node_title`), não uma afirmação literal do usuário nem uma
-inferência da LLM sobre o que o usuário quis dizer -- os dois eixos que
+`DECLARACAO_HUMANA`/`INFERENCIA_AGENTE`: o conteúdo gravado é o `summary`
+que `_crystallize_task` gera via LLM (prompt próprio, a partir do diário
+limpo de `_build_clean_diary`) -- não `_derive_node_title`, que só gera o
+título do nó, um campo diferente --, não uma afirmação literal do usuário
+nem uma inferência da LLM sobre o que o usuário quis dizer -- os dois eixos que
 `origem_fato_para_canal_de_salvar_memoria`/`origem_fato_para_salvar_memoria`
 (acima) resolvem para `salvar_memoria_global` não se aplicam aqui, por isso
 este chamador não usa nenhuma das duas funções, só a constante direto.
