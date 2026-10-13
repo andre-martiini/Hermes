@@ -673,7 +673,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         decisao: str,
         memoria_id: str = "",
         fato_atualizado: str = "",
-        categoria: str = "fato_isolado",
+        categoria: str = "",
     ):
         """Resolve um conflito explícito de memória após confirmação do usuário. decisao aceita: manter_existente, substituir_pelo_novo. memoria_id pode ser omitido quando houver um conflito de memória pendente desta mesma conversa."""
         # `decisao` foi colocado ANTES de `memoria_id` nesta assinatura (achado
@@ -777,12 +777,30 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         # execução real contra `_save_memory_node`, não só perda de pendência
         # como o achado da 2ª rodada. Mesma condição já usada abaixo para
         # decidir se a pendência pode ser apagada.
+        # Achado real do revisor automatico Codex na propria PR desta
+        # sub-entrega (nao de uma das 4 rodadas de revisao adversarial
+        # interna, que ja tinham encerrado quando o comentario chegou):
+        # `categoria` tinha default "fato_isolado" (em vez de "", como
+        # `fato_atualizado`), entao um valor explicito do modelo igual ao
+        # default era indistinguivel de uma omissao -- `categoria="fato_isolado"`
+        # passado deliberadamente pelo modelo (ex.: para corrigir a
+        # categoria de um fato que o pendente tinha como outra, diferente)
+        # caia no mesmo fallback de pendente e era sobrescrito sem
+        # necessidade. Corrigido trocando o default do parametro para ""
+        # (mesmo sentinela de "omitido" ja usado por `fato_atualizado`) e
+        # so aplicando o default real "fato_isolado" DEPOIS de tentar o
+        # fallback de pendente -- agora um valor explicito (inclusive
+        # "fato_isolado") nunca e sobrescrito, e so a ausencia real cai no
+        # pendente ou, na falta deste, no mesmo default de sempre.
         pendente_corresponde = bool(pendente) and pendente.get("memoria_id") == memoria_id
         fato_atualizado = (fato_atualizado or "").strip()
         if not fato_atualizado and pendente_corresponde:
             fato_atualizado = str(pendente.get("fato") or "")
-        if pendente_corresponde and (not categoria or categoria == "fato_isolado") and pendente.get("categoria"):
+        categoria = (categoria or "").strip()
+        if not categoria and pendente_corresponde and pendente.get("categoria"):
             categoria = str(pendente.get("categoria"))
+        if not categoria:
+            categoria = "fato_isolado"
 
         slots = {
             "memoria_id": memoria_id,
