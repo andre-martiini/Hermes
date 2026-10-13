@@ -103,9 +103,15 @@ class TestProjecao(unittest.TestCase):
 class TestFontes(unittest.TestCase):
     def test_renda_ifes_e_a_ultima_recebida(self):
         db = _Db({"income_entries": {
-            "a": {"category": "Renda Principal", "year": 2026, "month": 8, "amount": 9096.95, "isReceived": True},
-            "b": {"category": "Renda Principal", "year": 2026, "month": 9, "amount": 9401.8, "isReceived": True},
-            "c": {"category": "Renda Principal", "year": 2026, "month": 10, "amount": 9500, "isReceived": False},
+            "a": {"description": "Remuneração IFES", "category": "Renda Principal", "year": 2026, "month": 8,
+                  "amount": 9096.95, "isReceived": True},
+            "b": {"description": "Remuneração IFES", "category": "Renda Principal", "year": 2026, "month": 9,
+                  "amount": 9401.8, "isReceived": True},
+            "c": {"description": "Remuneração IFES", "category": "Renda Principal", "year": 2026, "month": 10,
+                  "amount": 9500, "isReceived": False},
+            # Renda Principal mais recente que nao e salario.
+            "d": {"description": "Diárias Facto", "category": "Renda Principal", "year": 2026, "month": 10,
+                  "amount": 980, "isReceived": True},
         }})
         self.assertEqual(rs.renda_ifes_atual(db), (9401.8, "2026-10"))
 

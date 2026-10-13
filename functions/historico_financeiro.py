@@ -20,12 +20,12 @@ from datetime import date, datetime, timezone
 from firebase_functions import options, scheduler_fn
 
 import competencia as comp
+import fontes_renda
 from agent_runs import instrumentada
 
 COLECAO = "financeiro_historico"
 MAX_MESES = 24
 CATEGORIAS_APORTE = ("Poupança", "Investimento")
-FONTES = {"Renda Principal": "ifes", "Serviço Particular": "servicos", "Bolsa": "servicos"}
 
 # Custo de IA e nuvem (item 14): o dono espera a API do Gaspar (Google Cloud)
 # abaixo de R$ 100/mes depois das correcoes de set-out/2026 (R$ 276,83 na fatura
@@ -103,7 +103,7 @@ def montar_mes(db, competencia: str) -> dict:
 
     por_fonte = {"ifes": 0.0, "servicos": 0.0, "outras": 0.0}
     for r in rendas:
-        fonte = FONTES.get(str(r.get("category") or ""), "outras")
+        fonte = fontes_renda.fonte(r)
         por_fonte[fonte] = round(por_fonte[fonte] + _num(r.get("amount")), 2)
     renda_total = round(sum(_num(r.get("amount")) for r in rendas), 2)
     renda_recebida = round(sum(_num(r.get("amount")) for r in rendas if r.get("isReceived")), 2)
