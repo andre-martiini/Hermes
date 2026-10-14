@@ -15,6 +15,17 @@ Reaproveita o fake de Firestore com armazenamento em memória já usado e
 testado por `test_outbox_aprovacao.py` (`_MockDb`) em vez de reimplementar
 um novo -- mesma disciplina de "reusar, nunca reescrever" já citada no
 cabeçalho de `tools/hermes_tools.py`.
+
+P06 sub-entrega 4/N (docs/plano-hermes-autonomo-2026-09-06.md, passo 1 do
+pacote, aplicado aos nós de POP/procedimento do passo 8): `salvar_pop_global`
+e `resolver_conflito_procedimento`, nesta mesma `tools/telegram_extended.py`,
+passam a gravar `origem_fato=DECLARACAO_HUMANA` (taxonomia de
+`autonomy/context.py`, já usada por `salvar_memoria_global`/
+`resolver_conflito_memoria` desde as sub-entregas 1/N e 2/N) nos documentos
+de `pops_diretrizes`/`conhecimento_mestre` que escrevem. As novas classes
+`TestSalvarPopGlobalOrigemFato` e os métodos novos acrescentados a
+`TestResolverConflitoProcedimentoNaoIdempotente` cobrem isso; as classes já
+existentes acima não mudam de comportamento (aditivo).
 """
 
 import unittest
@@ -23,6 +34,7 @@ from unittest import mock
 from firebase_admin import firestore
 
 from test_outbox_aprovacao import _MockDb
+from autonomy.context import DECLARACAO_HUMANA, LEGADO_DESCONHECIDO, origem_fato_de_leitura
 from tools import telegram_extended
 
 
@@ -74,6 +86,65 @@ class TestSalvarPopGlobalIdempotente(unittest.TestCase):
 
         self.assertEqual(r1["pop_id"], r2["pop_id"])
         self.assertEqual(len(self.db.collection("pops_diretrizes")._docs), 1)
+
+
+class TestSalvarPopGlobalOrigemFato(unittest.TestCase):
+    """P06 sub-entrega 4/N: `salvar_pop_global` grava `origem_fato` sempre
+    como `DECLARACAO_HUMANA`, tanto na criação quanto na atualização (via
+    `.set(merge=True)`) -- nunca depende de canal, porque o contrato da tool
+    (ver `mcp_server.py::_handle_prompts_list`) é que o POP já foi escrito e
+    versionado pelo usuário."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def _chamar(self, titulo="Como abrir processo SIPAC", gatilhos=None):
+        return telegram_extended.execute(
+            "salvar_pop_global",
+            {
+                "titulo": titulo,
+                "instrucao_sistema": "Siga o roteiro X.",
+                "gatilhos": gatilhos or ["abrir processo", "sipac"],
+            },
+            self.db,
+        )
+
+    def test_criacao_grava_declaracao_humana(self):
+        self._chamar()
+        docs = self.db.collection("pops_diretrizes")._docs
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], DECLARACAO_HUMANA)
+        # Campos preexistentes (hardcoded "telegram" desde antes desta
+        # sub-entrega, fora de escopo) continuam exatamente como estavam --
+        # esta sub-entrega é aditiva, não os substitui.
+        self.assertEqual(pop_doc["origem"], "telegram")
+        self.assertEqual(pop_doc["updated_by"], "telegram")
+
+    def test_atualizacao_por_merge_mantem_declaracao_humana(self):
+        self._chamar()
+        # Segunda chamada com o MESMO título (dedup já testado em
+        # TestSalvarPopGlobalIdempotente) -- aqui o foco é só origem_fato
+        # sobreviver ao `.set(merge=True)` do caminho de atualização.
+        self._chamar(titulo="Como abrir processo SIPAC (revisado)")
+        docs = self.db.collection("pops_diretrizes")._docs
+        self.assertEqual(len(docs), 1)
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], DECLARACAO_HUMANA)
+
+    def test_pop_antigo_sem_campo_le_como_legado_desconhecido(self):
+        """Passo 1 do pacote: "ler memória antiga com origem legacy_unknown"
+        -- um POP gravado antes desta sub-entrega (sem `origem_fato`) não
+        pode ganhar confiança retroativa. `origem_fato_de_leitura` é a mesma
+        função genérica já usada para `knowledge_nodes`; não há leitor
+        dedicado de `pops_diretrizes` ainda (fora de escopo desta
+        sub-entrega), então o teste aplica a função direto no dict, como a
+        leitura futura deverá fazer."""
+        self.db.collection("pops_diretrizes").document("pop-antigo").set({
+            "titulo": "POP sem proveniência",
+            "instrucao_sistema": "texto antigo",
+        })
+        doc = self.db.collection("pops_diretrizes").document("pop-antigo").get().to_dict()
+        self.assertEqual(origem_fato_de_leitura(doc), LEGADO_DESCONHECIDO)
 
 
 class TestAtualizarPersonalidadeIdempotente(unittest.TestCase):
@@ -190,6 +261,26 @@ class TestResolverConflitoProcedimentoNaoIdempotente(unittest.TestCase):
         docs = self.db.collection("conhecimento_mestre")._docs
         self.assertEqual(list(docs.keys()), ["proc-1"])
         self.assertEqual(docs["proc-1"]["status"], "ativo")
+
+    def test_documento_evoluido_grava_declaracao_humana(self):
+        """P06 sub-entrega 4/N: o documento NOVO criado quando o humano
+        confirma (`confirmar_contrato=True`) grava `origem_fato=
+        DECLARACAO_HUMANA` -- `autor` (hardcoded "human_review_telegram"
+        desde antes desta sub-entrega) continua como estava, fora de
+        escopo."""
+        telegram_extended.execute(
+            "resolver_conflito_procedimento",
+            {
+                "id_procedimento": "proc-1",
+                "justificativa_humana": "confirmado pelo revisor",
+                "confirmar_contrato": True,
+            },
+            self.db,
+        )
+        docs = self.db.collection("conhecimento_mestre")._docs
+        evoluido = next(v for k, v in docs.items() if k != "proc-1")
+        self.assertEqual(evoluido["origem_fato"], DECLARACAO_HUMANA)
+        self.assertEqual(evoluido["autor"], "human_review_telegram")
 
 
 class TestEditarPlanoAcaoIdempotente(unittest.TestCase):
