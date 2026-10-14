@@ -16,6 +16,13 @@ from gemini_cost_controls import (
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
+# P06 sub-entrega 4/N (docs/plano-hermes-autonomo-2026-09-06.md, passo 1 do
+# pacote): proveniencia dos documentos de POP/procedimento gravados por esta
+# funcao. Ver comentario em `salvar_pop_global`/`resolver_conflito_procedimento`
+# abaixo para a justificativa de usar sempre DECLARACAO_HUMANA aqui, em vez do
+# helper `origem_fato_para_canal_de_salvar_memoria` (que depende de `canal`).
+from autonomy.context import DECLARACAO_HUMANA
+
 _TEXT_MODEL_ID = os.environ.get("TELEGRAM_EXTENDED_TEXT_MODEL", GEMINI_BALANCED_MODEL)
 
 
@@ -528,6 +535,27 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "updated_at": firestore.SERVER_TIMESTAMP,
             "updated_by": "telegram",
             "origem": "telegram",
+            # P06 sub-entrega 4/N: `origem_fato` (taxonomia de
+            # `autonomy/context.py`, ja usada por `salvar_memoria_global`/
+            # `resolver_conflito_memoria`) e NOVO aqui -- aditivo, nao troca
+            # nem le `origem`/`updated_by` acima (hardcoded "telegram" desde
+            # antes desta sub-entrega; ambos permanecem como estavam, mesmo
+            # sabendo que o unico chamador real desta funcao e o servidor MCP
+            # -- ver `_handle_prompts_list` em mcp_server.py: "Um POP e um
+            # procedimento operacional que o usuario ja escreveu" -- nunca o
+            # motor Telegram legado, que nao expoe esta tool ao modelo em
+            # `telegram_message_tools.py::build_telegram_tool_closures`.
+            # Corrigir ESSES dois campos preexistentes fica fora do escopo
+            # desta sub-entrega, que so acrescenta o campo novo de
+            # proveniencia). Sempre DECLARACAO_HUMANA, sem depender do canal
+            # do `ToolContext` (que nem chega a esta funcao -- o unico
+            # chamador, `tools/hermes_tools.py::_via_telegram`, so repassa
+            # `slots`/`db`): diferente de `salvar_memoria_global` (onde o
+            # texto da tool as vezes pede ao MODELO para INFERIR um fato
+            # durável), o contrato desta tool e que o usuario JA ESCREVEU e
+            # versionou o procedimento -- nunca um POP inferido pelo agente
+            # sem o usuario ter afirmado o texto.
+            "origem_fato": DECLARACAO_HUMANA,
         }
         if "sempre_ativo" in slots:
             payload["sempre_ativo"] = slots["sempre_ativo"] is True
@@ -624,6 +652,16 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "tipo": proc.get("tipo", "procedimento_evoluido"),
             "autor": "human_review_telegram",
             "procedimento_anterior_id": proc_id,
+            # P06 sub-entrega 4/N: aditivo, mesma taxonomia e mesmo raciocinio
+            # do comentario em `salvar_pop_global` acima -- `autor` acima
+            # (hardcoded desde antes desta sub-entrega) fica como esta, fora
+            # de escopo. Aqui a evidencia de DECLARACAO_HUMANA e ainda mais
+            # direta que em `salvar_pop_global`: esta ramificacao so executa
+            # a escrita quando `confirmar_contrato=True` E `justificativa`
+            # (de `justificativa_humana`) foram informados -- o "Contrato de
+            # Entendimento" (bloco `if not confirmar` acima) obriga o humano
+            # a confirmar explicitamente antes de qualquer gravacao.
+            "origem_fato": DECLARACAO_HUMANA,
         })
         return (
             f"✅ Conflito resolvido. Procedimento **{titulo}** validado pelo revisor humano.\n"
