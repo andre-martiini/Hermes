@@ -826,8 +826,47 @@ def consumir_autorizacao_argos(ctx: ToolContext, args: dict):
     return consumir_autorizacao(ctx.db, solicitacao_id=args.get("solicitacao_id"))
 
 
+def criar_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    return objetivos_whatsapp.criar_e_iniciar(ctx.db, args, ctx=ctx)
+
+
+def consultar_objetivos_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    try:
+        limite = max(1, min(int(args.get("limite") or 10), 50))
+    except (TypeError, ValueError):
+        limite = 10
+    return objetivos_whatsapp.consultar(ctx.db, objetivo_id=args.get("objetivo_id"), limite=limite)
+
+
+def responder_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    objetivo_id = str(args.get("objetivo_id") or "").strip()
+    if not objetivo_id:
+        return {"erro": "objetivo_id é obrigatório."}
+    return objetivos_whatsapp.responder_do_dono(
+        ctx.db, objetivo_id, resposta=args.get("resposta"), estender_min=args.get("estender_min"))
+
+
+def encerrar_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    objetivo_id = str(args.get("objetivo_id") or "").strip()
+    if not objetivo_id:
+        return {"erro": "objetivo_id é obrigatório."}
+    return objetivos_whatsapp.encerrar(ctx.db, objetivo_id, str(args.get("motivo") or ""))
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
+    if name == "criar_objetivo_whatsapp":
+        import objetivos_whatsapp
+
+        return objetivos_whatsapp.previa(ctx.db, args, ctx=ctx)
     if name == "pausar_conversa":
         from tools.pausar_conversa import preview as _preview
         return _preview(ctx, args)
@@ -3060,6 +3099,10 @@ _HANDLERS: dict = {
     "schedule_whatsapp_message": _schedule_whatsapp_message,
     "confirmar_acao": confirmar_acao,
     "pausar_conversa": pausar_conversa,
+    "criar_objetivo_whatsapp": criar_objetivo_whatsapp,
+    "consultar_objetivos_whatsapp": consultar_objetivos_whatsapp,
+    "responder_objetivo_whatsapp": responder_objetivo_whatsapp,
+    "encerrar_objetivo_whatsapp": encerrar_objetivo_whatsapp,
     "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,

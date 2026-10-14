@@ -39,6 +39,7 @@ from firebase_functions.firestore_fn import Change, DocumentSnapshot, Event
 
 import telegram_callbacks_confirmacoes
 import telegram_callbacks_contatos
+import telegram_callbacks_objetivo
 import telegram_callbacks_custos
 import telegram_callbacks_perfil
 import telegram_callbacks_saude
@@ -173,6 +174,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         telegram_callbacks_confirmacoes,
         telegram_callbacks_contatos,
         telegram_callbacks_sessao,
+        telegram_callbacks_objetivo,
     ):
         if _mod.handle(
             db, token, query_id, chat_id, data, message, session,

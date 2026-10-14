@@ -262,6 +262,16 @@ def _tipos_promovidos(db) -> set[str]:
     return promovidos
 
 
+def _registrar_se_autonomo(db, dados: dict, outbox_id: str) -> None:
+    """Mensagem do Secretário ou do Objetivo sai em primeira pessoa: registra o texto
+    final antes do envio para o eco `from_me` não ser lido como o André (mensagens_gaspar)."""
+    from mensagens_gaspar import ORIGENS_AUTONOMAS, registrar
+
+    if dados.get("origem") in ORIGENS_AUTONOMAS:
+        registrar(db, dados.get("content") or "", origem=dados.get("origem"),
+                  chat_id=str(dados.get("to_number") or ""), ref_id=dados.get("ref_id") or outbox_id)
+
+
 def criar_rascunho(
     db,
     contact_number: str,
@@ -276,6 +286,7 @@ def criar_rascunho(
     tipo: str = "outro",
     envio_imediato: bool = False,
     destinatario_resolvido: dict | None = None,
+    ref_id: str | None = None,
 ) -> dict:
     """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram.
 
@@ -373,12 +384,15 @@ def criar_rascunho(
         payload["envio_liberado_em"] = envio_liberado_em
     if scheduled_for is not None:
         payload["scheduled_for"] = scheduled_for
+    if ref_id:
+        payload["ref_id"] = str(ref_id)
 
     doc_ref.set(payload)
 
     # Envio imediato não avisa no Telegram: o dono já vê a mensagem enviada no próprio
     # WhatsApp, e um eco do texto no Telegram seria só ruído (decisão do dono, 19/09/2026).
     if envio_imediato:
+        _registrar_se_autonomo(db, payload, outbox_id)
         return {
             "status": STATUS_PENDING,
             "outbox_id": outbox_id,
@@ -583,6 +597,7 @@ def aprovar_rascunho(
         return transaction_result
 
     data = transaction_result.get("dados") or {}
+    _registrar_se_autonomo(db, data, outbox_id)
     item_atencao_id = data.get("item_atencao_id")
     acao_id = data.get("acao_id")
     dest_nome = data.get("destinatario_nome") or data.get("to_number") or ""

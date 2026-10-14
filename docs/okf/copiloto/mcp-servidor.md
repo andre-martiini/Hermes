@@ -28,6 +28,12 @@ e consulta do Modo Secretário estão ligadas aos mesmos handlers do MCP por
 `ToolContext(canal="telegram")`. Os testes em `test_tool_schemas.py` verificam
 as declarações enviadas ao Gemini e a execução dos handlers.
 
+Modo Objetivo (14/10/2026): `criar_objetivo_whatsapp` está no piso de confirmação
+obrigatória — a prévia mostra destinatário, objetivo, abertura e limites, e a
+abertura só sai depois do "sim". O andamento é pelo próprio Gaspar (gatilho em
+`whatsapp_messages` e Telegram); pelo MCP há `consultar_objetivos_whatsapp`,
+`responder_objetivo_whatsapp` e `encerrar_objetivo_whatsapp`.
+
 Se uma ferramenta não aparecer no Cowork, conferir `tools/list` autenticado no
 endpoint configurado antes de concluir que falta deploy. Compare com
 `https://gestao-hermes.web.app/mcp` e a revisão de `mcpServer` no Cloud Functions.

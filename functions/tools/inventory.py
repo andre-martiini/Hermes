@@ -671,6 +671,35 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "para o mesmo pedido do usuário gera um `mcp_confirmation_id` diferente e delega de novo, mesmo "
         "caveat já aceito em `pausar_conversa` (sub-entrega 17/N).",
     ),
+    "criar_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
+        "consultar_envio_whatsapp (abertura) e consultar_objetivos_whatsapp (andamento)",
+        dados_sensiveis_categoria="conversa com terceiro em nome do dono",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Modo Objetivo (14/10/2026): no piso de confirmação obrigatória (autonomy/policy.py) — a abertura "
+        "sai em nome do André. Recusa um segundo objetivo na mesma conversa enquanto o primeiro estiver ativo, "
+        "mas uma nova confirmação depois do fim cria outro objetivo e outra abertura.",
+    ),
+    "consultar_objetivos_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        dados_sensiveis_categoria="mensagens enviadas a terceiro e respostas do dono",
+    ),
+    "responder_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
+        "consultar_objetivos_whatsapp",
+        rede_servico="Gemini (decisão do próximo passo) e Google Calendar (agenda)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="conversa com terceiro em nome do dono",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="retoma um objetivo cuja abertura o dono já confirmou (criar_objetivo_whatsapp, no piso); o "
+        "ciclo seguinte pode mandar mensagem ao contato dentro dos limites aprovados.",
+    ),
+    "encerrar_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "consultar_objetivos_whatsapp",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="encerrar de novo devolve o estado atual sem nova escrita.",
+    ),
     "pausar_conversa": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS, "nenhum",
         dados_sensiveis_categoria="conversa com terceiro",

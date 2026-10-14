@@ -41,6 +41,7 @@ TIPO_SECRETARIO_DECISAO_FORCADA = "secretario_decisao_forcada"
 TIPO_SECRETARIO_INSISTENCIA = "secretario_insistencia"
 TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
+TIPO_SECRETARIO_PERGUNTOU_SE_ROBO = "secretario_perguntou_se_robo"
 TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
 
 # Prioridades
