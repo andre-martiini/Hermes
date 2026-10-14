@@ -37,6 +37,8 @@ from firebase_admin import firestore, get_app, initialize_app
 from firebase_functions import firestore_fn, https_fn, options
 from firebase_functions.firestore_fn import Change, DocumentSnapshot, Event
 
+from autonomy.temporal import STATUS_SUPERADA, memoria_status_de_leitura
+
 import telegram_callbacks_confirmacoes
 import telegram_callbacks_contatos
 import telegram_callbacks_objetivo
@@ -551,6 +553,12 @@ def _process_telegram_message(db, data: dict):
             mem_lines = []
             for m_doc in memory_docs:
                 m = m_doc.to_dict() or {}
+                # P06 passo 4 (autonomy/temporal.py): um fato SUPERADO
+                # (histórico deixado por uma substituição de conflito) não é
+                # mais a verdade atual -- não deve ser injetado no system
+                # prompt como "MEMÓRIA GLOBAL ATIVA".
+                if memoria_status_de_leitura(m) == STATUS_SUPERADA:
+                    continue
                 fato = m.get("fato", "")
                 cat = m.get("categoria", "")
                 if fato:
