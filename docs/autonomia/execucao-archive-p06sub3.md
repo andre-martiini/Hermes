@@ -1,0 +1,1 @@
+$(cat /tmp/claude-0/-home-claude/84f78c5d-19cc-55c3-9339-0c5c24e6347a/scratchpad/archive_p06sub3_final.md)
