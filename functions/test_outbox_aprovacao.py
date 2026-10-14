@@ -97,6 +97,20 @@ class _MockCollection:
             snaps.append(snap)
         return snaps
 
+    def limit(self, n):
+        # P06 sub-entrega 4/N (autonomy/temporal.py): acrescentado para
+        # exercitar, contra este mock, o caminho de FALLBACK sem `.order_by`
+        # que `copilot_context._format_recent_memories` usa quando o
+        # `.order_by("data_criacao", ...)` falha (este mock não implementa
+        # `order_by`) -- `db.collection("knowledge_nodes").limit(limit).stream()`
+        # direto na coleção, sem `.where()` antes. Mesmo padrão de
+        # `_Colecao.limit` em `test_whatsapp_tools.py`. (O desenho original
+        # desta sub-entrega também usaria isto para testar o fallback de
+        # `main._find_similar_memory_nodes`, mas essa fiação em `main.py`
+        # não pôde ser publicada nesta PR -- ver `autonomy/temporal.py` e
+        # `test_memoria_supersedes.py` para o porquê.)
+        return _MockQuery(self, list(self._docs.items())[:n])
+
 
 class _MockQuery:
     def __init__(self, col, items):
