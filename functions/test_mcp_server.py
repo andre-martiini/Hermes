@@ -71,6 +71,7 @@ deliberada, ver comentário de escopo no topo de `mcp_server.py` — `ping` e
 de segurança própria.
 """
 
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -930,6 +931,12 @@ class TestAuditLogTamanhoDaResposta(unittest.TestCase):
     """`mcp_audit_log.result_chars` (20/09/2026): sem o tamanho da resposta não dá
     para saber quais ferramentas enchem o contexto do cliente."""
 
+    def setUp(self):
+        # O audit log só grava na nuvem (auditoria_mcp.destino): simula o Cloud Run.
+        ambiente = patch.dict(os.environ, {"K_SERVICE": "mcpserver"})
+        ambiente.start()
+        self.addCleanup(ambiente.stop)
+
     def _registro_gravado(self, **extra):
         db = MagicMock()
         with patch.object(mcp_server.firestore, "client", return_value=db):
@@ -983,6 +990,12 @@ class TestAuditLogRedigeConteudoDeDocumento(unittest.TestCase):
     `mcp_audit_log`: duplicaria dado sensivel e, acima de 1 MiB, o documento do
     Firestore nem cabe (a auditoria da chamada sumiria em silencio)."""
 
+    def setUp(self):
+        # O audit log só grava na nuvem (auditoria_mcp.destino): simula o Cloud Run.
+        ambiente = patch.dict(os.environ, {"K_SERVICE": "mcpserver"})
+        ambiente.start()
+        self.addCleanup(ambiente.stop)
+
     SEGREDO = "TEXTO-SECRETO-DO-DOCUMENTO " * 50
 
     def _registro(self, tool, arguments):
@@ -1012,11 +1025,10 @@ class TestAuditLogRedigeConteudoDeDocumento(unittest.TestCase):
         db = MagicMock()
         with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
              patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
-             patch.object(mcp_server, "execute_tool", return_value={"status": "ok"}), \
-             patch.object(mcp_server.firestore, "client", return_value=db):
+             patch.object(mcp_server, "execute_tool", return_value={"status": "ok"}):
             mcp_server._handle_tools_call(
                 {"name": "atualizar_arquivo_drive", "arguments": {"file_id": "abc", "conteudo": self.SEGREDO}},
-                ctx=_ctx_result_type())
+                ctx=ToolContext(user_uid="dono-uid", canal="mcp", _db=db))
         adds = db.collection.return_value.add.call_args_list
         self.assertTrue(adds)
         self.assertNotIn("TEXTO-SECRETO", _json.dumps([c.args for c in adds], default=str))

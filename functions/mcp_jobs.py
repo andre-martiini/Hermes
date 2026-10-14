@@ -300,6 +300,7 @@ def sweep_mcp_jobs_travados_core(db, *, agora: datetime) -> tuple[int, int]:
                 else:
                     travados += 1
                     print(f"[mcp_jobs] job travado marcado como falha definitiva: {snap.id}")
+                    _auditar_falha(db, dados, snap.id, atualizacao.get("erro"), ERRO_TIPO_TRAVADO)
         if len(docs_da_pagina) < _SWEEP_TAMANHO_PAGINA:
             break
         cursor = docs_da_pagina[-1]
@@ -350,6 +351,32 @@ def criar_job(uid: str, tool: str, arguments: dict, *, session_id: str | None = 
     return job_id
 
 
+# IDs que o Claude passava a consultar_job por engano (5 de 14 erros reais entre
+# 05 e 14/10/2026): o andamento desses fluxos se le pela propria ferramenta.
+_OUTRAS_FERRAMENTAS = (
+    ("whatsapp_consolidacoes", "uma consolidacao de WhatsApp: leia com ler_consolidacao_whatsapp(job_id='{id}')"),
+    ("whatsapp_chats_sync_requests",
+     "um pedido de sincronizacao de conversas: consulte com sincronizar_conversas_whatsapp(request_id='{id}')"),
+)
+
+
+def _dica_de_outra_ferramenta(job_id: str) -> str:
+    for colecao, dica in _OUTRAS_FERRAMENTAS:
+        try:
+            if _db().collection(colecao).document(str(job_id)).get().exists:
+                return " Esse id e de " + dica.format(id=job_id) + "."
+        except Exception:  # noqa: BLE001 — id com '/' ou falha de leitura: sem dica
+            return ""
+    return ""
+
+
+def _auditar_falha(db, dados: dict, job_id: str, erro: str, erro_tipo: str) -> None:
+    from auditoria_mcp import registrar_falha_job
+
+    registrar_falha_job(db, uid=dados.get("uid"), tool=dados.get("tool"), job_id=job_id,
+                        erro=erro, erro_tipo=erro_tipo)
+
+
 def ler_job(uid: str, job_id: str) -> dict:
     """Estado do job. So o dono enxerga — o job_id sozinho nao da acesso."""
     if not job_id:
@@ -357,7 +384,7 @@ def ler_job(uid: str, job_id: str) -> dict:
 
     snap = _db().collection(COLECAO).document(str(job_id)).get()
     if not snap.exists:
-        return {"erro": f"Job '{job_id}' nao encontrado.", "status": "not_found"}
+        return {"erro": f"Job '{job_id}' nao encontrado.{_dica_de_outra_ferramenta(job_id)}", "status": "not_found"}
 
     dados = snap.to_dict() or {}
     if dados.get("uid") != uid:
@@ -471,13 +498,15 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
         job = _reivindicar_job(db, ref)
     except _SemSuporteTransacao:
         print(f"[mcp_jobs] Backend Firestore sem suporte a transacao; job {ref.id} recusado (sem efeito).")
+        erro = "Configuração do backend não permite reivindicar o job com segurança."
         ref.update({
             "status": "error",
-            "erro": "Configuração do backend não permite reivindicar o job com segurança.",
+            "erro": erro,
             "erro_tipo": ERRO_TIPO_CONFIGURACAO,
             "concluido_em": int(time.time()),
             "expira_em": _expira_em(),
         })
+        _auditar_falha(db, snap.to_dict() or {}, ref.id, erro, ERRO_TIPO_CONFIGURACAO)
         return
     except Exception as exc:  # noqa: BLE001
         # Falha real de transação (ex.: Aborted após esgotar tentativas). Sem
@@ -588,6 +617,7 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
                 f"[mcp_jobs] {tool} bloqueada pela politica "
                 f"(job={job.get('job_id')}, decision={decisao.decision.value}, reason={decisao.reason_code})"
             )
+            _auditar_falha(db, job, ref.id, erro, ERRO_TIPO_POLITICA)
             return
 
         resultado = execute(tool, argumentos, ctx)
@@ -617,6 +647,7 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
                 f"[mcp_jobs] {tool} devolveu resultado no formato de erro, "
                 f"sem levantar excecao (job={job.get('job_id')})"
             )
+            _auditar_falha(db, job, ref.id, erro_detectado, ERRO_TIPO_RESULTADO)
             return
 
         resultado_final, truncado = _preparar_resultado(resultado)
@@ -639,3 +670,4 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
             "concluido_em": int(time.time()),
             "expira_em": _expira_em(),
         })
+        _auditar_falha(db, job, ref.id, str(exc), ERRO_TIPO_EXCECAO)

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 import uuid
@@ -114,6 +115,12 @@ class MockDb:
 
 
 class TestAuditLogInMcpServer(unittest.TestCase):
+
+    def setUp(self):
+        # O audit log só grava na nuvem (auditoria_mcp.destino): simula o Cloud Run.
+        ambiente = patch.dict(os.environ, {"K_SERVICE": "mcpserver"})
+        ambiente.start()
+        self.addCleanup(ambiente.stop)
     def test_audit_log_adiciona_is_error(self):
         from mcp_server import _audit_log
 

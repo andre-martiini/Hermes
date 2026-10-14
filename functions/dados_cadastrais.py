@@ -25,6 +25,8 @@ resposta. Por isso a leitura é sempre por seção: sem `secao`, devolve só o
 daquela seção (a maior seção individual hoje tem ~2.3k caracteres).
 """
 
+import unicodedata
+
 
 def get_dados_cadastrais(db, user_uid: str | None, secao: str | None = None) -> dict:
     if not user_uid:
@@ -42,5 +44,13 @@ def get_dados_cadastrais(db, user_uid: str | None, secao: str | None = None) -> 
             "instrucao": "Chame de novo passando 'secao' com um dos valores acima para ver o conteúdo completo dessa seção.",
         }
     if secao_norm not in dados:
+        # "formação" para a seção "formacao": o Claude escreve com acento.
+        secao_norm = next((s for s in dados if _chave(s) == _chave(secao_norm)), secao_norm)
+    if secao_norm not in dados:
         return {"error": f"Seção '{secao_norm}' não encontrada.", "secoes_disponiveis": secoes_disponiveis}
     return {secao_norm: dados[secao_norm]}
+
+
+def _chave(texto: str) -> str:
+    sem_acento = unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode("ascii")
+    return "_".join(sem_acento.lower().replace("-", " ").split())

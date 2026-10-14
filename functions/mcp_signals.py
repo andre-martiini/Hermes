@@ -82,6 +82,13 @@ def registrar(uid: str | None, tool: str, arguments: dict | None, task_id: str |
     if not uid:
         return
 
+    # Fora da nuvem (testes, scripts) nao grava: o perfil de producao recebia
+    # sinais falsos quando um teste rodava sozinho, sem o bloqueio de credencial.
+    from auditoria_mcp import em_producao
+
+    if not em_producao():
+        return
+
     texto = sinal_de_intencao(tool, arguments)
     if not texto:
         return

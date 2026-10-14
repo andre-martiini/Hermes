@@ -12,6 +12,7 @@ import json
 import os
 import re
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -148,6 +149,9 @@ def coletar_metricas_semana(db, now_utc: datetime) -> tuple[dict, dict]:
     tools_map: dict[str, dict] = {}
     total_calls = 0
     total_erros_tools = 0
+    total_falhas = 0
+    total_recusas = 0
+    mensagens_gerais: Counter = Counter()
 
     for doc in audit_docs:
         d = doc.to_dict() if hasattr(doc, "to_dict") else doc
@@ -158,50 +162,85 @@ def coletar_metricas_semana(db, now_utc: datetime) -> tuple[dict, dict]:
         if ts is not None and ts < cutoff:
             continue
 
-        total_calls += 1
         tool_nome = str(d.get("tool") or "desconhecida").strip()
         is_error = bool(d.get("is_error", False))
-        latency = float(d.get("latency_ms") or 0.0)
-
-        if is_error:
-            total_erros_tools += 1
+        # A falha de um job é registrada uma vez, à parte da chamada que o criou:
+        # conta como falha, não como chamada nova.
+        do_job = d.get("origem") == "job"
 
         if tool_nome not in tools_map:
-            tools_map[tool_nome] = {
-                "total": 0,
-                "erros": 0,
-                "latencias": [],
-            }
+            tools_map[tool_nome] = {"total": 0, "erros": 0, "falhas": 0, "recusas": 0,
+                                    "latencias": [], "mensagens": Counter()}
+        dados_tool = tools_map[tool_nome]
 
-        tools_map[tool_nome]["total"] += 1
-        if is_error:
-            tools_map[tool_nome]["erros"] += 1
-        tools_map[tool_nome]["latencias"].append(latency)
+        if not do_job:
+            total_calls += 1
+            dados_tool["total"] += 1
+            dados_tool["latencias"].append(float(d.get("latency_ms") or 0.0))
+
+        if not is_error:
+            continue
+        total_erros_tools += 1
+        dados_tool["erros"] += 1
+        # Registro anterior a 14/10/2026 não tem a causa: conta como falha.
+        recusa = d.get("recusa_esperada") is True
+        if recusa:
+            total_recusas += 1
+            dados_tool["recusas"] += 1
+        else:
+            total_falhas += 1
+            dados_tool["falhas"] += 1
+        chave = (str(d.get("erro_tipo") or "sem_causa_registrada"), str(d.get("erro_resumo") or ""), recusa)
+        dados_tool["mensagens"][chave] += 1
+        mensagens_gerais[(tool_nome,) + chave] += 1
 
     tools_agregadas: dict[str, dict] = {}
     for tool, dados in tools_map.items():
         tot = dados["total"]
-        errs = dados["erros"]
-        lats = dados["latencias"]
-        lat_med = round(sum(lats) / len(lats), 1) if lats else 0.0
-        lat_max = round(max(lats), 1) if lats else 0.0
-        taxa = round(errs / tot, 3) if tot > 0 else 0.0
-
+        lats = sorted(dados["latencias"])
         tools_agregadas[tool] = {
             "total": tot,
-            "erros": errs,
-            "taxa_erro": taxa,
-            "latencia_media_ms": lat_med,
-            "latencia_max_ms": lat_max,
+            "erros": dados["erros"],
+            "falhas": dados["falhas"],
+            "recusas": dados["recusas"],
+            "taxa_erro": round(dados["erros"] / tot, 3) if tot > 0 else 0.0,
+            "taxa_falha": round(dados["falhas"] / tot, 3) if tot > 0 else 0.0,
+            "latencia_media_ms": round(sum(lats) / len(lats), 1) if lats else 0.0,
+            "latencia_p50_ms": _percentil(lats, 50),
+            "latencia_p95_ms": _percentil(lats, 95),
+            "latencia_max_ms": round(lats[-1], 1) if lats else 0.0,
+            "erros_frequentes": [
+                {"tipo": tipo, "resumo": resumo, "recusa": recusa, "n": n}
+                for (tipo, resumo, recusa), n in dados["mensagens"].most_common(3)
+            ],
         }
 
     metricas_tools = {
         "total_calls": total_calls,
         "total_erros": total_erros_tools,
+        "total_falhas": total_falhas,
+        "total_recusas": total_recusas,
+        "erros_frequentes": [
+            {"tool": tool, "tipo": tipo, "resumo": resumo, "recusa": recusa, "n": n}
+            for (tool, tipo, resumo, recusa), n in mensagens_gerais.most_common(5)
+        ],
         "tools": tools_agregadas,
     }
 
     return metricas_rotinas, metricas_tools
+
+
+def _resumo_erros_mcp(metricas_tools: dict) -> str:
+    return (f"{metricas_tools.get('total_falhas', 0)} falhas reais, "
+            f"{metricas_tools.get('total_recusas', 0)} recusas esperadas")
+
+
+def _percentil(ordenados: list[float], p: int) -> float:
+    """Percentil pelo posto mais próximo; a lista já vem ordenada."""
+    if not ordenados:
+        return 0.0
+    posto = max(1, -(-p * len(ordenados) // 100))
+    return round(ordenados[posto - 1], 1)
 
 
 def formatar_texto_agregado(
@@ -233,7 +272,9 @@ def formatar_texto_agregado(
         "",
         "FERRAMENTAS MCP (mcp_audit_log):",
         f"- Total de chamadas: {metricas_tools.get('total_calls', 0)}",
-        f"- Total com erro reportado: {metricas_tools.get('total_erros', 0)}",
+        f"- Falhas reais: {metricas_tools.get('total_falhas', 0)}",
+        f"- Recusas esperadas (id inexistente, argumento errado, política, conflito): "
+        f"{metricas_tools.get('total_recusas', 0)}",
     ])
 
     tools = metricas_tools.get("tools", {})
@@ -241,12 +282,15 @@ def formatar_texto_agregado(
         linhas.append("  (nenhuma chamada de ferramenta registrada)")
     else:
         for tool, dados in tools.items():
-            taxa_pct = round(dados.get("taxa_erro", 0) * 100, 1)
             linhas.append(
                 f"  * {tool}: {dados.get('total', 0)} chamadas, "
-                f"latência média {dados.get('latencia_media_ms', 0)}ms (máx {dados.get('latencia_max_ms', 0)}ms), "
-                f"{dados.get('erros', 0)} erros (taxa {taxa_pct}%)"
+                f"latência p50 {dados.get('latencia_p50_ms', 0)}ms, p95 {dados.get('latencia_p95_ms', 0)}ms "
+                f"(máx {dados.get('latencia_max_ms', 0)}ms), "
+                f"{dados.get('falhas', 0)} falhas reais, {dados.get('recusas', 0)} recusas"
             )
+            for erro in dados.get("erros_frequentes") or []:
+                rotulo = "recusa" if erro.get("recusa") else "falha"
+                linhas.append(f"    - {rotulo} {erro.get('tipo')} ({erro.get('n')}x): {erro.get('resumo')}")
 
     return "\n".join(linhas)
 
@@ -271,6 +315,9 @@ Retorne estritamente um único objeto JSON com o formato:
     "justificativa": "Evidência concreta e quantificada das falhas (ex: 'Rotina X falhou 3 vezes pelo erro Y')"
   }}
 }}
+
+FALHA x RECUSA: recusas esperadas (id inexistente, argumento errado, política, conflito de versão) são o sistema
+funcionando, não defeito. Analise e cite só as falhas reais; mencione recusas apenas se uma delas se repetir muito.
 
 REGRA INEGOCIÁVEL PARA proposta_pop:
 1. SÓ proponha ajuste se houver um padrão CONCRETO e REPETIDO (ex.: a mesma rotina falhando ≥3 vezes pelo mesmo motivo, ou uma ferramenta com taxa de falha sistemática anormal em múltiplas tentativas).
@@ -371,10 +418,9 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
         tot_r = metricas_rotinas.get("total_runs", 0)
         tot_err = metricas_rotinas.get("total_erros", 0)
         tot_c = metricas_tools.get("total_calls", 0)
-        tot_tc_err = metricas_tools.get("total_erros", 0)
         resumo = (
             f"Na última semana foram registradas {tot_r} execuções de rotinas agendadas "
-            f"({tot_err} com erro) e {tot_c} chamadas de ferramentas MCP ({tot_tc_err} com erro)."
+            f"({tot_err} com erro) e {tot_c} chamadas de ferramentas MCP ({_resumo_erros_mcp(metricas_tools)})."
         )
         proposta_pop = None
 
@@ -391,6 +437,9 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
             "rotinas": metricas_rotinas.get("rotinas", {}),
             "total_mcp_calls": metricas_tools.get("total_calls", 0),
             "total_erros_tools": metricas_tools.get("total_erros", 0),
+            "total_falhas_tools": metricas_tools.get("total_falhas", 0),
+            "total_recusas_tools": metricas_tools.get("total_recusas", 0),
+            "erros_frequentes_tools": metricas_tools.get("erros_frequentes", []),
             "tools": metricas_tools.get("tools", {}),
         },
         "proposta_pop": proposta_pop,
@@ -452,13 +501,11 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
             tot_r = metricas_rotinas.get("total_runs", 0)
             tot_err = metricas_rotinas.get("total_erros", 0)
             tot_c = metricas_tools.get("total_calls", 0)
-            tot_tc_err = metricas_tools.get("total_erros", 0)
-
             msg = (
                 f"📊 <b>Retro Semanal do Agente</b>\n\n"
                 f"{resumo}\n\n"
                 f"• Execuções de rotinas: {tot_r} ({tot_err} com falha)\n"
-                f"• Chamadas MCP: {tot_c} ({tot_tc_err} com erro)"
+                f"• Chamadas MCP: {tot_c} ({_resumo_erros_mcp(metricas_tools)})"
             )
             if proposta_pop:
                 tit_pop = proposta_pop.get("titulo_procedimento")
