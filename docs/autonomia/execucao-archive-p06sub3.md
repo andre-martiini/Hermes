@@ -1,0 +1,1 @@
+"$(cat /tmp/claude-0/-home-claude/1456cb90-87c2-500e-8624-8338d5978801/scratchpad/execucao-archive-p06sub3.md)"
