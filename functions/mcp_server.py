@@ -1501,7 +1501,7 @@ def _erro_valores_invalidos(name: str, arguments: dict) -> dict | None:
     negócio completo -- mesmo raciocínio de escopo, não repetido aqui. Como
     nenhum campo com `enum` no catálogo atual é `array`/`object`, não há
     conflito de prioridade real com `_erro_tipos_invalidos` hoje; a ordem
-    (tipo antes de valor) e so para manter o mesmo padrão de "checagem mais
+    (tipo antes de valor) é só para manter o mesmo padrão de "checagem mais
     estrutural primeiro" das duas sub-entregas anteriores.
     """
     problemas = registry.valores_invalidos(name, arguments)
