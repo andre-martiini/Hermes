@@ -4,6 +4,8 @@
 **Origem:** discussão entre André e Claude (Cowork), a partir de uma ideia do André
 **Status:** **aprovado para desenvolvimento imediato** — próxima etapa a ser trabalhada pelo dev, via protocolo `docs/dev-sync.md`. (Deixa de ser "rascunho de conceito"; ver seção 8 para a análise de viabilidade e as decisões de MVP tomadas antes de abrir a etapa.)
 
+> **Atualização de 14/10/2026:** por decisão do dono, o secretário passou a escrever em primeira pessoa, sem a assinatura "Gaspar Bot" (seções abaixo que falam em identidade explícita ficaram históricas). Se perguntarem se é robô, não envia nada e chama o André. Fica calado depois de escalar ou de o André assumir. Ver `docs/okf/log.md` (14/10) e o Modo Objetivo (`functions/objetivos_whatsapp.py`).
+
 ## 1. Contexto
 
 O Gaspar já lê e envia mensagens de WhatsApp em nome do André, mas hoje toda mensagem enviada passa por confirmação manual dele antes de sair (fluxo `schedule_whatsapp_message` → `confirmar_acao`).

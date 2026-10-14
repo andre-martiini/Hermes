@@ -48,7 +48,7 @@ PERFIL_AJUSTE_VALIDADE_HORAS = 12
 # Capturas que só aceitam mensagem de texto digitada: áudio, foto, documento,
 # figurinha, legenda de mídia ou mensagem editada limpam o marcador e seguem o
 # fluxo normal (o outbox fica de fora: tem tratamento próprio de marcador obsoleto).
-_CAPTURAS_SO_TEXTO = ("pending_diary_edit", "pending_perfil_ajuste")
+_CAPTURAS_SO_TEXTO = ("pending_diary_edit", "pending_perfil_ajuste", "pending_objetivo_resposta")
 
 
 def limpar_capturas_so_texto(session: dict) -> bool:
@@ -135,6 +135,23 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
             _send_telegram_session_message(db, token, chat_id, perfil_reply, session=session)
             return True
         print("[Personalidade] Marcador de correção do perfil expirado; mensagem segue o fluxo normal.")
+
+    # --- Resposta do André a uma pergunta do Modo Objetivo (botão "✍️ Responder") ---
+    pending_objetivo_id = session.get("pending_objetivo_resposta")
+    if pending_objetivo_id and text and not text.startswith("/"):
+        from objetivos_whatsapp import responder_do_dono
+        session.pop("pending_objetivo_resposta", None)
+        _save_session(db, chat_id, session)
+        try:
+            res_obj = responder_do_dono(db, pending_objetivo_id, resposta=text)
+            objetivo_reply = (f"⚠️ {res_obj['erro']}" if res_obj.get("erro")
+                              else "✅ Recebido. Sigo a conversa com essa informação.")
+        except Exception as exc:
+            print(f"[ObjetivoWhatsApp] Falha ao repassar a resposta do André: {exc}")
+            objetivo_reply = "⚠️ Não consegui repassar a resposta ao objetivo."
+        _persist_turn_to_copilot(text, objetivo_reply)
+        _send_telegram_session_message(db, token, chat_id, objetivo_reply, session=session)
+        return True
 
     # --- Ajuste de rascunho de outbox WhatsApp pendente (botão "✏️ Editar") ---
     pending_outbox_id = session.get("pending_outbox_edit")

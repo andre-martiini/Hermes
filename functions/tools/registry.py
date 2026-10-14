@@ -187,6 +187,11 @@ _CATALOG: dict[str, str] = {
     "video_renderizar": "Renderiza o vídeo aprovado no storyboard (clipes no Veo + montagem + Drive); pago, exige confirmação com o custo na prévia",
     "video_refazer_cena": "Refaz o clipe de uma cena de um vídeo pronto (opcionalmente as seguintes) e remonta; pago, exige confirmação",
     "video_cancelar": "Cancela um projeto de vídeo; se estiver renderizando, o worker para antes do próximo clipe",
+    # Modo Objetivo no WhatsApp (14/10/2026): o Gaspar conduz a conversa até cumprir um objetivo.
+    "criar_objetivo_whatsapp": "Modo Objetivo: o Gaspar conversa no WhatsApp em primeira pessoa com uma pessoa até cumprir um objetivo (ex.: marcar consulta); exige confirmação da abertura",
+    "consultar_objetivos_whatsapp": "Andamento dos objetivos de WhatsApp: estado, prazo, pergunta pendente ao André e resultado",
+    "responder_objetivo_whatsapp": "Responde a pergunta do Modo Objetivo ou retoma/estende um objetivo; o Gaspar segue a conversa",
+    "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -211,6 +216,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     "schedule_whatsapp_message",
     "criar_rascunho_whatsapp",
     "pausar_conversa",
+    "criar_objetivo_whatsapp",
+    "responder_objetivo_whatsapp",
+    "encerrar_objetivo_whatsapp",
     "criar_rascunho_email",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",
@@ -343,6 +351,8 @@ _VOICE_EXCLUDED: set[str] = {
     "importar_contracheque",
     # Valor de dinheiro por voz nao (mesmo motivo das escritas de investimento).
     "atualizar_reserva_emergencia",
+    # A abertura e os limites do objetivo se aprovam lendo, nao ouvindo.
+    "criar_objetivo_whatsapp",
 }
 
 _schema_cache: dict[str, dict] = {}

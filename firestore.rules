@@ -51,6 +51,8 @@ service cloud.firestore {
         'whitelist',
         // Casos da trava de confirmação: trechos de resposta do copiloto.
         'trava_confirmacao',
+        // Modo Objetivo e registro dos envios do Gaspar em 1ª pessoa: só servidor.
+        'objetivos_whatsapp', 'objetivos_whatsapp_ativos', 'whatsapp_enviados_gaspar',
         // Fila interna da transcrição longa (Storage -> Firestore -> worker
         // de 4 GB); só o despachante on_long_transcription_uploaded grava.
         'long_transcription_jobs'

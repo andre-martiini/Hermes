@@ -106,26 +106,19 @@ class _MockDb:
 
 
 class TestSecretarioRegrasPuras(unittest.TestCase):
-    def test_prefixar_assinatura_adiciona_prefixo_se_ausente(self):
-        texto = "Olá, o André está em reunião."
-        res = sec.prefixar_assinatura(texto)
-        self.assertEqual(res, "**Gaspar Bot:** Olá, o André está em reunião.")
+    # Desde 14/10/2026 o secretário escreve em primeira pessoa, sem assinatura.
+    def test_sem_assinatura_mantem_texto_sem_prefixo(self):
+        self.assertEqual(sec.sem_assinatura("  Estou em reunião, te retorno.  "), "Estou em reunião, te retorno.")
 
-    def test_prefixar_assinatura_mantem_prefixo_se_ja_presente(self):
-        texto = "**Gaspar Bot:** Olá, já anotei o seu recado."
-        res = sec.prefixar_assinatura(texto)
-        self.assertEqual(res, "**Gaspar Bot:** Olá, já anotei o seu recado.")
-
-    def test_prefixar_assinatura_limpa_variacoes_duplicadas(self):
-        for texto in ["Gaspar Bot: Olá, anotei.", "*Gaspar Bot:* Olá, anotei.", "**Gaspar Bot**: Olá, anotei.",
-                      "Gaspar: Olá, anotei.", "**Gaspar**: Olá, anotei.",
+    def test_sem_assinatura_tira_a_assinatura_antiga(self):
+        for texto in ["**Gaspar Bot:** Olá, anotei.", "Gaspar Bot: Olá, anotei.", "*Gaspar Bot:* Olá, anotei.",
+                      "**Gaspar Bot**: Olá, anotei.", "Gaspar: Olá, anotei.", "**Gaspar**: Olá, anotei.",
                       "Hermes Bot: Olá, anotei.", "**Hermes Bot:** Olá, anotei."]:
             with self.subTest(texto=texto):
-                self.assertEqual(sec.prefixar_assinatura(texto), "**Gaspar Bot:** Olá, anotei.")
+                self.assertEqual(sec.sem_assinatura(texto), "Olá, anotei.")
 
-    def test_prefixar_assinatura_nao_come_o_nome_sem_dois_pontos(self):
-        res = sec.prefixar_assinatura("Gaspar é o assistente do André.")
-        self.assertEqual(res, "**Gaspar Bot:** Gaspar é o assistente do André.")
+    def test_sem_assinatura_nao_come_o_nome_sem_dois_pontos(self):
+        self.assertEqual(sec.sem_assinatura("Gaspar, tudo certo?"), "Gaspar, tudo certo?")
 
     def test_chat_na_allowlist_match_exato_e_digitos(self):
         allowlist = ["5511999999999@c.us", "5521888888888"]
@@ -372,7 +365,8 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
         rascunho = outbox_docs[0].to_dict()
-        self.assertTrue(rascunho["content"].startswith("**Gaspar Bot:** "))
+        # Primeira pessoa, sem assinatura (14/10/2026).
+        self.assertFalse(rascunho["content"].startswith("**Gaspar Bot:**"))
         self.assertEqual(rascunho["tipo"], sec.TIPO_OUTBOX_SECRETARIO)
         self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
         self.assertIsNone(rascunho.get("envio_liberado_em"))
@@ -425,7 +419,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         # Mensagem no outbox com encerramento polido
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
-        self.assertIn("Já anotei todos os detalhes e vou repassar diretamente", outbox_docs[0].to_dict()["content"])
+        self.assertEqual(outbox_docs[0].to_dict()["content"], sec._RESPOSTA_FECHAMENTO)
 
     def test_forcar_decisao_escala_alta_prioridade(self):
         chat_id = "5511999999999@c.us"
@@ -529,7 +523,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(res["status"], "ok")
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
-        self.assertTrue(outbox_docs[0].to_dict()["content"].startswith("**Gaspar Bot:** "))
+        self.assertFalse(outbox_docs[0].to_dict()["content"].startswith("**Gaspar Bot:**"))
 
     def test_grupo_na_allowlist_com_mentioned_ids_cruzando_andre_ids_processa(self):
         chat_id = "120363000000000000@g.us"
@@ -1703,9 +1697,8 @@ class TestMontagemPromptSecretario(unittest.TestCase):
     def test_primeira_mensagem_instrui_apresentacao_breve(self):
         prompt = sec.montar_system_instruction_secretario(historico=[])
         self.assertIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
-        self.assertIn("Você pode se apresentar brevemente como assistente do André", prompt)
+        self.assertIn("em primeira pessoa, que agora não consegue falar com calma", prompt)
         self.assertNotIn("Esta conversa JÁ ESTÁ EM ANDAMENTO", prompt)
-        self.assertNotIn("NÃO repita 'sou o assistente do André'", prompt)
 
     def test_primeira_mensagem_com_historico_none(self):
         prompt = sec.montar_system_instruction_secretario(historico=None)
@@ -1718,7 +1711,7 @@ class TestMontagemPromptSecretario(unittest.TestCase):
         ]
         prompt = sec.montar_system_instruction_secretario(historico=historico)
         self.assertIn("Esta conversa JÁ ESTÁ EM ANDAMENTO", prompt)
-        self.assertIn("NÃO repita 'sou o assistente do André'", prompt)
+        self.assertIn("NÃO repita que está indisponível", prompt)
         self.assertIn("Vá direto ao ponto", prompt)
         self.assertNotIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
 
@@ -1745,7 +1738,7 @@ class TestMontagemPromptSecretario(unittest.TestCase):
             historico=[],
             agora_sp="2026-09-05 12:00:00 BRT",
         )
-        self.assertIn("Olá! O André está indisponível no momento.", res1["resposta_para_contato"])
+        self.assertEqual(res1["resposta_para_contato"], sec._RESPOSTA_CONTINGENCIA_INICIO)
 
         # 2. Conversa em andamento (com histórico)
         res2 = sec._executar_llm_secretario(
@@ -1755,8 +1748,7 @@ class TestMontagemPromptSecretario(unittest.TestCase):
             historico=[{"role": "user", "content": "Oi"}],
             agora_sp="2026-09-05 12:05:00 BRT",
         )
-        self.assertNotIn("Olá! O André está indisponível no momento.", res2["resposta_para_contato"])
-        self.assertIn("Anotei sua mensagem e vou repassar ao André assim que possível.", res2["resposta_para_contato"])
+        self.assertEqual(res2["resposta_para_contato"], sec._RESPOSTA_CONTINGENCIA)
 
 
 class _DocFalso:
@@ -1795,7 +1787,7 @@ class TestSecretarioGemini(unittest.TestCase):
         self.assertEqual(kw["stop_after_tools"], {"finalizar_atendimento"})
         self.assertEqual(kw["max_rounds"], 2)
         self.assertEqual(kw["feature"], "secretario_whatsapp")
-        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar Bot:** "))
+        self.assertFalse(res["resposta_para_contato"].startswith("**Gaspar Bot:**"))
 
     def test_modelo_padrao_e_reserva_vem_da_configuracao_gemini(self):
         from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
@@ -1825,8 +1817,7 @@ class TestSecretarioGemini(unittest.TestCase):
              mock.patch.object(sec, "_agenda_para_o_prompt", return_value=None):
             res = sec._executar_llm_secretario(
                 db=_MockDb(), chat_name="Carlos", texto_mensagem="Oi", historico=[], agora_sp="x")
-        self.assertIn("indisponível", res["resposta_para_contato"])
-        self.assertTrue(res["resposta_para_contato"].startswith("**Gaspar Bot:** "))
+        self.assertEqual(res["resposta_para_contato"], sec._RESPOSTA_CONTINGENCIA_INICIO)
 
     def test_ferramentas_sem_consultar_agenda(self):
         tools, function_map, _ = sec._construir_tools_secretario(_MockDb())
@@ -1986,9 +1977,9 @@ class TestOrientacoesDoSecretario(unittest.TestCase):
         prompt = sec.montar_system_instruction_secretario(orientacoes="Estou em viagem até dia 25")
         self.assertIn("ORIENTAÇÕES DO ANDRÉ (opcionais):", prompt)
         self.assertIn("Estou em viagem até dia 25", prompt)
-        self.assertLess(prompt.index("GUARDRAILS INEGOCIÁVEIS"), prompt.index("ORIENTAÇÕES DO ANDRÉ"))
-        self.assertIn("NUNCA revogam os GUARDRAILS INEGOCIÁVEIS", prompt)
-        self.assertIn("siga o guardrail", prompt)
+        self.assertLess(prompt.index("REGRAS INEGOCIÁVEIS"), prompt.index("ORIENTAÇÕES DO ANDRÉ"))
+        self.assertIn("NUNCA revogam as REGRAS INEGOCIÁVEIS", prompt)
+        self.assertIn("siga a regra", prompt)
 
     def test_prompt_sem_orientacoes_nao_tem_o_bloco(self):
         for vazio in (None, "", "   "):

@@ -70,6 +70,7 @@ FLOOR_CONFIRMACAO_OBRIGATORIA: frozenset[str] = frozenset({
     "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
     "registrar_aporte_investimento", "registrar_execucao_investimento",
     "video_renderizar", "video_refazer_cena",
+    "criar_objetivo_whatsapp",
 })
 
 # Classificação por convenção das ferramentas do piso, na matriz de efeito da
@@ -85,6 +86,8 @@ CLASSE_EFEITO_PISO: dict[str, ClasseEfeito] = {
     "registrar_execucao_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
     "video_renderizar": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
     "video_refazer_cena": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+    # Modo Objetivo (14/10/2026): conversa em nome do André com terceiro; a abertura sempre aprovada por ele.
+    "criar_objetivo_whatsapp": ClasseEfeito.COMPROMISSO_TERCEIROS,
 }
 
 def _validar_piso_consistente(
