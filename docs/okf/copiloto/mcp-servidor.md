@@ -185,7 +185,7 @@ Três camadas, todas obrigatórias:
    `arguments._confirmed = true`.
 
 Além disso: rate limit de 60 chamadas/minuto por UID e log de auditoria de toda
-chamada em `mcp_audit_log` (uid, tool, argumentos, latência e, nas execuções diretas, `result_chars`: o tamanho da resposta em caracteres, para achar as ferramentas que enchem o contexto do cliente).
+chamada em `mcp_audit_log` (uid, tool, argumentos, latência e, nas execuções diretas, `result_chars`: o tamanho da resposta em caracteres, para achar as ferramentas que enchem o contexto do cliente). Nos erros grava também `erro_tipo`, `erro_resumo` e `recusa_esperada` (recusa: id inexistente, argumento errado, política, conflito; ver `functions/auditoria_mcp.py`), e a Retro Semanal reporta só as falhas reais como defeito. Antes de executar, o servidor conserta o ID da ação mandado com outro nome (`id`, `acao_id`, `tarefa_id` → `task_id`/`task_id_alvo`) e `*_id` com o texto "null" (`functions/mcp_argumentos.py`).
 
 ### Por que só o WhatsApp
 
