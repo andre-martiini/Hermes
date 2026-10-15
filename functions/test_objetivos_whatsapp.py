@@ -381,6 +381,17 @@ class TestDecisoes(_Base):
         descartar.assert_called_once_with(self.db, "ob-2")
         self.assertEqual(self._objetivo(oid)["rascunho_pendente_id"], "ob-3")
 
+    def test_aprovacao_desligada_tambem_descarta_o_rascunho_velho(self):
+        oid = self._criar(aprovar_cada_mensagem=True)
+        with mock.patch("outbox_aprovacao.descartar_rascunho") as descartar:
+            self._ciclo(oid, {"acao": "responder", "texto": "Pode ser quinta?", "informacao_nova": True})
+            self._objetivo(oid)["aprovar_cada_mensagem"] = False
+            self.agora += dt.timedelta(minutes=1)
+            self._ciclo(oid, {"acao": "responder", "texto": "Ou sexta de manhã?", "informacao_nova": True})
+        descartar.assert_called_once_with(self.db, "ob-2")
+        self.assertTrue(self.enfileiradas[-1]["imediato"])
+        self.assertIsNone(self._objetivo(oid)["rascunho_pendente_id"])
+
     def test_intervalo_minimo_entre_envios(self):
         oid = self._criar()
         self.agora = AGORA + dt.timedelta(seconds=5)

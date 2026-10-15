@@ -1031,8 +1031,9 @@ class TestCriarEListarRascunho(unittest.TestCase):
             doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
             scheduled_for = doc.get("scheduled_for")
             self.assertIsNotNone(scheduled_for)
-            self.assertLessEqual(antes, scheduled_for)
-            self.assertLessEqual(scheduled_for, depois)
+            # "Agora" menos a folga do relógio do worker (outbox_aprovacao.FOLGA_RELOGIO_WORKER).
+            self.assertLessEqual(antes - oa.FOLGA_RELOGIO_WORKER, scheduled_for)
+            self.assertLessEqual(scheduled_for, depois - oa.FOLGA_RELOGIO_WORKER)
 
             # Reproduz a semântica da query do worker: scheduled_for <= agora().
             # Um valor null/ausente nunca satisfaz essa comparação no Firestore.
