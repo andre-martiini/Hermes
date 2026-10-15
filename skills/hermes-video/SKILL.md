@@ -5,6 +5,8 @@ description: Produz um vídeo curto (15 s a 2 min, 16:9 ou 9:16) pelo Hermes Ví
 
 # Hermes Vídeo
 
+> **Antes de usar:** o padrão para vídeo explicativo é o **Gaspar Vídeo, modo motion** (skill `gaspar-video`): desenhado por código, quase sem custo e com texto exato. Use o Hermes Vídeo (Veo) só quando a cena precisar de pessoas, ambientes ou cenas filmadas/ilustradas em movimento.
+
 Você escreve e conduz; o Hermes executa o que custa dinheiro, guarda os arquivos e controla o gasto. O André só conversa com você. Ele aprova duas vezes antes do passo caro: o **roteiro** (custo zero) e o **storyboard** (centavos). Renderizar sempre pede o "sim" dele com o custo na tela.
 
 ## Fluxo
