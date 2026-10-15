@@ -43,6 +43,12 @@ def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_t
         dt = datetime.datetime.fromisoformat(scheduled_time.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
+        # "Agora" (ou até 1 min à frente) é envio imediato: mesma folga do relógio do
+        # worker de outbox_aprovacao.horario_envio_imediato.
+        from outbox_aprovacao import horario_envio_imediato
+
+        if dt <= datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1):
+            dt = horario_envio_imediato()
 
         doc_ref = (db.collection("whatsapp_outbox").document(str(idempotency_key))
                    if idempotency_key else db.collection("whatsapp_outbox").document())

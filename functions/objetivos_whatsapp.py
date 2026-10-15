@@ -46,8 +46,10 @@ ATIVOS = (EM_ANDAMENTO, AGUARDANDO_DONO, PAUSADO)
 
 PRAZO_PADRAO_MIN = 30
 PRAZO_MINIMO_AO_RETOMAR = datetime.timedelta(minutes=10)
-ESPERA_SILENCIO_S = 40
-INTERVALO_MIN_ENVIO_S = 20
+# 15 s de silêncio agrupa as mensagens seguidas do contato; 40 s deixava a resposta lenta
+# (teste do dono em 15/10/2026).
+ESPERA_SILENCIO_S = 15
+INTERVALO_MIN_ENVIO_S = 10
 IDADE_MAXIMA_MENSAGEM = datetime.timedelta(minutes=10)
 TRAVA_VALIDADE = datetime.timedelta(minutes=3)
 MENSAGENS_NA_CONVERSA = 30
@@ -451,8 +453,9 @@ def _enfileirar(db, objetivo: dict, texto: str, *, imediato: bool) -> dict:
 
 def _enviar(db, objetivo: dict, texto: str, *, dormir=time.sleep) -> dict:
     """Mensagem do meio da conversa: envio imediato, ou rascunho para o André aprovar
-    enquanto `aprovar_cada_mensagem` estiver ligado (o rascunho anterior não aprovado
-    é descartado: ficou velho com a mensagem nova do contato)."""
+    enquanto `aprovar_cada_mensagem` estiver ligado. O rascunho anterior ainda não
+    aprovado é descartado nos dois modos: ficou velho com a mensagem nova do contato,
+    e aprová-lo depois mandaria uma resposta fora de ordem."""
     import outbox_aprovacao
 
     ultimo = _como_data(objetivo.get("ultimo_envio_em"))
@@ -462,7 +465,7 @@ def _enviar(db, objetivo: dict, texto: str, *, dormir=time.sleep) -> dict:
             dormir(falta)
     imediato = not objetivo.get("aprovar_cada_mensagem")
     pendente = objetivo.get("rascunho_pendente_id")
-    if pendente and not imediato:
+    if pendente:
         try:
             outbox_aprovacao.descartar_rascunho(db, pendente)
         except Exception as exc:  # noqa: BLE001

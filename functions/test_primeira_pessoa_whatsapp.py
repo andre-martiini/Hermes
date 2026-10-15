@@ -101,6 +101,40 @@ class TestRegistroDoGaspar(unittest.TestCase):
         self.assertEqual((registro["origem"], registro["ref_id"]), ("objetivo_whatsapp", "obj-1"))
 
 
+class TestHorarioDeEnvioComFolga(unittest.TestCase):
+    """O worker escolhe por `scheduled_for <= agora` no relógio do notebook, ~3 s atrás do
+    servidor: envio "para agora" vai 30 s no passado para sair na passada em tempo real."""
+
+    def _limite(self):
+        return dt.datetime.now(dt.timezone.utc) - oa.FOLGA_RELOGIO_WORKER + dt.timedelta(seconds=2)
+
+    def test_envio_imediato_e_aprovacao_vao_com_folga(self):
+        db = _MockDb()
+        oa.criar_rascunho(db=db, contact_number=CHAT, message="Oi", motivo="m", origem="secretario_whatsapp",
+                          envio_imediato=True, destinatario_resolvido={"chat_id": CHAT, "nome": "Carlos"})
+        doc = next(iter(db.collection(oa.COLLECTION)._docs.values()))
+        self.assertLessEqual(doc["scheduled_for"], self._limite())
+
+        from test_outbox_aprovacao import _MockDb as _MockDbOutbox
+        db2 = _MockDbOutbox()
+        db2.collection(oa.COLLECTION)._docs["job-1"] = {"status": oa.STATUS_AGUARDANDO, "to_number": CHAT,
+                                                        "content": "Oi", "motivo": "m", "destinatario_nome": "C"}
+        oa.aprovar_rascunho(db2, "job-1")
+        self.assertLessEqual(db2.collection(oa.COLLECTION)._docs["job-1"]["scheduled_for"], self._limite())
+
+    def test_agendamento_para_agora_vai_com_folga_e_o_futuro_fica(self):
+        from tools.schedule_whatsapp_message import schedule_whatsapp_message
+
+        db = _MockDb()
+        agora = dt.datetime.now(dt.timezone.utc)
+        schedule_whatsapp_message(db, CHAT, "agora", agora.isoformat(), idempotency_key="a")
+        futuro = agora + dt.timedelta(hours=2)
+        schedule_whatsapp_message(db, CHAT, "depois", futuro.isoformat(), idempotency_key="b")
+        docs = db.collection(oa.COLLECTION)._docs
+        self.assertLessEqual(docs["a"]["scheduled_for"], self._limite())
+        self.assertEqual(docs["b"]["scheduled_for"], futuro)
+
+
 class TestSecretarioPrimeiraPessoa(unittest.TestCase):
     def setUp(self):
         for alvo, valor in (("hermes_core_logic._get_telegram_token", "tok"),

@@ -262,6 +262,17 @@ def _tipos_promovidos(db) -> set[str]:
     return promovidos
 
 
+# Envio "para agora" vai com o horário 30 s no passado. O worker escolhe a mensagem por
+# `scheduled_for <= agora` no relógio do notebook, que anda ~3 s atrás do servidor
+# (medido em 15/10/2026): sem a folga, o aviso em tempo real chega antes de a mensagem
+# "vencer" para ele, e ela espera a rodada do minuto seguinte (0 a 84 s, mediana 35 s).
+FOLGA_RELOGIO_WORKER = datetime.timedelta(seconds=30)
+
+
+def horario_envio_imediato() -> datetime.datetime:
+    return datetime.datetime.now(timezone.utc) - FOLGA_RELOGIO_WORKER
+
+
 def _registrar_se_autonomo(db, dados: dict, outbox_id: str) -> None:
     """Mensagem do Secretário ou do Objetivo sai em primeira pessoa: registra o texto
     final antes do envio para o eco `from_me` não ser lido como o André (mensagens_gaspar)."""
@@ -355,7 +366,7 @@ def criar_rascunho(
         # Envio imediato é "agendado para agora", não "sem agendamento": o worker
         # seleciona jobs pendentes com scheduled_for <= agora(), e essa comparação
         # no Firestore exclui documentos com o campo null/ausente.
-        scheduled_for = datetime.datetime.now(timezone.utc)
+        scheduled_for = horario_envio_imediato()
     else:
         promovidos = _tipos_promovidos(db)
         is_promovido = tipo_limpo.lower() in promovidos
@@ -577,7 +588,7 @@ def aprovar_rascunho(
                     "status": STATUS_PENDING,
                     "aprovado_em": firestore.SERVER_TIMESTAMP,
                     "aprovado_via": aprovado_via,
-                    "scheduled_for": agora_utc,
+                    "scheduled_for": agora_utc - FOLGA_RELOGIO_WORKER,
                 },
             )
             return {"status": "ok", "dados": data}
