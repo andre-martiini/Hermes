@@ -663,14 +663,15 @@ def _texto_da_mensagem(db, ref, msg: dict) -> str:
     texto = str(msg.get("content") or msg.get("text") or "").strip()
     tipo = str(msg.get("message_type") or "")
     if tipo in ("audio", "ptt"):
-        transcricao = msg.get("transcription_text") or (_transcrever(db, ref, msg) if not msg.get("from_me") else None)
+        transcricao = msg.get("transcription_text") or (transcrever_audio(db, ref, msg) if not msg.get("from_me") else None)
         return f"[áudio] {transcricao}" if transcricao else "[áudio sem transcrição]"
     if tipo in ("image", "video", "document", "sticker") and not texto:
         return f"[{tipo}]"
     return texto
 
 
-def _transcrever(db, ref, msg: dict) -> str | None:
+def transcrever_audio(db, ref, msg: dict) -> str | None:
+    """Transcreve o áudio da mensagem (Whisper/Gemini) e guarda em `transcription_text`."""
     storage_path = str((msg.get("media") or {}).get("storage_path") or "").strip()
     if not storage_path:
         return None
