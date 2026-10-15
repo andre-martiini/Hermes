@@ -55,6 +55,14 @@ class _Ref:
         self.col.docs.pop(self.id, None)
 
 
+def _compara(atual, op, valor):
+    if op == "==":
+        return atual == valor
+    if atual is None:
+        return False
+    return {"<": atual < valor, "<=": atual <= valor, ">": atual > valor, ">=": atual >= valor}[op]
+
+
 class _Consulta:
     def __init__(self, col, filtros=(), ordem=None, limite=None):
         self.col, self.filtros, self.ordem, self.limite = col, list(filtros), ordem, limite
@@ -72,7 +80,7 @@ class _Consulta:
 
     def stream(self):
         itens = [(k, v) for k, v in self.col.docs.items()
-                 if all(op == "==" and v.get(c) == val for c, op, val in self.filtros)]
+                 if all(_compara(v.get(c), op, val) for c, op, val in self.filtros)]
         if self.ordem:
             campo, desc = self.ordem
             itens.sort(key=lambda kv: kv[1].get(campo) or dt.datetime.min.replace(tzinfo=UTC), reverse=desc)

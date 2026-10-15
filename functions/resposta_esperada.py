@@ -14,6 +14,8 @@ Duas metades:
   (cache de 5 min), nunca a colecao `tarefas`.
 
 Atras de `system/settings.atencao.resposta_esperada.enabled` (padrao desligado).
+Com `avisar` tambem ligado, cada casamento de confianca media/alta passa pelo nivel 2
+(`resposta_esperada_avisos`): o Gemini flash classifica e o Andre e avisado no Telegram.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ _GENERICOS = {
     "analistas", "tecnicos", "senior", "grupo", "whatsapp",
 }
 
-_CACHE: dict = {"expira_em": 0.0, "habilitado": False, "entradas": []}
+_CACHE: dict = {"expira_em": 0.0, "habilitado": False, "avisar": False, "entradas": []}
 
 
 def _sem_acento(texto: str) -> str:
@@ -128,6 +130,7 @@ def construir_indice(tarefas: list[dict], anterior: list[dict] | None, agora: da
                 "acao_id": tarefa["id"],
                 "acao_titulo": str(tarefa.get("titulo") or "")[:70],
                 "etapa_id": etapa.get("id"),
+                "etapa_texto": str(etapa.get("text") or etapa.get("texto") or "")[:200],
                 "aguardando_de": de,
                 "nomes": extrair_nomes(de),
                 "chat_ids": chat_ids,
@@ -213,11 +216,14 @@ def casar_mensagem(mensagem: dict, entradas: list[dict]) -> dict:
     return resultado
 
 
-def _flag_habilitada(db) -> bool:
+def _config(db) -> dict:
     doc = db.collection("system").document("settings").get()
     settings = doc.to_dict() if doc.exists else {}
-    cfg = ((settings or {}).get("atencao") or {}).get("resposta_esperada") or {}
-    return bool(cfg.get("enabled", False))
+    return ((settings or {}).get("atencao") or {}).get("resposta_esperada") or {}
+
+
+def _flag_habilitada(db) -> bool:
+    return bool(_config(db).get("enabled", False))
 
 
 def _ler_indice(db) -> list[dict]:
@@ -226,16 +232,18 @@ def _ler_indice(db) -> list[dict]:
 
 
 def _limpar_cache() -> None:
-    _CACHE.update(expira_em=0.0, habilitado=False, entradas=[])
+    _CACHE.update(expira_em=0.0, habilitado=False, avisar=False, entradas=[])
 
 
 def _estado(db) -> tuple[bool, list[dict]]:
     agora = datetime.now(timezone.utc).timestamp()
     if agora >= _CACHE["expira_em"]:
-        habilitado = _flag_habilitada(db)
+        cfg = _config(db)
+        habilitado = bool(cfg.get("enabled", False))
         _CACHE.update(
             expira_em=agora + _CACHE_TTL_SEG,
             habilitado=habilitado,
+            avisar=habilitado and bool(cfg.get("avisar", False)),
             entradas=_ler_indice(db) if habilitado else [],
         )
     return _CACHE["habilitado"], _CACHE["entradas"]
@@ -290,4 +298,11 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None) -> dic
                 "criado_em": agora.isoformat(),
             })
     db.collection(CONTADORES_COLLECTION).document(agora.strftime("%Y-%m-%d")).set(contadores, merge=True)
+    if resultado["matches"] and _CACHE.get("avisar"):
+        try:
+            import resposta_esperada_avisos
+
+            resultado["nivel2"] = resposta_esperada_avisos.avaliar(db, mensagem, resultado, entradas, agora=agora)
+        except Exception as exc:  # noqa: BLE001 — o aviso nunca derruba o registro do sinal
+            print(f"[RespostaEsperada] Falha no nivel 2: {exc}")
     return resultado
