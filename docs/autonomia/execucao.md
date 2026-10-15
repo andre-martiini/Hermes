@@ -350,10 +350,11 @@ merge autônomo, sha a4aa80d). O bloco P05 sub-entrega 9/N foi movido, em
 docs/autonomia/execucao-archive-p05sub9.md — pela tarefa agendada de
 avanço autônomo, ao acrescentar a entrada da sub-entrega P05 10/N
 (wiring de `obter_estado_atual` para consumir a saúde das integrações,
-item (d) da RECOMENDACAO do bloco anterior) (o arquivo ativo estava em
-50629 bytes, no limite usual de ~50KB, sem re-arquivamento desde o
-quadragésimo oitavo arquivo). Nenhum conteúdo foi alterado — o bloco já
-estava com `estado: validado` (confirmado pela própria PR #387, mesclada por
+item (d) da RECOMENDACAO do bloco anterior, pendência registrada desde
+a sub-entrega 3/N) (o arquivo ativo estava em 50629 bytes, no limite
+usual de ~50KB, sem re-arquivamento desde o quadragésimo oitavo
+arquivo). Nenhum conteúdo foi alterado — o bloco já estava com
+`estado: validado` (confirmado pela própria PR #387, mesclada por
 aquela execução sob a autoridade de merge autônomo, sha 009fa1f; a
 entrada do diário foi registrada por uma execução seguinte via PR #388,
 sha 67e1e27). O bloco P05 sub-entrega 10/N foi movido, em 30/09/2026,
