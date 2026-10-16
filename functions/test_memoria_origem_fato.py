@@ -26,6 +26,7 @@ from autonomy.context import (
     origem_fato_de_leitura,
     origem_fato_para_canal_de_salvar_memoria,
     origem_fato_para_salvar_memoria,
+    origem_fato_para_salvar_pop,
 )
 from tools import hermes_tools
 from tools.tool_context import ToolContext
@@ -265,6 +266,50 @@ class TestOrigemFatoDeLeitura(unittest.TestCase):
         self.assertEqual(
             origem_fato_de_leitura({"origem_fato": 123}), LEGADO_DESCONHECIDO
         )
+
+
+class TestOrigemFatoParaSalvarPop(unittest.TestCase):
+    """`origem_fato_para_salvar_pop` (P06 sub-entrega 4/N, `salvar_pop_global`
+    em tools/telegram_extended.py) -- acrescentada em resposta ao achado real
+    do Codex "Derive POP provenance from its actual author" (ver docstring
+    da função). Testes diretos no nível da função, sem passar pelo handler
+    MCP (esse caminho já é coberto por `TestSalvarPopGlobalOrigemFato` em
+    test_telegram_extended.py).
+
+    ACHADO DE PROCESSO (6a rodada de revisão adversarial sobre esta mesma
+    sub-entrega): a 1a versão desta classe foi inserida por engano DENTRO do
+    corpo de `TestOrigemFatoDeLeitura` (entre seu 1o e 2o método), fazendo os
+    8 métodos restantes daquela classe serem "herdados" por esta aqui -- um
+    `pytest -k TestOrigemFatoDeLeitura` rodava só 1 de 9 testes daquela
+    classe, com falsa confiança de cobertura completa. A contagem total de
+    testes/subtestes nunca mudou (nada ficou sem rodar), só a ORGANIZAÇÃO
+    estava errada. Corrigido movendo os 8 métodos de volta para
+    `TestOrigemFatoDeLeitura` (acima) e esta classe para depois dela."""
+
+    def test_true_explicito_e_declaracao_humana(self):
+        self.assertEqual(origem_fato_para_salvar_pop(True), DECLARACAO_HUMANA)
+
+    def test_false_explicito_e_inferencia_agente(self):
+        self.assertEqual(origem_fato_para_salvar_pop(False), INFERENCIA_AGENTE)
+
+    def test_ausente_preserva_declaracao_humana(self):
+        """Sem argumento (cliente MCP mais antigo) -- mesmo default
+        contratual de antes desta correção."""
+        self.assertEqual(origem_fato_para_salvar_pop(), DECLARACAO_HUMANA)
+        self.assertEqual(origem_fato_para_salvar_pop(None), DECLARACAO_HUMANA)
+
+    def test_valor_mal_tipado_nunca_e_promovido_a_declaracao_humana(self):
+        """Achado real de revisão adversarial sobre a 1a versão deste fix:
+        comparar só com `is False` deixava qualquer valor que não fosse o
+        bool `False` exato (ex.: a STRING "false", que não é `is False`)
+        cair no `else` e devolver DECLARACAO_HUMANA por engano -- a mesma
+        superestimação de proveniência que o achado original do Codex
+        queria eliminar. A versão corrigida só concede DECLARACAO_HUMANA
+        para o literal `True` exato; qualquer outro valor PRESENTE
+        (mal-tipado ou um `False` de verdade) cai em INFERENCIA_AGENTE."""
+        for valor in ("false", "False", "true", 0, 1, "", "qualquer coisa", []):
+            with self.subTest(valor=valor):
+                self.assertEqual(origem_fato_para_salvar_pop(valor), INFERENCIA_AGENTE)
 
 
 if __name__ == "__main__":
