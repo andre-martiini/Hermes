@@ -26,6 +26,22 @@ de `pops_diretrizes`/`conhecimento_mestre` que escrevem. As novas classes
 `TestSalvarPopGlobalOrigemFato` e os métodos novos acrescentados a
 `TestResolverConflitoProcedimentoNaoIdempotente` cobrem isso; as classes já
 existentes acima não mudam de comportamento (aditivo).
+
+CORREÇÃO (achados reais do Codex, revisão automática da PR desta
+sub-entrega, aplicados antes do merge):
+- "Derive POP provenance from its actual author": `salvar_pop_global` grava
+  incondicionalmente `DECLARACAO_HUMANA`, mas um cliente MCP pode pedir ao
+  modelo para CRIAR/REFINAR o texto do POP em vez de fornecê-lo literalmente
+  -- `origem_fato_para_salvar_pop` (novo, `autonomy/context.py`) resolve a
+  partir do slot novo `usuario_forneceu_o_texto_literal`, mesmo padrão de
+  `origem_fato_para_salvar_memoria`/`usuario_afirmou_diretamente`. Testes
+  novos em `TestSalvarPopGlobalOrigemFato`.
+- "Reject empty justification before tagging human provenance":
+  `resolver_conflito_procedimento` com `confirmar_contrato=True` e
+  `justificativa_humana` vazia/só espaços gravava `origem_fato=
+  DECLARACAO_HUMANA` sem nenhuma justificativa humana real -- agora rejeita
+  ANTES de escrever. Testes novos em
+  `TestResolverConflitoProcedimentoNaoIdempotente`.
 """
 
 import unittest
@@ -34,7 +50,12 @@ from unittest import mock
 from firebase_admin import firestore
 
 from test_outbox_aprovacao import _MockDb
-from autonomy.context import DECLARACAO_HUMANA, LEGADO_DESCONHECIDO, origem_fato_de_leitura
+from autonomy.context import (
+    DECLARACAO_HUMANA,
+    INFERENCIA_AGENTE,
+    LEGADO_DESCONHECIDO,
+    origem_fato_de_leitura,
+)
 from tools import telegram_extended
 
 
@@ -131,6 +152,77 @@ class TestSalvarPopGlobalOrigemFato(unittest.TestCase):
         (pop_doc,) = docs.values()
         self.assertEqual(pop_doc["origem_fato"], DECLARACAO_HUMANA)
 
+    def test_usuario_forneceu_o_texto_literal_false_grava_inferencia_agente(self):
+        """Achado real do Codex: quando o PRÓPRIO CHAMADOR declara que foi
+        ele (o modelo) quem redigiu o texto do POP -- não o usuário --,
+        `origem_fato` deve rebaixar para `INFERENCIA_AGENTE`, não
+        `DECLARACAO_HUMANA`."""
+        telegram_extended.execute(
+            "salvar_pop_global",
+            {
+                "titulo": "Como abrir processo SIPAC",
+                "instrucao_sistema": "Siga o roteiro X.",
+                "gatilhos": ["abrir processo", "sipac"],
+                "usuario_forneceu_o_texto_literal": False,
+            },
+            self.db,
+        )
+        docs = self.db.collection("pops_diretrizes")._docs
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], INFERENCIA_AGENTE)
+
+    def test_usuario_forneceu_o_texto_literal_true_grava_declaracao_humana(self):
+        telegram_extended.execute(
+            "salvar_pop_global",
+            {
+                "titulo": "Como abrir processo SIPAC",
+                "instrucao_sistema": "Siga o roteiro X.",
+                "gatilhos": ["abrir processo", "sipac"],
+                "usuario_forneceu_o_texto_literal": True,
+            },
+            self.db,
+        )
+        docs = self.db.collection("pops_diretrizes")._docs
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], DECLARACAO_HUMANA)
+
+    def test_usuario_forneceu_o_texto_literal_ausente_preserva_declaracao_humana(self):
+        """Cliente MCP mais antigo que ainda não manda o slot novo -- o
+        contrato da tool (texto já escrito pelo usuário) continua valendo
+        por padrão, igual ao comportamento anterior a esta correção."""
+        self._chamar()
+        docs = self.db.collection("pops_diretrizes")._docs
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], DECLARACAO_HUMANA)
+
+    def test_usuario_forneceu_o_texto_literal_string_false_nao_e_promovido(self):
+        """Achado real de revisão adversarial sobre a 1a versão deste fix:
+        nada neste codebase valida/coage o JSON de entrada contra o schema
+        MCP antes de chegar aqui -- um cliente cru podia mandar a STRING
+        "false" em vez do booleano JSON `false`. `bool("false")` é `True`
+        em Python, então uma comparação só com `is False` (1a versão)
+        deixava a string cair no `else` e gravar DECLARACAO_HUMANA por
+        engano -- exatamente a superestimação que este fix existe para
+        eliminar. `origem_fato_para_salvar_pop` agora só concede
+        DECLARACAO_HUMANA para o literal `True` exato (ver
+        autonomy/context.py); qualquer outro valor presente, mal-tipado ou
+        não, cai no lado fraco INFERENCIA_AGENTE."""
+        for valor_mal_tipado in ("false", "False", 0, "qualquer coisa"):
+            with self.subTest(valor=valor_mal_tipado):
+                db = _MockDb()
+                telegram_extended.execute(
+                    "salvar_pop_global",
+                    {
+                        "titulo": "Como abrir processo SIPAC",
+                        "instrucao_sistema": "Siga o roteiro X.",
+                        "gatilhos": ["abrir processo", "sipac"],
+                        "usuario_forneceu_o_texto_literal": valor_mal_tipado,
+                    },
+                    db,
+                )
+                (pop_doc,) = db.collection("pops_diretrizes")._docs.values()
+                self.assertEqual(pop_doc["origem_fato"], INFERENCIA_AGENTE)
+
     def test_pop_antigo_sem_campo_le_como_legado_desconhecido(self):
         """Passo 1 do pacote: "ler memória antiga com origem legacy_unknown"
         -- um POP gravado antes desta sub-entrega (sem `origem_fato`) não
@@ -145,6 +237,56 @@ class TestSalvarPopGlobalOrigemFato(unittest.TestCase):
         })
         doc = self.db.collection("pops_diretrizes").document("pop-antigo").get().to_dict()
         self.assertEqual(origem_fato_de_leitura(doc), LEGADO_DESCONHECIDO)
+
+
+class TestTemConteudoVisivel(unittest.TestCase):
+    """`_tem_conteudo_visivel` (tools/telegram_extended.py) -- helper novo,
+    testado direto no nível da função, sem passar pelo handler MCP (esse
+    caminho já é coberto pelos testes de
+    `TestResolverConflitoProcedimentoNaoIdempotente` acima)."""
+
+    def test_texto_normal_tem_conteudo_visivel(self):
+        self.assertTrue(telegram_extended._tem_conteudo_visivel("confirmado pelo revisor"))
+
+    def test_vazio_ou_so_espaco_ascii_nao_tem_conteudo_visivel(self):
+        for valor in ("", " ", "   ", "\t\n"):
+            with self.subTest(valor=repr(valor)):
+                self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
+
+    def test_espaco_unicode_comum_nao_tem_conteudo_visivel(self):
+        """NBSP (U+00A0) e EM SPACE (U+2003) são categoria "Zs" (space
+        separator) -- `str.isspace()` já os reconhece, sem precisar do
+        tratamento especial de `Cf`."""
+        for valor in (" ", " ", "  "):
+            with self.subTest(valor=repr(valor)):
+                self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
+
+    def test_caractere_de_formatacao_invisivel_nao_tem_conteudo_visivel(self):
+        for valor in ("​", "﻿", "᠎"):
+            with self.subTest(valor=repr(valor)):
+                self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
+
+    def test_diacritico_combinante_solto_nao_tem_conteudo_visivel(self):
+        """Achado real da 2a rodada de revisão adversarial sobre este
+        helper: um acento combinante (categoria "Mn") sem caractere-base,
+        ou um variation selector, não é visível para um humano -- a 1a
+        versão deste helper (só espaço + categoria "Cf") tratava isso como
+        conteúdo real."""
+        for valor in ("́", "️", "́́"):
+            with self.subTest(valor=repr(valor)):
+                self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
+
+    def test_caractere_de_controle_nao_tem_conteudo_visivel(self):
+        """Mesmo achado -- NUL/DEL e outros caracteres de controle
+        (categoria "Cc") não imprimem nada visível."""
+        for valor in ("\x00", "\x1f", "\x7f", "\x00\x01\x02"):
+            with self.subTest(valor=repr(valor)):
+                self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
+
+    def test_caractere_invisivel_misturado_com_texto_real_tem_conteudo_visivel(self):
+        """O ponto não é banir caracteres invisíveis -- é não deixá-los
+        PASSAR POR conteúdo quando são tudo o que existe na string."""
+        self.assertTrue(telegram_extended._tem_conteudo_visivel("​ok​"))
 
 
 class TestAtualizarPersonalidadeIdempotente(unittest.TestCase):
@@ -281,6 +423,120 @@ class TestResolverConflitoProcedimentoNaoIdempotente(unittest.TestCase):
         evoluido = next(v for k, v in docs.items() if k != "proc-1")
         self.assertEqual(evoluido["origem_fato"], DECLARACAO_HUMANA)
         self.assertEqual(evoluido["autor"], "human_review_telegram")
+
+    def test_confirmar_contrato_com_justificativa_vazia_e_rejeitado_sem_escrever(self):
+        """Achado real do Codex: `confirmar_contrato=True` com
+        `justificativa_humana=""` gravava `origem_fato=DECLARACAO_HUMANA` e
+        `justificativa_da_regra=""` sem nenhuma justificativa humana real --
+        agora é rejeitado ANTES de qualquer escrita (nem o arquivamento do
+        procedimento original acontece)."""
+        import json
+
+        resultado = telegram_extended.execute(
+            "resolver_conflito_procedimento",
+            {
+                "id_procedimento": "proc-1",
+                "justificativa_humana": "",
+                "confirmar_contrato": True,
+            },
+            self.db,
+        )
+        self.assertTrue(resultado.startswith("ERRO|"))
+        corpo = json.loads(resultado[len("ERRO|"):])
+        self.assertEqual(corpo["reason"], "justificativa_humana_obrigatoria")
+        docs = self.db.collection("conhecimento_mestre")._docs
+        self.assertEqual(list(docs.keys()), ["proc-1"])
+        self.assertEqual(docs["proc-1"]["status"], "ativo", "não pode arquivar sem justificativa válida")
+
+    def test_confirmar_contrato_com_justificativa_so_caractere_invisivel_e_rejeitado(self):
+        """Achado real de revisão adversarial independente: `.strip()` não
+        remove caracteres de formatação Unicode invisíveis (ZERO WIDTH
+        SPACE U+200B, BOM U+FEFF, MONGOLIAN VOWEL SEPARATOR U+180E) -- uma
+        justificativa composta só por um desses caracteres não pode passar
+        pela validação como se fosse conteúdo real."""
+        for caractere_invisivel in ("​", "﻿", "᠎", "​​﻿", "́", "\x00\x01"):
+            with self.subTest(caractere=repr(caractere_invisivel)):
+                db = _MockDb()
+                db.collection("conhecimento_mestre").document("proc-1").set({
+                    "titulo": "Procedimento X",
+                    "conteudo_regra": "faça Y",
+                    "status": "ativo",
+                })
+                resultado = telegram_extended.execute(
+                    "resolver_conflito_procedimento",
+                    {
+                        "id_procedimento": "proc-1",
+                        "justificativa_humana": caractere_invisivel,
+                        "confirmar_contrato": True,
+                    },
+                    db,
+                )
+                self.assertTrue(resultado.startswith("ERRO|"))
+                docs = db.collection("conhecimento_mestre")._docs
+                self.assertEqual(list(docs.keys()), ["proc-1"])
+
+    def test_confirmar_contrato_com_justificativa_so_espacos_e_rejeitado(self):
+        """Mesmo achado -- `justificativa_humana` só com espaços em branco
+        não deve passar pela validação (`.strip()` já usado no handler)."""
+        resultado = telegram_extended.execute(
+            "resolver_conflito_procedimento",
+            {
+                "id_procedimento": "proc-1",
+                "justificativa_humana": "   ",
+                "confirmar_contrato": True,
+            },
+            self.db,
+        )
+        self.assertTrue(resultado.startswith("ERRO|"))
+        docs = self.db.collection("conhecimento_mestre")._docs
+        self.assertEqual(list(docs.keys()), ["proc-1"])
+
+    def test_confirmar_contrato_mal_tipado_nao_dispara_escrita_destrutiva(self):
+        """Achado real de revisão adversarial independente sobre a correção
+        anterior: `confirmar = bool(slots.get("confirmar_contrato"))`
+        tratava a STRING "false" como confirmação de verdade
+        (`bool("false")` é `True` em Python) -- um cliente que mandasse essa
+        string pedindo só o preview disparava a escrita irreversível
+        (arquivamento + documento novo) com a intenção invertida. Só o
+        literal `True` exato deve confirmar agora."""
+        for valor_mal_tipado in ("false", "False", 0, "qualquer coisa"):
+            with self.subTest(valor=valor_mal_tipado):
+                db = _MockDb()
+                db.collection("conhecimento_mestre").document("proc-1").set({
+                    "titulo": "Procedimento X",
+                    "conteudo_regra": "faça Y",
+                    "status": "ativo",
+                })
+                resultado = telegram_extended.execute(
+                    "resolver_conflito_procedimento",
+                    {
+                        "id_procedimento": "proc-1",
+                        "justificativa_humana": "justificativa nao vazia",
+                        "confirmar_contrato": valor_mal_tipado,
+                    },
+                    db,
+                )
+                self.assertIn("Contrato de Entendimento", resultado)
+                docs = db.collection("conhecimento_mestre")._docs
+                self.assertEqual(list(docs.keys()), ["proc-1"], "nao deve arquivar nem criar documento novo")
+                self.assertEqual(docs["proc-1"]["status"], "ativo")
+
+    def test_sem_confirmar_contrato_com_justificativa_vazia_ainda_mostra_contrato(self):
+        """A validação nova só bloqueia quando `confirmar_contrato=True` --
+        o preview (contrato de entendimento) continua aceitando
+        `justificativa_humana` vazia, para ecoar ao usuário o que falta
+        preencher antes de confirmar."""
+        resultado = telegram_extended.execute(
+            "resolver_conflito_procedimento",
+            {
+                "id_procedimento": "proc-1",
+                "justificativa_humana": "",
+                "confirmar_contrato": False,
+            },
+            self.db,
+        )
+        self.assertIn("Contrato de Entendimento", resultado)
+        self.assertFalse(resultado.startswith("ERRO|"))
 
 
 class TestEditarPlanoAcaoIdempotente(unittest.TestCase):
