@@ -205,7 +205,10 @@ def origem_fato_para_salvar_memoria(
     return origem_fato_para_canal_de_salvar_memoria(canal)
 
 
-def origem_fato_para_salvar_pop(usuario_forneceu_o_texto: bool | None = None) -> str:
+def origem_fato_para_salvar_pop(
+    usuario_forneceu_o_texto: bool | None = None,
+    origem_fato_existente: str | None = None,
+) -> str:
     """Proveniência de um POP novo/atualizado via `salvar_pop_global`
     (`tools/telegram_extended.py`), a partir de `usuario_forneceu_o_texto` --
     parâmetro NOVO da própria tool (ver
@@ -213,6 +216,22 @@ def origem_fato_para_salvar_pop(usuario_forneceu_o_texto: bool | None = None) ->
     preenche a cada vez, declarando se foi o USUÁRIO quem forneceu o texto
     do procedimento literalmente (copiou/colou, ditou, ou escreveu palavra
     por palavra) nesta conversa.
+
+    `origem_fato_existente` é o `origem_fato` JÁ GRAVADO no documento, só
+    relevante numa ATUALIZAÇÃO (merge sobre um POP existente, mesmo título
+    ou mesmo gatilho) -- `None` numa criação, onde não há nada a preservar.
+    Achado real de revisão adversarial independente (sessão de 17/10/2026,
+    fora das 7 rodadas originais desta sub-entrega): sem este parâmetro, uma
+    chamada de ATUALIZAÇÃO que omita `usuario_forneceu_o_texto_literal` (ex.:
+    um segundo gatilho acrescentado ao mesmo POP, numa conversa onde o
+    modelo simplesmente não repete o slot opcional) cairia no mesmo default
+    `DECLARACAO_HUMANA` de uma criação nova -- sobrescrevendo em silêncio um
+    `INFERENCIA_AGENTE` corretamente rebaixado por uma chamada anterior. Isso
+    é exatamente a superestimação de proveniência que esta função existe
+    para eliminar, só que pela porta de trás do caminho de update: a lacuna
+    está na ausência de informação nova sobre uma atualização, não na
+    criação de um fato sem proveniência alguma ainda registrada (o caso que
+    a analogia original com `canal="mcp"` cobre).
 
     Acrescentada DEPOIS da PR original de `salvar_pop_global` gravar
     `origem_fato`, em resposta a um achado real do Codex (revisão
@@ -255,5 +274,7 @@ def origem_fato_para_salvar_pop(usuario_forneceu_o_texto: bool | None = None) ->
     nunca no lado forte.
     """
     if usuario_forneceu_o_texto is None:
+        if isinstance(origem_fato_existente, str) and origem_fato_existente in ORIGENS_FATO_VALIDAS:
+            return origem_fato_existente
         return DECLARACAO_HUMANA
     return DECLARACAO_HUMANA if usuario_forneceu_o_texto is True else INFERENCIA_AGENTE
