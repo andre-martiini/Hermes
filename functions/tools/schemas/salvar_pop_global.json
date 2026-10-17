@@ -30,6 +30,10 @@
       "conteudo": {
         "type": "string",
         "description": "Apelido de instrucao_sistema"
+      },
+      "usuario_forneceu_o_texto_literal": {
+        "type": "boolean",
+        "description": "true somente quando o PRÓPRIO USUÁRIO forneceu o texto deste procedimento literalmente nesta conversa (copiou/colou, ditou, ou escreveu palavra por palavra). false quando VOCÊ redigiu ou elaborou o texto final (instrucao_sistema) a partir de um pedido vago do usuário, sem reproduzir palavras dele. Omitido, assume-se que o texto é do usuário."
       }
     },
     "required": [
