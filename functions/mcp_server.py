@@ -1277,9 +1277,11 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         return erro_valores
 
     # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
-    # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
-    # `ai_profile.historico_deduzido` congela — sem erro e sem log. Registrar
-    # aqui mantem o sistema sabendo o que o usuario anda pedindo.
+    # interacao migrando para clientes MCP, aquele caminho para de ser exercido.
+    # Registrar aqui mantem o sistema sabendo o que o usuario anda pedindo — mas
+    # em `ai_profile.atividade_operacional`, trilha separada de
+    # `historico_deduzido` (achado A07 / P06 passo 3): consulta de rotina nao
+    # pode virar preferencia pessoal.
     try:
         from mcp_signals import registrar as registrar_sinal
 

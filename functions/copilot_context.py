@@ -70,6 +70,19 @@ def _format_user_profile(db, uid: str | None) -> str:
                 f"- historico_deduzido_recente: {_clean(json.dumps(compact, ensure_ascii=False), 700)}"
             )
 
+    atividade_operacional = ai_profile.get("atividade_operacional") or []
+    if atividade_operacional:
+        compact_atividade = [
+            {"texto": item.get("texto"), "at": item.get("at")}
+            for item in atividade_operacional[-5:]
+            if item.get("texto")
+        ]
+        if compact_atividade:
+            lines.append(
+                "- atividade_operacional_recente (uso de ferramentas, NAO e preferencia): "
+                f"{_clean(json.dumps(compact_atividade, ensure_ascii=False), 700)}"
+            )
+
     if len(lines) == 1:
         lines.append(f"- id: {user_doc['id']}")
     return "\n".join(lines)
