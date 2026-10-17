@@ -293,7 +293,7 @@ class TestTemConteudoVisivel(unittest.TestCase):
         """NBSP (U+00A0) e EM SPACE (U+2003) são categoria "Zs" (space
         separator) -- `str.isspace()` já os reconhece, sem precisar do
         tratamento especial de `Cf`."""
-        for valor in (" ", " ", "  "):
+        for valor in ("\xa0", " ", "\xa0 "):
             with self.subTest(valor=repr(valor)):
                 self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
 
