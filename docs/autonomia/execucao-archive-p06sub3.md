@@ -1,6 +1,24 @@
 # Arquivo de execução — P06 sub-entrega 3/N
 
-Bloco movido de docs/autonomia/execucao.md em 2026-10-14, pela tarefa agendada de avanço autônomo, ao acrescentar a entrada da sub-entrega P06 4/N (fecha a limitação cross-turn já proposta por esta 3/N: dedup por memoria_id pendente, com fallback também para fato_atualizado/categoria, protegido contra corrupção entre conflitos concorrentes) — o arquivo ativo estava em 60039 bytes, acima do limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo arquivo de arquivo anterior, execucao-archive-p06sub2.md. Nesta mesma escrita, o campo `estado` do bloco movido foi corrigido de `pronto_para_revisao` para `validado`: esta execução confirmou que a PR #447 foi mesclada manualmente pelo André em 2026-10-13 (merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32, HEAD de origin/main confirmado por clone local). Nota sobre a verificação: uma 1ª leitura via WebFetch de `github.com/.../pull/447` (sem sufixo) mostrou "Open" — divergência resolvida lendo `.../pull/447/files` (mostrou "Merged" corretamente) e confirmando pelo clone local, cujo HEAD de `origin/main` é o próprio merge commit; aparenta ser cache/renderização incompleta do lado do GitHub na página sem sufixo, não um erro desta execução — registrado aqui para quem revisar no futuro não estranhar a inconsistência entre as duas leituras. Também confirmado nesta mesma verificação: a PR concorrente #439 (abordagem por botões inline para o mesmo problema) permanece ABERTA e não mesclada — decisão de reconciliar, fechar ou aproveitar algo dela é do André; não tocada por esta execução (política vigente: nunca mesclar nem fechar PR de outra execução). Nenhum outro conteúdo do bloco foi alterado.
+Bloco movido de docs/autonomia/execucao.md em 2026-10-15, pela tarefa
+agendada de avanço autônomo, por ter passado de 60039 bytes, acima do
+limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo
+arquivo de arquivo anterior, execucao-archive-p06sub2.md. Nesta mesma
+escrita, o campo `estado` do bloco movido foi corrigido de
+`pronto_para_revisao` para `validado`: esta execução confirmou, via
+`git fetch`/`git log --merges` sobre um clone local (método mais
+confiável que WebFetch de página pública, lição já registrada pelo
+Blueprint da Autonomia após um erro anterior na direção contrária, em
+13/10/2026), que a PR #447 foi de fato mesclada em 2026-10-13T23:38:33Z
+(merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32,
+`Merge pull request #447 from
+andre-martiini/claude/p06-sub3-memoria-conflito-persistente`). Nenhum
+outro conteúdo do bloco foi alterado.
+
+Esta execução NÃO abriu nenhuma sub-entrega de código nova — ver o
+bloco desta mesma data ao final de execucao.md para o motivo (três PRs
+do pacote P06 já abertas e aguardando decisão do André: #449, #451 e
+#452) e o relato completo da auditoria feita.
 
 ---
 
