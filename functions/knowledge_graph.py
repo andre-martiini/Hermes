@@ -52,6 +52,7 @@ from gemini_cost_controls import (
     embed_content_logged,
     generate_content_logged,
 )
+from autonomy.context import RESUMO_DERIVADO
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -1075,6 +1076,13 @@ Responda APENAS com uma das opções acima, sem mais texto."""
         "resumo": summary[:600],
         "data_criacao": now,
         "data_atualizacao": now,
+        # P06 passo 8 (docs/plano-hermes-autonomo-2026-09-06.md): nó de
+        # procedimento/POP, sempre um resumo derivado automaticamente do
+        # diário de uma tarefa concluída -- nunca uma declaração humana
+        # direta nem outra categoria de autonomy/context.py::ORIGENS_FATO_NOVO.
+        # Ver autonomy/context.py (docstring do módulo) para por que este
+        # valor não varia por canal/chamador, diferente de salvar_memoria_global.
+        "origem_fato": RESUMO_DERIVADO,
     })
     print(f"[KG Fase2] Nó inédito criado: {new_id}")
     return new_id, 1.0
@@ -1152,6 +1160,11 @@ Resumo:"""
             "task_ids": existing_ids,
             "resumo": summary[:600],
             "data_atualizacao": datetime.now(timezone.utc).isoformat(),
+            # P06 passo 8: regrava a cada atualização (idempotente -- o nó
+            # já é sempre RESUMO_DERIVADO desde a criação), o que também
+            # faz o backfill lazy de um nó criado antes desta sub-entrega
+            # (sem origem_fato nenhum) assim que ele for cristalizado de novo.
+            "origem_fato": RESUMO_DERIVADO,
         })
 
     # ── Grava aresta na coleção knowledge_edges ───────────────────────────────

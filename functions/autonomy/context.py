@@ -100,11 +100,36 @@ NÃO tocado por esta sub-entrega, registrado como pendência:
   documento (sem `tipo`/`texto_memoria`; nós de procedimento, não de fato) e
   corresponde ao passo 8 do pacote (mapa de POPs), não ao passo 1. Marcar
   esses nós como `resumo_derivado` é trabalho de uma sub-entrega própria que
-  decida a forma final desses nós.
+  decida a forma final desses nós. (Ver "Sub-entrega seguinte (P06
+  sub-entrega 4/N)" abaixo, que resolve isto.)
 - "Validade" (a segunda metade do passo 1) corresponde ao passo 4 do pacote
   ("Modelar fatos temporais e relação supersedes") e não é modelada aqui --
   `memoria_status` já existe (sempre "ativa" hoje, nunca lido nem transicionado
   em nenhum lugar do código) e fica como está, sem colisão com este módulo.
+
+## Sub-entrega seguinte (P06 sub-entrega 4/N)
+
+`knowledge_graph.py` (`_dual_pass_find_or_create_node`, criação de nó, e
+`_crystallize_task`, atualização de nó) passou a gravar `origem_fato=
+RESUMO_DERIVADO` nos dois pontos de escrita de `knowledge_nodes` que
+correspondem a nós de PROCEDIMENTO (não de fato) -- quarto chamador deste
+módulo, e o primeiro que não passa por `_save_memory_node`/
+`salvar_memoria_global`. Confirmado que NENHUMA decisão de schema nova era
+necessária: esses nós já são discriminados dos nós de memória/fato pela
+AUSÊNCIA do campo `tipo` (`main.py::MEMORY_NODE_TYPES` e
+`_find_similar_memory_nodes` só consideram `tipo in {"regra_global",
+"fato_isolado"}` -- um nó de procedimento nunca grava `tipo`, então nunca
+colide com busca de memória/fato, antes ou depois desta sub-entrega) --
+não foi preciso introduzir nenhum campo discriminador novo. O valor é
+sempre `RESUMO_DERIVADO`, sem ramificação por chamador/canal (diferente de
+`salvar_memoria_global`): um nó de procedimento é, por definição, um
+resumo do diário de uma tarefa gerado por LLM, nunca uma declaração humana
+direta. `origem_fato_de_leitura` (acima) já funciona sem nenhuma mudança
+para esses nós -- é genérica a qualquer dict, não específica de uma
+coleção ou forma de documento. Nenhum consumidor de leitura foi tocado
+(mesmo estado do passo 6, "ainda não implementado", citado na docstring
+original do módulo) -- esta sub-entrega só fecha a escrita, como as
+anteriores fecharam a escrita dos outros três chamadores.
 """
 
 from __future__ import annotations
