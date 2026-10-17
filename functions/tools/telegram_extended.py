@@ -16,6 +16,16 @@ from gemini_cost_controls import (
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
+# P06 sub-entrega 4/N (docs/plano-hermes-autonomo-2026-09-06.md, passo 1 do
+# pacote): proveniencia dos documentos de POP/procedimento gravados por esta
+# funcao. Ver comentario em `salvar_pop_global`/`resolver_conflito_procedimento`
+# abaixo para a justificativa de usar DECLARACAO_HUMANA aqui, em vez do
+# helper `origem_fato_para_canal_de_salvar_memoria` (que depende de `canal`).
+# `origem_fato_para_salvar_pop` foi acrescentada apos a PR ser aberta, em
+# resposta a um achado real do Codex ("Derive POP provenance from its
+# actual author") -- ver seu docstring em autonomy/context.py.
+from autonomy.context import DECLARACAO_HUMANA, origem_fato_para_salvar_pop
+
 _TEXT_MODEL_ID = os.environ.get("TELEGRAM_EXTENDED_TEXT_MODEL", GEMINI_BALANCED_MODEL)
 
 
@@ -26,6 +36,31 @@ def _get_api_keys(db):
 
 def _normalize_pop_text(text):
     return "".join(ch for ch in unicodedata.normalize("NFKD", (text or "").lower()) if not unicodedata.combining(ch)).strip()
+
+
+def _tem_conteudo_visivel(texto: str) -> bool:
+    """True se `texto` tiver pelo menos 1 caractere que um humano realmente
+    VERIA como conteúdo -- categoria Unicode geral L* (letra), N* (número),
+    P* (pontuação) ou S* (símbolo). Falso para qualquer string composta só
+    de categorias C* (Other -- controle Cc, formatação invisível Cf como
+    ZERO WIDTH SPACE/BOM, etc.), M* (Mark -- diacríticos/combinantes soltos,
+    variation selectors) ou Z* (Separator -- espaços de todo tipo,
+    inclusive os que `str.isspace()` já reconhece).
+
+    Achado real de 2 rodadas de revisão adversarial sobre a validação de
+    `justificativa_humana` em `resolver_conflito_procedimento` (abaixo):
+    `str.strip()` sozinho não remove caracteres de formatação Unicode
+    invisíveis (1a rodada: ZERO WIDTH SPACE U+200B, BOM U+FEFF, etc.) --
+    e uma 1a versão deste helper, que só excluía espaço (`isspace()`) e a
+    categoria "Cf", ainda deixava passar como "conteúdo visível" um
+    diacrítico combinante solto (categoria "Mn", sem caractere-base) ou
+    puro caractere de controle (categoria "Cc", ex. NUL) -- mesma classe de
+    falha (uma `justificativa_humana` ilegível para um humano, mas
+    "não-vazia" o bastante para passar a validação), só em categorias
+    diferentes. Agrupar por LETRA DA CATEGORIA (L/N/P/S são visíveis;
+    C/M/Z não são) fecha a classe inteira de uma vez, em vez de listar
+    categoria por categoria."""
+    return any(unicodedata.category(ch)[0] not in ("C", "M", "Z") for ch in texto)
 
 
 def _normalizar_status_acao(valor):
@@ -528,6 +563,49 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "updated_at": firestore.SERVER_TIMESTAMP,
             "updated_by": "telegram",
             "origem": "telegram",
+            # P06 sub-entrega 4/N: `origem_fato` (taxonomia de
+            # `autonomy/context.py`, ja usada por `salvar_memoria_global`/
+            # `resolver_conflito_memoria`) e NOVO aqui -- aditivo, nao troca
+            # nem le `origem`/`updated_by` acima (hardcoded "telegram" desde
+            # antes desta sub-entrega; ambos permanecem como estavam, mesmo
+            # sabendo que o unico chamador real desta funcao e o servidor MCP
+            # -- ver `_handle_prompts_list` em mcp_server.py: "Um POP e um
+            # procedimento operacional que o usuario ja escreveu" -- nunca o
+            # motor Telegram legado, que nao expoe esta tool ao modelo em
+            # `telegram_message_tools.py::build_telegram_tool_closures`.
+            # Corrigir ESSES dois campos preexistentes fica fora do escopo
+            # desta sub-entrega, que so acrescenta o campo novo de
+            # proveniencia.
+            #
+            # CORRECAO (achado real do Codex, apos a PR ser aberta): o
+            # contrato MCP pressupoe "o usuario ja escreveu", mas um cliente
+            # MCP pode pedir para o modelo CRIAR/REFINAR um POP a partir de
+            # uma descricao vaga -- o proprio modelo redige o texto final, e
+            # gravar DECLARACAO_HUMANA incondicionalmente superestimaria essa
+            # proveniencia. `usuario_forneceu_o_texto_literal` (novo slot da
+            # tool, ver tools/schemas/salvar_pop_global.json) deixa o
+            # CHAMADOR (o modelo, que viu a conversa) declarar se foi assim;
+            # ausente/True preserva o default anterior (DECLARACAO_HUMANA,
+            # mesma logica do fallback canal="mcp" em
+            # `origem_fato_para_canal_de_salvar_memoria`), False explicito
+            # rebaixa para INFERENCIA_AGENTE.
+            #
+            # CORRECAO 2 (achado real de revisao adversarial independente,
+            # 17/10/2026, fora das 7 rodadas originais): o "ausente preserva
+            # o default anterior" acima so vale para uma CRIACAO (nenhum
+            # origem_fato gravado ainda). Numa ATUALIZACAO (existing_ref
+            # presente), omitir o slot gravaria DECLARACAO_HUMANA por cima de
+            # um INFERENCIA_AGENTE que uma chamada anterior tenha rebaixado
+            # corretamente -- apagando esse rebaixamento em silencio.
+            # `origem_fato_existente` passa o valor ja gravado (None numa
+            # criacao) para a funcao preservar, em vez de promover, quando o
+            # slot vem ausente sobre um documento que ja tem proveniencia.
+            # Ver docstring de `origem_fato_para_salvar_pop` para o
+            # raciocinio completo.
+            "origem_fato": origem_fato_para_salvar_pop(
+                slots.get("usuario_forneceu_o_texto_literal"),
+                origem_fato_existente=(existing_data or {}).get("origem_fato"),
+            ),
         }
         if "sempre_ativo" in slots:
             payload["sempre_ativo"] = slots["sempre_ativo"] is True
@@ -591,7 +669,52 @@ def execute(tool_name: str, slots: dict, db) -> str:
     if tool_name == "resolver_conflito_procedimento":
         proc_id = str(slots.get("id_procedimento") or "")
         justificativa = str(slots.get("justificativa_humana") or "").strip()
-        confirmar = bool(slots.get("confirmar_contrato"))
+        # `is True`, nao `bool(...)`: achado real de revisao adversarial
+        # independente sobre esta mesma correcao (mesmo raciocinio ja
+        # documentado para `usuario_forneceu_o_texto_literal` em
+        # autonomy/context.py::origem_fato_para_salvar_pop, acima -- nada
+        # neste codebase valida/coage o JSON de entrada contra o schema MCP
+        # antes de chegar aqui). `bool("false")` e `True` em Python, entao a
+        # versao anterior (`bool(slots.get("confirmar_contrato"))`) tratava
+        # a STRING "false" (ou "0", "nao", etc.) como confirmacao de
+        # verdade -- um cliente que mandasse essa string pedindo so o
+        # preview ("Contrato de Entendimento") disparava a escrita
+        # irreversivel (arquivamento do procedimento original + criacao do
+        # documento evoluido) com a intencao invertida. So o literal `True`
+        # exato confirma agora; qualquer outro valor (inclusive mal-tipado)
+        # cai no lado seguro (preview, sem gravar nada).
+        confirmar = slots.get("confirmar_contrato") is True
+        # CORRECAO (achado real do Codex, apos a PR ser aberta: "Reject
+        # empty justification before tagging human provenance"): o schema
+        # desta tool ja lista `justificativa_humana` em `required`, mas
+        # "required" no JSON Schema so exige a CHAVE presente, nunca que o
+        # valor seja nao-vazio -- um chamador podia mandar
+        # `confirmar_contrato=True` com `justificativa_humana=""` (ou so
+        # espacos) e a gravacao abaixo seguia em frente, marcando
+        # `origem_fato=DECLARACAO_HUMANA` e `justificativa_da_regra=""` sem
+        # nenhuma justificativa humana de fato. Falha rapido, ANTES de ler
+        # `conhecimento_mestre` (mesmo padrao de `salvar_pop_global` acima,
+        # que valida campos obrigatorios antes de tocar o Firestore) -- so
+        # quando `confirmar=True`: sem isso, a 1a chamada (que so monta o
+        # "Contrato de Entendimento" para o humano revisar, ainda sem
+        # gravar nada) continua aceitando `justificativa_humana` vazia para
+        # ecoar de volta ao usuario o que falta preencher.
+        #
+        # `_tem_conteudo_visivel`, nao `not justificativa`: achado real de
+        # revisao adversarial independente sobre esta mesma validacao --
+        # `.strip()` (ja aplicado acima) NAO remove caracteres de
+        # formatacao Unicode invisiveis (ZERO WIDTH SPACE U+200B, BOM
+        # U+FEFF, etc.), entao uma `justificativa_humana` composta so por
+        # um desses caracteres passava a checagem de "nao vazia" como se
+        # fosse conteudo real -- ver docstring de `_tem_conteudo_visivel`.
+        if confirmar and not _tem_conteudo_visivel(justificativa):
+            return "ERRO|" + json.dumps({
+                "status": "error",
+                "reason": "justificativa_humana_obrigatoria",
+                "detalhe": ("confirmar_contrato=True exige justificativa_humana "
+                            "nao vazia -- sem ela, o procedimento nao pode ser "
+                            "marcado como validado por decisao humana."),
+            }, ensure_ascii=False)
         proc_ref = db.collection("conhecimento_mestre").document(proc_id)
         proc_doc = proc_ref.get()
         if not proc_doc.exists:
@@ -624,6 +747,18 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "tipo": proc.get("tipo", "procedimento_evoluido"),
             "autor": "human_review_telegram",
             "procedimento_anterior_id": proc_id,
+            # P06 sub-entrega 4/N: aditivo, mesma taxonomia e mesmo raciocinio
+            # do comentario em `salvar_pop_global` acima -- `autor` acima
+            # (hardcoded desde antes desta sub-entrega) fica como esta, fora
+            # de escopo. Aqui a evidencia de DECLARACAO_HUMANA e ainda mais
+            # direta que em `salvar_pop_global`: esta ramificacao so executa
+            # a escrita quando `confirmar_contrato=True` E `justificativa`
+            # (de `justificativa_humana`) foram informados -- o "Contrato de
+            # Entendimento" (bloco `if not confirmar` acima) obriga o humano
+            # a confirmar explicitamente antes de qualquer gravacao, e desde
+            # a CORRECAO acima (achado do Codex) `justificativa` nao-vazia e
+            # verificada em codigo, nao so suposta pelo fluxo da UI.
+            "origem_fato": DECLARACAO_HUMANA,
         })
         return (
             f"✅ Conflito resolvido. Procedimento **{titulo}** validado pelo revisor humano.\n"

@@ -203,3 +203,78 @@ def origem_fato_para_salvar_memoria(
     if usuario_afirmou_diretamente:
         return DECLARACAO_HUMANA
     return origem_fato_para_canal_de_salvar_memoria(canal)
+
+
+def origem_fato_para_salvar_pop(
+    usuario_forneceu_o_texto: bool | None = None,
+    origem_fato_existente: str | None = None,
+) -> str:
+    """Proveniência de um POP novo/atualizado via `salvar_pop_global`
+    (`tools/telegram_extended.py`), a partir de `usuario_forneceu_o_texto` --
+    parâmetro NOVO da própria tool (ver
+    `tools/schemas/salvar_pop_global.json`), que o MODELO que fez a chamada
+    preenche a cada vez, declarando se foi o USUÁRIO quem forneceu o texto
+    do procedimento literalmente (copiou/colou, ditou, ou escreveu palavra
+    por palavra) nesta conversa.
+
+    `origem_fato_existente` é o `origem_fato` JÁ GRAVADO no documento, só
+    relevante numa ATUALIZAÇÃO (merge sobre um POP existente, mesmo título
+    ou mesmo gatilho) -- `None` numa criação, onde não há nada a preservar.
+    Achado real de revisão adversarial independente (sessão de 17/10/2026,
+    fora das 7 rodadas originais desta sub-entrega): sem este parâmetro, uma
+    chamada de ATUALIZAÇÃO que omita `usuario_forneceu_o_texto_literal` (ex.:
+    um segundo gatilho acrescentado ao mesmo POP, numa conversa onde o
+    modelo simplesmente não repete o slot opcional) cairia no mesmo default
+    `DECLARACAO_HUMANA` de uma criação nova -- sobrescrevendo em silêncio um
+    `INFERENCIA_AGENTE` corretamente rebaixado por uma chamada anterior. Isso
+    é exatamente a superestimação de proveniência que esta função existe
+    para eliminar, só que pela porta de trás do caminho de update: a lacuna
+    está na ausência de informação nova sobre uma atualização, não na
+    criação de um fato sem proveniência alguma ainda registrada (o caso que
+    a analogia original com `canal="mcp"` cobre).
+
+    Acrescentada DEPOIS da PR original de `salvar_pop_global` gravar
+    `origem_fato`, em resposta a um achado real do Codex (revisão
+    automática, comentário "Derive POP provenance from its actual author"):
+    o contrato textual desta tool no servidor MCP (`mcp_server.py`,
+    `_handle_prompts_list`: "Um POP é um procedimento operacional que o
+    usuário já escreveu") pressupõe que o texto sempre vem do usuário -- mas,
+    na prática, um cliente MCP pode pedir ao modelo para CRIAR ou REFINAR um
+    POP a partir de uma descrição vaga, e é o próprio modelo quem redige o
+    `instrucao_sistema` final. Gravar `DECLARACAO_HUMANA` incondicionalmente
+    nesse caso superestima a proveniência -- o texto nunca foi dito/escrito
+    pelo usuário palavra por palavra.
+
+    `usuario_forneceu_o_texto is None` (parâmetro ausente, ex.: um cliente
+    MCP mais antigo que ainda não manda esse campo) preserva o comportamento
+    anterior a esta correção (`DECLARACAO_HUMANA`) -- mesma lógica do
+    fallback canal="mcp" em `origem_fato_para_canal_de_salvar_memoria`: o
+    contrato do servidor MCP já pressupõe afirmação do usuário por padrão,
+    então a mera AUSÊNCIA do parâmetro não deve, por si só, rebaixar uma
+    classificação que já existia antes dele.
+
+    Com o parâmetro PRESENTE, só o literal Python `True` (`is True`, não
+    `bool(...)`) devolve `DECLARACAO_HUMANA` -- qualquer outro valor devolve
+    `INFERENCIA_AGENTE`, inclusive tipos "parecidos com False" só por
+    coincidência de truthiness. Achado real de revisão adversarial sobre a
+    1a versão desta correção: nada neste codebase valida/coage o JSON de
+    entrada contra o schema MCP antes de chegar aqui (mesmo raciocínio já
+    registrado em `tools/hermes_tools.py::_salvar_memoria_global` para
+    `usuario_afirmou_diretamente`) -- `bool("false")` é `True` em Python, e a
+    1a versão deste helper comparava só com `is False`, o que deixava a
+    STRING `"false"` (ou `0`, ou qualquer valor que não seja o bool `True`
+    exato) cair no `else` e gravar `DECLARACAO_HUMANA` -- exatamente a
+    superestimação de proveniência que este helper existe para eliminar. A
+    direção seguro aqui é a OPOSTA da de `sempre_ativo`
+    (`tools/telegram_extended.py`, que usa `is True` para o lado "mais
+    forte" ser o booleano explícito e tudo o mais cair no lado fraco/padrão
+    `False`): aqui a reivindicação mais forte é `DECLARACAO_HUMANA`, então só
+    o `True` exato a concede -- `False` explícito E qualquer valor
+    ambíguo/mal-tipado caem igualmente no lado fraco `INFERENCIA_AGENTE`,
+    nunca no lado forte.
+    """
+    if usuario_forneceu_o_texto is None:
+        if isinstance(origem_fato_existente, str) and origem_fato_existente in ORIGENS_FATO_VALIDAS:
+            return origem_fato_existente
+        return DECLARACAO_HUMANA
+    return DECLARACAO_HUMANA if usuario_forneceu_o_texto is True else INFERENCIA_AGENTE
