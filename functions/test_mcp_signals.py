@@ -45,10 +45,27 @@ class TestRegistrarUsaTrilhaOperacionalPropria(unittest.TestCase):
 
     def test_registrar_nunca_chama_save_user_profile_signal_humano(self):
         """A trilha de declaração humana (historico_deduzido) fica reservada a
-        `askCopilotoHermes` — o canal MCP nunca deve escrever nela."""
+        `askCopilotoHermes` — o canal MCP nunca deve escrever nela, nem direta
+        nem indiretamente. Exercita o caminho REAL (sem mockar
+        `salvar_atividade_operacional`): se registrar() voltasse a cair no
+        padrão antigo (ler o mapa `ai_profile` inteiro e regravá-lo com
+        `set(merge=True)`), o payload capturado aqui incluiria
+        `historico_deduzido` e esta asserção pegaria a regressão -- ao
+        contrário da versão anterior deste teste, que só verificava um nome
+        de função que o módulo já não importa (passava vacuamente mesmo com
+        o bug; achado de revisão adversarial da sub-entrega 4/N)."""
         import mcp_signals
 
+        doc_snap = mock.MagicMock()
+        doc_snap.exists = True
+        doc_snap.to_dict.return_value = {
+            "ai_profile": {"historico_deduzido": [{"texto": "prefere reunioes de manha", "at": "t0"}]}
+        }
+        doc_ref = mock.MagicMock()
+        doc_ref.get.return_value = doc_snap
         db = mock.MagicMock()
+        db.collection.return_value.document.return_value = doc_ref
+
         with mock.patch.dict(os.environ, NA_NUVEM), \
                 mock.patch("firebase_admin.firestore.client", return_value=db), \
                 mock.patch("mcp_signals.threading.Thread", side_effect=_thread_sincrona), \
@@ -56,6 +73,9 @@ class TestRegistrarUsaTrilhaOperacionalPropria(unittest.TestCase):
             mcp_signals.registrar("uid-1", "buscar_contato", {"termo": "Joana"}, None)
 
         save_humano.assert_not_called()
+        doc_ref.set.assert_not_called()
+        payload = doc_ref.update.call_args[0][0]
+        self.assertEqual(set(payload.keys()), {"ai_profile.atividade_operacional", "ai_profile.updated_at"})
 
     def test_tool_sem_sinal_nao_grava_nada(self):
         import mcp_signals
@@ -66,8 +86,9 @@ class TestRegistrarUsaTrilhaOperacionalPropria(unittest.TestCase):
 
 
 class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase):
-    def _fake_profile_ref(self, ai_profile_inicial):
+    def _fake_profile_ref(self, ai_profile_inicial, exists=True):
         doc_snap = mock.MagicMock()
+        doc_snap.exists = exists
         doc_snap.to_dict.return_value = {"ai_profile": ai_profile_inicial}
         doc_ref = mock.MagicMock()
         doc_ref.get.return_value = doc_snap
@@ -76,6 +97,12 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
         return db, doc_ref
 
     def test_grava_em_atividade_operacional_sem_tocar_historico_deduzido(self):
+        """Usa update() com field paths dedicados -- não set(merge=True) do
+        mapa `ai_profile` inteiro -- exatamente para que `historico_deduzido`
+        nunca apareça no payload desta escrita, nem como cópia obsoleta (ver
+        docstring de `salvar_atividade_operacional`: achado de revisão
+        adversarial da sub-entrega 4/N, risco de apagar concorrentemente o
+        que a trilha humana gravou)."""
         import mcp_signals
 
         db, doc_ref = self._fake_profile_ref({
@@ -84,13 +111,13 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
 
         mcp_signals.salvar_atividade_operacional(db, "uid-1", "buscou no acervo: contrato 2026", "task-9", None)
 
-        gravado = doc_ref.set.call_args[0][0]["ai_profile"]
-        self.assertEqual(gravado["atividade_operacional"][-1]["texto"], "buscou no acervo: contrato 2026")
-        self.assertEqual(gravado["atividade_operacional"][-1]["taskId"], "task-9")
-        self.assertEqual(
-            gravado["historico_deduzido"],
-            [{"texto": "prefere reunioes de manha", "at": "t0"}],
-        )
+        doc_ref.set.assert_not_called()
+        payload = doc_ref.update.call_args[0][0]
+        atividade = payload["ai_profile.atividade_operacional"]
+        self.assertEqual(atividade[-1]["texto"], "buscou no acervo: contrato 2026")
+        self.assertEqual(atividade[-1]["taskId"], "task-9")
+        self.assertNotIn("ai_profile.historico_deduzido", payload)
+        self.assertNotIn("historico_deduzido", payload)
 
     def test_nao_duplica_entrada_identica_consecutiva(self):
         import mcp_signals
@@ -101,8 +128,8 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
 
         mcp_signals.salvar_atividade_operacional(db, "uid-1", "buscou no acervo: contrato 2026", None, None)
 
-        gravado = doc_ref.set.call_args[0][0]["ai_profile"]
-        self.assertEqual(len(gravado["atividade_operacional"]), 1)
+        payload = doc_ref.update.call_args[0][0]
+        self.assertEqual(len(payload["ai_profile.atividade_operacional"]), 1)
 
     def test_mantem_so_as_10_mais_recentes(self):
         import mcp_signals
@@ -112,10 +139,11 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
 
         mcp_signals.salvar_atividade_operacional(db, "uid-1", "buscou 10", None, None)
 
-        gravado = doc_ref.set.call_args[0][0]["ai_profile"]
-        self.assertEqual(len(gravado["atividade_operacional"]), 10)
-        self.assertEqual(gravado["atividade_operacional"][0]["texto"], "buscou 1")
-        self.assertEqual(gravado["atividade_operacional"][-1]["texto"], "buscou 10")
+        payload = doc_ref.update.call_args[0][0]
+        atividade = payload["ai_profile.atividade_operacional"]
+        self.assertEqual(len(atividade), 10)
+        self.assertEqual(atividade[0]["texto"], "buscou 1")
+        self.assertEqual(atividade[-1]["texto"], "buscou 10")
 
     def test_sem_uid_ou_sem_texto_nao_grava(self):
         import mcp_signals
@@ -133,8 +161,8 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
 
         mcp_signals.salvar_atividade_operacional(db, "uid-1", texto_longo, None, None)
 
-        gravado = doc_ref.set.call_args[0][0]["ai_profile"]
-        salvo = gravado["atividade_operacional"][-1]["texto"]
+        payload = doc_ref.update.call_args[0][0]
+        salvo = payload["ai_profile.atividade_operacional"][-1]["texto"]
         self.assertEqual(len(salvo), 180)
         self.assertTrue(salvo.endswith("..."))
         self.assertEqual(salvo, "x" * 177 + "...")
@@ -142,18 +170,35 @@ class TestSalvarAtividadeOperacionalSeparadaDoHistoricoHumano(unittest.TestCase)
     def test_nao_toca_last_task_id_nem_last_system_id(self):
         """Esses campos pertencem à trilha humana (main.py::_save_user_profile_signal,
         não tocado por esta sub-entrega); a trilha operacional não deve
-        sobrescrevê-los -- as duas funções escrevem em threads separadas sobre
-        o mesmo doc, e last-write-wins entre elas misturaria as duas trilhas
-        outra vez (achado de revisão adversarial da sub-entrega 4/N)."""
+        sobrescrevê-los. Com update() por field path, eles simplesmente nunca
+        entram no payload desta escrita -- não há mais "last-write-wins" NESTE
+        sentido (ver docstring do módulo para o risco residual, unidirecional,
+        que fica em main.py)."""
         import mcp_signals
 
         db, doc_ref = self._fake_profile_ref({"last_task_id": "task-humano", "last_system_id": "sistema-humano"})
 
         mcp_signals.salvar_atividade_operacional(db, "uid-1", "buscou no acervo: X", "task-mcp", "sistema-mcp")
 
+        doc_ref.set.assert_not_called()
+        payload = doc_ref.update.call_args[0][0]
+        self.assertEqual(set(payload.keys()), {"ai_profile.atividade_operacional", "ai_profile.updated_at"})
+
+    def test_documento_inexistente_usa_set_merge_em_vez_de_update(self):
+        """update() com field path falha com NOT_FOUND se o documento não
+        existir -- só é seguro trocar para esse padrão quando o doc já existe
+        (visto por `doc.exists`). Para doc novo não há concorrência possível
+        (nenhum outro escritor depende de um doc que ainda não existe), então
+        set(merge=True) continua correto nesse caso específico."""
+        import mcp_signals
+
+        db, doc_ref = self._fake_profile_ref({}, exists=False)
+
+        mcp_signals.salvar_atividade_operacional(db, "uid-1", "buscou no acervo: Y", None, None)
+
+        doc_ref.update.assert_not_called()
         gravado = doc_ref.set.call_args[0][0]["ai_profile"]
-        self.assertEqual(gravado["last_task_id"], "task-humano")
-        self.assertEqual(gravado["last_system_id"], "sistema-humano")
+        self.assertEqual(gravado["atividade_operacional"][-1]["texto"], "buscou no acervo: Y")
 
 
 class TestVoiceContextSeparaAtividadeDePreferencia(unittest.TestCase):
