@@ -171,6 +171,42 @@ class TestSalvarPopGlobalOrigemFato(unittest.TestCase):
         (pop_doc,) = docs.values()
         self.assertEqual(pop_doc["origem_fato"], INFERENCIA_AGENTE)
 
+    def test_atualizacao_omitindo_o_slot_nao_promove_inferencia_agente_de_volta(self):
+        """Achado real de revisão adversarial independente (17/10/2026, fora
+        das 7 rodadas originais desta sub-entrega): a 1a versão deste fix só
+        testava a atualização PRESERVANDO DECLARACAO_HUMANA (caso fácil,
+        `test_atualizacao_por_merge_mantem_declaracao_humana` acima) -- nunca
+        o caso update-que-apagaria-um-rebaixamento-anterior. Sem o fix de
+        `origem_fato_existente`, esta 2a chamada (slot omitido) gravaria
+        DECLARACAO_HUMANA por cima do INFERENCIA_AGENTE correto da 1a
+        chamada -- a mesma superestimação de proveniência que o achado
+        original do Codex motivou a corrigir, só que pela porta do caminho
+        de update."""
+        telegram_extended.execute(
+            "salvar_pop_global",
+            {
+                "titulo": "Como abrir processo SIPAC",
+                "instrucao_sistema": "Siga o roteiro X.",
+                "gatilhos": ["abrir processo", "sipac"],
+                "usuario_forneceu_o_texto_literal": False,
+            },
+            self.db,
+        )
+        # Segunda chamada, mesmo título (caminho de atualização), SEM o slot.
+        telegram_extended.execute(
+            "salvar_pop_global",
+            {
+                "titulo": "Como abrir processo SIPAC",
+                "instrucao_sistema": "Siga o roteiro X (revisado).",
+                "gatilhos": ["abrir processo", "sipac"],
+            },
+            self.db,
+        )
+        docs = self.db.collection("pops_diretrizes")._docs
+        self.assertEqual(len(docs), 1)
+        (pop_doc,) = docs.values()
+        self.assertEqual(pop_doc["origem_fato"], INFERENCIA_AGENTE)
+
     def test_usuario_forneceu_o_texto_literal_true_grava_declaracao_humana(self):
         telegram_extended.execute(
             "salvar_pop_global",
@@ -257,7 +293,7 @@ class TestTemConteudoVisivel(unittest.TestCase):
         """NBSP (U+00A0) e EM SPACE (U+2003) são categoria "Zs" (space
         separator) -- `str.isspace()` já os reconhece, sem precisar do
         tratamento especial de `Cf`."""
-        for valor in (" ", " ", "  "):
+        for valor in (" ", " ", "  "):
             with self.subTest(valor=repr(valor)):
                 self.assertFalse(telegram_extended._tem_conteudo_visivel(valor))
 
