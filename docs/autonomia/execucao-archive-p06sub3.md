@@ -1,6 +1,24 @@
-# Arquivo de execução — P06 sub-entrega 3/N (memória, Telegram)
+# Arquivo de execução — P06 sub-entrega 3/N
 
-Bloco movido de docs/autonomia/execucao.md em 2026-10-16, pela tarefa agendada de avanço autônomo (execução das 15h BRT), ao acrescentar a entrada da sub-entrega seguinte sobre knowledge_graph.py (ver docs/autonomia/execucao.md para a numeração e a extensa triagem de PRs concorrentes registrada nela). Nesta mesma escrita, o campo `estado` do bloco movido foi corrigido de `pronto_para_revisao` para `validado`: esta execução confirmou, via clone git local (`git log --all --grep`/`merge-base`, não a listagem pública do GitHub, que se mostrou não confiável em execuções anteriores desta série), que a PR #447 desta sub-entrega foi mesclada manualmente pelo André (merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32, 2026-10-13 23:38:33 UTC). A colisão com a PR #439 (registrada no próprio bloco abaixo) permanece sem decisão do André — a #439 ficou órfã após o merge da #447 (mesmo objetivo, abordagem diferente) e continua aberta; ver a triagem completa em docs/autonomia/execucao.md. Nenhum outro conteúdo do bloco foi alterado.
+Bloco movido de docs/autonomia/execucao.md em 2026-10-15, pela tarefa
+agendada de avanço autônomo, por ter passado de 60039 bytes, acima do
+limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo
+arquivo de arquivo anterior, execucao-archive-p06sub2.md. Nesta mesma
+escrita, o campo `estado` do bloco movido foi corrigido de
+`pronto_para_revisao` para `validado`: esta execução confirmou, via
+`git fetch`/`git log --merges` sobre um clone local (método mais
+confiável que WebFetch de página pública, lição já registrada pelo
+Blueprint da Autonomia após um erro anterior na direção contrária, em
+13/10/2026), que a PR #447 foi de fato mesclada em 2026-10-13T23:38:33Z
+(merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32,
+`Merge pull request #447 from
+andre-martiini/claude/p06-sub3-memoria-conflito-persistente`). Nenhum
+outro conteúdo do bloco foi alterado.
+
+Esta execução NÃO abriu nenhuma sub-entrega de código nova — ver o
+bloco desta mesma data ao final de execucao.md para o motivo (três PRs
+do pacote P06 já abertas e aguardando decisão do André: #449, #451 e
+#452) e o relato completo da auditoria feita.
 
 ---
 
