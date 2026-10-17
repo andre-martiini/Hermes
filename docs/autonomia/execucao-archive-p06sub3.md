@@ -1,6 +1,24 @@
 # Arquivo de execução — P06 sub-entrega 3/N
 
-Bloco movido de docs/autonomia/execucao.md em 2026-10-14, pela tarefa agendada de avanço autônomo, ao acrescentar a entrada da sub-entrega P06 4/N (autonomy/temporal.py: vocabulário de memoria_status e payloads puros de supersedes, mais dois filtros defensivos de leitura em copilot_context.py e telegram_handlers_core.py — fiação real em main._save_memory_node/_find_similar_memory_nodes implementada e testada localmente, mas NÃO publicada por main.py exceder o limite de 200.000 caracteres da tool de escrita do Argos) — o arquivo ativo estava em 60039 bytes, acima do limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo arquivo de arquivo anterior, execucao-archive-p06sub2.md. O campo `estado` do bloco movido NÃO foi alterado: permanece `pronto_para_revisao`, já que tanto a PR #447 (desta sub-entrega 3/N) quanto a PR #439 (colisão, de uma execução anterior, mesmo problema por abordagem diferente) continuam ambas abertas e não mescladas, confirmado via leitura das páginas individuais de cada PR nesta mesma execução (2026-10-14). Nenhum outro conteúdo do bloco foi alterado.
+Bloco movido de docs/autonomia/execucao.md em 2026-10-15, pela tarefa
+agendada de avanço autônomo, por ter passado de 60039 bytes, acima do
+limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo
+arquivo de arquivo anterior, execucao-archive-p06sub2.md. Nesta mesma
+escrita, o campo `estado` do bloco movido foi corrigido de
+`pronto_para_revisao` para `validado`: esta execução confirmou, via
+`git fetch`/`git log --merges` sobre um clone local (método mais
+confiável que WebFetch de página pública, lição já registrada pelo
+Blueprint da Autonomia após um erro anterior na direção contrária, em
+13/10/2026), que a PR #447 foi de fato mesclada em 2026-10-13T23:38:33Z
+(merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32,
+`Merge pull request #447 from
+andre-martiini/claude/p06-sub3-memoria-conflito-persistente`). Nenhum
+outro conteúdo do bloco foi alterado.
+
+Esta execução NÃO abriu nenhuma sub-entrega de código nova — ver o
+bloco desta mesma data ao final de execucao.md para o motivo (três PRs
+do pacote P06 já abertas e aguardando decisão do André: #449, #451 e
+#452) e o relato completo da auditoria feita.
 
 ---
 
@@ -8,7 +26,7 @@ Bloco movido de docs/autonomia/execucao.md em 2026-10-14, pela tarefa agendada d
 plano: plano-hermes-autonomo-2026-09-06
 base_commit: 4d885674bef005882281d1ae8bfb16e85426fa50
 pacote: "P06 sub-entrega 3/N -- fecha a LIMITACAO CONHECIDA registrada pela P06 sub-entrega 2/N (ver pendencia 'NOVA, desta sub-entrega, DELIBERADAMENTE NAO RESOLVIDA' no bloco anterior, arquivado nesta mesma execucao em execucao-archive-p06sub2.md): o memoria_id que o modelo precisa repassar a resolver_conflito_memoria (motor Telegram legado) apos um conflito de memoria devolvido por salvar_memoria_global nao era persistido entre turnos -- telegram_handlers_core.py so grava o TEXTO final de cada turno no historico da sessao, nunca as partes de function-call/response, entao um memoria_id que o texto visivel ao usuario nao repetisse se perdia ao fim do turno. Ao inicio desta execucao, `git fetch origin main` (via clone local, ja usado nas sub-entregas 1/N e 2/N) confirmou HEAD em 4d885674b, idêntico ao commit da PR #434 (sub-entrega 2/N) -- WebFetch na pagina publica da PR #434 confirmou merged=true, merge commit ee60840dd7cd0083b5ba7c068630bf2c03bcde98, mesclada manualmente pelo Andre em 2026-10-12, e 0 PRs abertas no repositorio antes desta sub-entrega. Investigacao direta do codigo (telegram_message_tools.py::salvar_memoria_global/resolver_conflito_memoria, main.py::_save_memory_node) confirmou a limitacao exatamente como descrita: nenhum mecanismo gravava o memory_id de um 'conflict' em lugar nenhum da sessao. Corrigido reaproveitando o MESMO padrao de pendencia de sessao ja usado por propor_lancamento_financeiro/propor_acao_para_confirmacao (mesmo arquivo): salvar_memoria_global agora grava memoria_id/fato/categoria em session['pending_confirmations']['memoria_conflito'] quando _save_memory_node devolve status='conflict', e resolver_conflito_memoria aceita memoria_id omitido, caindo nesse valor pendente -- nenhuma mudanca foi necessaria em telegram_handlers_core.py, que ja copia o dict pending_confirmations inteiro entre sessoes. Esta execucao usou 3 rodadas de revisao adversarial independentes (Agent general-purpose, cada uma sem contexto da implementacao nem das rodadas anteriores -- so o diff acumulado e o objetivo de revisar tudo de novo por execucao real, nao so leitura), encadeadas: cada rodada achou um problema real na correcao da rodada anterior, e uma 4a rodada nao achou nada -- criterio de parada atingido."
-estado: pronto_para_revisao
+estado: validado
 inicio: "2026-10-13T19:40:00Z"
 fim: "2026-10-13T22:35:00Z"
 arquivos_alterados:
