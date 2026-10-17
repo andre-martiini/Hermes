@@ -293,10 +293,68 @@ class TestOrigemFatoParaSalvarPop(unittest.TestCase):
         self.assertEqual(origem_fato_para_salvar_pop(False), INFERENCIA_AGENTE)
 
     def test_ausente_preserva_declaracao_humana(self):
-        """Sem argumento (cliente MCP mais antigo) -- mesmo default
-        contratual de antes desta correção."""
+        """Sem argumento e sem origem_fato_existente (criação nova, cliente
+        MCP mais antigo) -- mesmo default contratual de antes desta
+        correção."""
         self.assertEqual(origem_fato_para_salvar_pop(), DECLARACAO_HUMANA)
         self.assertEqual(origem_fato_para_salvar_pop(None), DECLARACAO_HUMANA)
+        self.assertEqual(origem_fato_para_salvar_pop(None, origem_fato_existente=None), DECLARACAO_HUMANA)
+
+    def test_ausente_numa_atualizacao_preserva_origem_existente_em_vez_de_promover(self):
+        """Achado real de revisão adversarial independente (17/10/2026,
+        fora das 7 rodadas originais): numa ATUALIZAÇÃO (origem_fato_existente
+        presente), omitir o slot NÃO deve promover um INFERENCIA_AGENTE
+        corretamente rebaixado por uma chamada anterior de volta a
+        DECLARACAO_HUMANA -- isso apagaria em silêncio o rebaixamento que o
+        próprio achado original do Codex motivou este helper a fazer."""
+        self.assertEqual(
+            origem_fato_para_salvar_pop(None, origem_fato_existente=INFERENCIA_AGENTE),
+            INFERENCIA_AGENTE,
+        )
+        self.assertEqual(
+            origem_fato_para_salvar_pop(None, origem_fato_existente=DECLARACAO_HUMANA),
+            DECLARACAO_HUMANA,
+        )
+
+    def test_existente_fora_da_taxonomia_nao_e_usado_cai_no_default(self):
+        """`origem_fato_existente` só é respeitado quando já é uma categoria
+        válida (`ORIGENS_FATO_VALIDAS`, que inclui `LEGADO_DESCONHECIDO` --
+        ver `test_existente_legado_desconhecido_e_preservado` abaixo). Um
+        valor fora dessa taxonomia inteira (tipo errado, enum futuro,
+        corrupção de dado) não deve travar a POP num valor inválido; cai no
+        mesmo default de uma criação nova."""
+        self.assertEqual(
+            origem_fato_para_salvar_pop(None, origem_fato_existente="valor-invalido"),
+            DECLARACAO_HUMANA,
+        )
+        self.assertEqual(
+            origem_fato_para_salvar_pop(None, origem_fato_existente=123),
+            DECLARACAO_HUMANA,
+        )
+
+    def test_existente_legado_desconhecido_e_preservado(self):
+        """`LEGADO_DESCONHECIDO` pertence a `ORIGENS_FATO_VALIDAS` (categoria
+        válida para LEITURA de fatos antigos, passo 1 do pacote) -- se por
+        algum motivo um POP já tiver esse valor gravado literalmente, uma
+        atualização que omita o slot não deve promovê-lo a DECLARACAO_HUMANA
+        (mesmo princípio de não promover sem informação nova)."""
+        self.assertEqual(
+            origem_fato_para_salvar_pop(None, origem_fato_existente=LEGADO_DESCONHECIDO),
+            LEGADO_DESCONHECIDO,
+        )
+
+    def test_true_ou_false_explicitos_ignoram_origem_existente(self):
+        """Quando o slot vem PRESENTE (True ou False), ele é a fonte mais
+        confiável (o próprio modelo, que viu a conversa, nesta chamada) --
+        origem_fato_existente nunca sobrepõe um valor explícito."""
+        self.assertEqual(
+            origem_fato_para_salvar_pop(True, origem_fato_existente=INFERENCIA_AGENTE),
+            DECLARACAO_HUMANA,
+        )
+        self.assertEqual(
+            origem_fato_para_salvar_pop(False, origem_fato_existente=DECLARACAO_HUMANA),
+            INFERENCIA_AGENTE,
+        )
 
     def test_valor_mal_tipado_nunca_e_promovido_a_declaracao_humana(self):
         """Achado real de revisão adversarial sobre a 1a versão deste fix:
