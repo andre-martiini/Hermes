@@ -588,9 +588,24 @@ def execute(tool_name: str, slots: dict, db) -> str:
             # ausente/True preserva o default anterior (DECLARACAO_HUMANA,
             # mesma logica do fallback canal="mcp" em
             # `origem_fato_para_canal_de_salvar_memoria`), False explicito
-            # rebaixa para INFERENCIA_AGENTE. Ver docstring de
-            # `origem_fato_para_salvar_pop` para o raciocinio completo.
-            "origem_fato": origem_fato_para_salvar_pop(slots.get("usuario_forneceu_o_texto_literal")),
+            # rebaixa para INFERENCIA_AGENTE.
+            #
+            # CORRECAO 2 (achado real de revisao adversarial independente,
+            # 17/10/2026, fora das 7 rodadas originais): o "ausente preserva
+            # o default anterior" acima so vale para uma CRIACAO (nenhum
+            # origem_fato gravado ainda). Numa ATUALIZACAO (existing_ref
+            # presente), omitir o slot gravaria DECLARACAO_HUMANA por cima de
+            # um INFERENCIA_AGENTE que uma chamada anterior tenha rebaixado
+            # corretamente -- apagando esse rebaixamento em silencio.
+            # `origem_fato_existente` passa o valor ja gravado (None numa
+            # criacao) para a funcao preservar, em vez de promover, quando o
+            # slot vem ausente sobre um documento que ja tem proveniencia.
+            # Ver docstring de `origem_fato_para_salvar_pop` para o
+            # raciocinio completo.
+            "origem_fato": origem_fato_para_salvar_pop(
+                slots.get("usuario_forneceu_o_texto_literal"),
+                origem_fato_existente=(existing_data or {}).get("origem_fato"),
+            ),
         }
         if "sempre_ativo" in slots:
             payload["sempre_ativo"] = slots["sempre_ativo"] is True
