@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+from autonomy.temporal import STATUS_SUPERADA, memoria_status_de_leitura
+
 
 def build_mcp_voice_context(db, uid: str | None = None) -> str:
     sections = [
@@ -102,6 +104,12 @@ def _format_recent_memories(db, limit: int = 8) -> str:
 
     for snap in docs:
         data = snap.to_dict() or {}
+        # P06 passo 4 (autonomy/temporal.py): um fato SUPERADO (histórico
+        # deixado por uma substituição de conflito) não é mais a verdade
+        # atual -- não deve ser injetado no contexto de voz como se fosse
+        # uma "memória recente" ativa.
+        if memoria_status_de_leitura(data) == STATUS_SUPERADA:
+            continue
         content = (
             data.get("texto_memoria")
             or data.get("fato")
