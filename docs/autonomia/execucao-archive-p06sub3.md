@@ -1,21 +1,24 @@
 # Arquivo de execução — P06 sub-entrega 3/N
 
-O bloco P06 sub-entrega 3/N foi movido, em 2026-10-14, para este
-SEXAGÉSIMO TERCEIRO arquivo de arquivo — pela tarefa agendada de avanço
-autônomo, ao acrescentar a entrada da sub-entrega P06 4/N (ver
-docs/autonomia/execucao.md; o arquivo ativo estava em 59236 bytes,
-acima do limite usual de ~50KB, sem re-arquivamento desde o sexagésimo
-segundo arquivo, execucao-archive-p06sub2.md). Nesta mesma escrita, o
-campo `estado` do bloco movido foi corrigido de `pronto_para_revisao`
-para `validado`: esta execução confirmou de forma independente, via
-`git log`/`git show` no clone local (merge-base contra origin/main),
-que a PR #447 foi mesclada (merge commit
-2813d88d4390629ebb7c25375abc73b7edeabf32, pais 4d885674b e 37f5f9c1,
-mesclada manualmente pelo André em 2026-10-13 às 20:38:33 -03:00) e que
-o conteúdo da sub-entrega (fallback de `memoria_id` via
-`session['pending_confirmations']['memoria_conflito']` em
-telegram_message_tools.py) está presente em origin/main. Nenhum outro
-conteúdo do bloco foi alterado.
+Bloco movido de docs/autonomia/execucao.md em 2026-10-15, pela tarefa
+agendada de avanço autônomo, por ter passado de 60039 bytes, acima do
+limite usual de ~50KB, sem re-arquivamento desde o sexagésimo segundo
+arquivo de arquivo anterior, execucao-archive-p06sub2.md. Nesta mesma
+escrita, o campo `estado` do bloco movido foi corrigido de
+`pronto_para_revisao` para `validado`: esta execução confirmou, via
+`git fetch`/`git log --merges` sobre um clone local (método mais
+confiável que WebFetch de página pública, lição já registrada pelo
+Blueprint da Autonomia após um erro anterior na direção contrária, em
+13/10/2026), que a PR #447 foi de fato mesclada em 2026-10-13T23:38:33Z
+(merge commit 2813d88d4390629ebb7c25375abc73b7edeabf32,
+`Merge pull request #447 from
+andre-martiini/claude/p06-sub3-memoria-conflito-persistente`). Nenhum
+outro conteúdo do bloco foi alterado.
+
+Esta execução NÃO abriu nenhuma sub-entrega de código nova — ver o
+bloco desta mesma data ao final de execucao.md para o motivo (três PRs
+do pacote P06 já abertas e aguardando decisão do André: #449, #451 e
+#452) e o relato completo da auditoria feita.
 
 ---
 
@@ -48,7 +51,7 @@ decisoes:
     motivo: "4a rodada de revisao adversarial independente (outro Agent general-purpose, sem contexto de nenhuma rodada anterior -- so o diff final acumulado e o objetivo de verificar tudo de novo) confirmou a consistencia logica de pendente_corresponde nos 2 casos de origem do memoria_id final (explicito ou vindo do proprio fallback), confirmou que o padrao de slot unico por tipo em pending_confirmations e pre-existente ao modulo (nao introduzido por esta sub-entrega) e que a limitacao residual de PERDA de pendencia (nao de corrupcao, ja corrigida) ao sobrescrever o slot com um conflito novo e aceitavel/fora de escopo, rodou a suite completa e isolada (3956 passed/0 failed, identico ao declarado), reverteu temporariamente pendente_corresponde para bool(pendente) e confirmou que o teste novo da rodada 3 falha sem a correcao (reproduzindo a corrupcao: 'updated' != 'ignored'), restaurando o arquivo em seguida, e nao achou nenhum comentario desatualizado apos as 3 correcoes. Criterio de parada atingido (rodada nao achou nada novo)."
     autoridade: existente_ou_nova
   - id: p06-sub3-rodada5-achado-do-codex-categoria-default-ambigua
-    motivo: "Com a PR #447 ja aberta, o revisor automatico Codex achou 1 real nao coberto por nenhuma das 4 rodadas internas: `categoria` tinha default literal 'fato_isolado' (diferente de `fato_atualizado`, cujo default e ''), entao um valor EXPLICITO do modelo igual ao default era indistinguivel de uma omissao -- `categoria='fato_isolado'` passado deliberadamente podia ser sobrescrito sem necessidade pelo fallback de pendente quando o pendente (mesmo memoria_id) tivesse uma categoria diferente. Corrigido trocando o default do parametro para '' (mesmo sentinela de omitido de `fato_atualizado`) e so aplicando o default real 'fato_isolado' DEPOIS do fallback de pendente, nunca antes -- agora um valor explicito (inclusive 'fato_isolado') nunca e sobrescrito. Uma 5a rodada de revisao adversarial independente, focada so neste fix, rodou a suite isolada (22/22) e completa (3958 passed/0 failed), fez mutation test (reverter so o fix do Codex faz o teste novo falhar, confirmando que ele exercita o achado de fato) e sondou None/espacos-em-branco explicitos em `categoria` (tratados como omissao, mesmo padrao de `fato_atualizado`) sem achar nada novo -- criterio de parada atingido de novo."
+    motivo: "Com a PR #447 ja aberta, o revisor automatico Codex achou 1 real nao coberto por nenhuma das 4 rodadas internas: `categoria='fato_isolado'` explicito indistinguivel do default, sobrescrito sem necessidade pelo fallback de pendente. Corrigido na mesma execucao (trocando o default do parametro, nao a condicao de fallback), com uma 5a rodada de revisao adversarial independente (focada so nesse fix) rodando a suite completa (3958 passed/0 failed) e um mutation test proprio que confirmou os 2 testes novos exercitam o achado -- sem achar nada de novo. Ambos os arquivos (telegram_message_tools.py, test_telegram_salvar_memoria_global.py) foram reescritos via Argos com essa correcao, com sha devolvido coincidindo exatamente com `git hash-object` local em ambos (sem nenhum mismatch desta vez)."
     autoridade: existente_ou_nova
 testes:
   comandos:
