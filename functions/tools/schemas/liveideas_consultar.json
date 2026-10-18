@@ -1,0 +1,16 @@
+{
+  "name": "liveideas_consultar",
+  "description": "Estado de um pedido feito por liveideas_gerar ou liveideas_ajustar: 'gerando', 'pronto' ou 'falhou' (com o motivo), e o custo. Pronto: o texto do diagrama e o link para abrir; no ajuste, a resposta da IA e as propostas com o id de cada uma. Com task_id no pedido, anexa na ação uma vez só.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "pedido_id": {
+        "type": "string",
+        "description": "Id devolvido por liveideas_gerar ou liveideas_ajustar."
+      }
+    },
+    "required": [
+      "pedido_id"
+    ]
+  }
+}

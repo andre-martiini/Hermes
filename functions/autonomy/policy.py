@@ -66,11 +66,19 @@ from autonomy.contracts import (
 # critério das escritas de investimento: efeito financeiro sem estorno. As
 # demais tools de vídeo (prévia, ajuste, status, cancelar) ficam fora: custam
 # centavos com teto próprio, ou nada.
+#
+# Decisão explícita (18/10/2026, especificação do conector Gaspar → Live
+# Ideas, aprovada pelo André): `liveideas_apagar` entra no piso. Manda uma
+# reunião ou um processo do notebook para a lixeira, e a volta é manual, fora
+# do Gaspar. As outras nove do Live Ideas ficam fora: criar, ajustar e
+# renomear vão direto, e no ajuste a proposta mostrada antes do aplicar já é
+# a confirmação.
 FLOOR_CONFIRMACAO_OBRIGATORIA: frozenset[str] = frozenset({
     "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
     "registrar_aporte_investimento", "registrar_execucao_investimento",
     "video_renderizar", "video_refazer_cena",
     "criar_objetivo_whatsapp",
+    "liveideas_apagar",
 })
 
 # Classificação por convenção das ferramentas do piso, na matriz de efeito da
@@ -88,6 +96,8 @@ CLASSE_EFEITO_PISO: dict[str, ClasseEfeito] = {
     "video_refazer_cena": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
     # Modo Objetivo (14/10/2026): conversa em nome do André com terceiro; a abertura sempre aprovada por ele.
     "criar_objetivo_whatsapp": ClasseEfeito.COMPROMISSO_TERCEIROS,
+    # Live Ideas (18/10/2026): vai para a lixeira do notebook, não some de vez.
+    "liveideas_apagar": ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL,
 }
 
 def _validar_piso_consistente(

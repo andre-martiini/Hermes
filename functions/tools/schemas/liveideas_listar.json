@@ -1,0 +1,22 @@
+{
+  "name": "liveideas_listar",
+  "description": "Lista reuniões e processos do Live Ideas (até 50, mais recentes primeiro) com tipo, id, título e data. Item de tipo 'processo' usa o id como processo_id; os demais (fluxo, mapa) como reuniao_id. Só leitura.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "enum": [
+          "processo",
+          "fluxo",
+          "mapa"
+        ],
+        "description": "Opcional: só processo, só fluxo ou só mapa."
+      },
+      "busca": {
+        "type": "string",
+        "description": "Opcional: trecho do título (sem diferença de acento e caixa)."
+      }
+    }
+  }
+}

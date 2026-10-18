@@ -154,6 +154,11 @@ _access_cache: dict[str, object] | None = None
 # o gasto do mes e o teto mensal antes do "sim"; a execucao confere tudo de novo.
 # Previa, ajuste, status e cancelar ficam fora (centavos com teto, ou nada).
 #
+# Live Ideas (18/10/2026, decisao explicita do dono na especificacao do
+# conector): `liveideas_apagar` entra no piso. Manda reuniao ou processo do
+# notebook para a lixeira, e a volta e manual, fora do Gaspar. A previa mostra
+# o titulo; as outras nove do Live Ideas ficam fora.
+#
 # ESTE CONJUNTO NAO CRESCE POR HABITO (condicao do dono, 02/09/2026). Uma
 # candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
 # e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o
@@ -283,6 +288,14 @@ _INSTRUCTIONS = (
     "- Imagens (`gerar_imagem`, `editar_imagem`): siga o `consultar_job` ate "
     "`done` sem perguntar; o resultado traz a imagem para voce ver e o "
     "`link_download` do original para slides e artefatos.\n"
+    "- Live Ideas (tools `liveideas_*`): processo BPMN, fluxo ou mapa de ideias "
+    "sob demanda, de um texto da conversa ou de uma reuniao gravada "
+    "(`liveideas_listar` acha o id). `liveideas_gerar` devolve um `pedido_id`: "
+    "siga com `liveideas_consultar` (uns 30 s entre as chamadas) ate `pronto` "
+    "ou `falhou`, sem perguntar. Para mudar um diagrama, `liveideas_ajustar` e "
+    "`liveideas_consultar` ate a proposta; mostre a proposta ao usuario antes de "
+    "`liveideas_aplicar`. `liveideas_apagar` manda para a lixeira e exige "
+    "`confirmar_acao`.\n"
     "- Para ATUALIZAR um arquivo do Drive que ja existe (por exemplo um "
     "Google Doc que voce criou antes), use `atualizar_arquivo_drive` com o "
     "mesmo `file_id`: mantem ID, link e permissoes, e a versao anterior "

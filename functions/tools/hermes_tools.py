@@ -863,6 +863,10 @@ def encerrar_objetivo_whatsapp(ctx: ToolContext, args: dict):
 
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
+    if name == "liveideas_apagar":
+        from tools import liveideas_tools
+
+        return liveideas_tools.previa_apagar(ctx, args)
     if name == "criar_objetivo_whatsapp":
         import objetivos_whatsapp
 
@@ -896,6 +900,16 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
                 "mensagem": str(args.get("message") or ""),
                 "agendado_para": str(args.get("scheduled_time") or "")}
     return None
+
+
+def _liveideas(nome: str):
+    """Ferramentas do Live Ideas: a lógica fica em `tools/liveideas_tools.py`."""
+    def handler(ctx: ToolContext, args: dict):
+        from tools import liveideas_tools
+
+        return getattr(liveideas_tools, nome)(ctx, args)
+
+    return handler
 
 
 def _buscar_conversas_whatsapp(ctx: ToolContext, args: dict):
@@ -3196,6 +3210,11 @@ _HANDLERS: dict = {
     "video_renderizar": _video_renderizar,
     "video_refazer_cena": _video_refazer_cena,
     "video_cancelar": _video_cancelar,
+
+    # Live Ideas (canal /gaspar no Firebase do notebook)
+    **{f"liveideas_{nome}": _liveideas(nome) for nome in (
+        "gerar", "consultar", "listar", "ler", "ajustar",
+        "aplicar", "descartar", "desfazer", "renomear", "apagar")},
 }
 
 

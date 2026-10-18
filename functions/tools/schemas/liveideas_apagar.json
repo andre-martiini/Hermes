@@ -1,0 +1,17 @@
+{
+  "name": "liveideas_apagar",
+  "description": "Manda uma reunião ou um processo do Live Ideas para a lixeira (não apaga de vez). Exige confirmação: a primeira chamada devolve a prévia e o confirmation_id; só confirmar_acao apaga.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "reuniao_id": {
+        "type": "string",
+        "description": "Id da reunião do Live Ideas (formato AAAA-MM-DD_HH-MM-SS), como vem em liveideas_listar. Informe este OU processo_id."
+      },
+      "processo_id": {
+        "type": "string",
+        "description": "Id do processo do Live Ideas (começa com p_), como vem em liveideas_listar. Informe este OU reuniao_id."
+      }
+    }
+  }
+}
