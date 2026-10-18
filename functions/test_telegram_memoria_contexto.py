@@ -1,4 +1,4 @@
-"""P06 sub-entrega 3/N -- corrige a seção "Memory context" de
+"""P06 sub-entrega -- corrige a seção "Memory context" de
 `telegram_handlers_core.py::_process_telegram_message`.
 
 Achado real do Codex (revisão automática da PR #434, comentário P1,
@@ -18,13 +18,30 @@ A correção usa o mesmo fallback já estabelecido em dois outros lugares do
 próprio repositório para esta exata divergência de esquema --
 `copilot_context.py::_format_recent_memories` (`data.get("texto_memoria")
 or data.get("fato")`) e `verificadores_escrita.py::salvar_memoria`
-(`doc.get("texto_memoria") or doc.get("fato")`) -- então os dois testes
-abaixo cobrem exatamente essa regra: um documento no esquema NOVO
+(`doc.get("texto_memoria") or doc.get("fato")`) -- então os primeiros três
+testes abaixo cobrem exatamente essa regra: um documento no esquema NOVO
 (`texto_memoria`/`tipo`, como `_save_memory_node` grava hoje, para os 3
 canais) e um documento no esquema LEGADO (`fato`/`categoria`, como
 `telegram_message_tools.py::salvar_memoria_global` gravava antes da P06
 sub-entrega 2/N, e como qualquer nó antigo já existente em produção
 continua gravado, sem migração retroativa).
+
+COMPOSIÇÃO com a P06 sub-entrega 4/N (PR #451, `autonomy/temporal.py`,
+já mesclada em main antes desta correção ser publicada): aquela
+sub-entrega adicionou, na MESMA seção, um filtro que pula qualquer
+documento com `memoria_status == "superada"` (fato substituído por uma
+resolução de conflito) antes mesmo de olhar seu texto -- e seu próprio
+diário (`test_memoria_supersedes.py`, docstring do módulo) registrou
+explicitamente que esse filtro, dentro de `telegram_handlers_core.py`,
+ficava SEM teste dedicado "por desproporção de custo", já que exigiria
+mockar boa parte do pipeline Gemini/Telegram só para isso -- exatamente o
+fake que este arquivo já constrói para testar o fallback de esquema.
+`TestMemoriaContextoFiltraSuperadaComEsquemaNovo` fecha essa lacuna
+(aproveitando a infraestrutura já presente aqui) ao mesmo tempo em que
+prova que a ORDEM de composição é a correta: um fato no esquema NOVO
+(`texto_memoria`/`tipo`) mas com `memoria_status="superada"` precisa
+continuar fora do contexto -- o fallback de esquema é aditivo e nunca deve
+reviver um fato que o filtro de proveniência temporal já descartou.
 
 Fake de Firestore local (não reaproveita `test_outbox_aprovacao._MockDb`
 porque esse mock não implementa `order_by`, usado por este bloco; segue o
@@ -249,6 +266,45 @@ class TestMemoriaContextoOrdenacaoELimite(unittest.TestCase):
         ])
         self.assertNotIn("fato 1", system_instruction)
         self.assertNotIn("fato 2", system_instruction)
+
+
+class TestMemoriaContextoFiltraSuperadaComEsquemaNovo(unittest.TestCase):
+    """Composição com a P06 sub-entrega 4/N (PR #451, já mesclada em main):
+    o filtro `memoria_status_de_leitura(m) == STATUS_SUPERADA` precisa
+    continuar descartando um fato ANTES do fallback de esquema entrar em
+    ação -- um documento no esquema NOVO (`texto_memoria`/`tipo`) mas
+    marcado `superada` não deve reaparecer no contexto só porque agora
+    também lemos `texto_memoria`. Lacuna de teste registrada explicitamente
+    (não escondida) na docstring de `test_memoria_supersedes.py` como
+    "desproporcional" de cobrir ali, por exigir este mesmo fake de
+    Telegram -- fechada aqui, que já o constrói."""
+
+    def test_fato_superado_no_esquema_novo_nao_aparece(self):
+        import telegram_handlers_core as thc
+
+        db = _Db()
+        db.collection("knowledge_nodes").document("mem-superado").set({
+            "texto_memoria": "André trabalha de São Paulo (fato antigo, já substituído)",
+            "tipo": "fato_isolado",
+            "memoria_status": "superada",
+            "data_criacao": "2026-10-09T10:00:00+00:00",
+        })
+        db.collection("knowledge_nodes").document("mem-vigente").set({
+            "texto_memoria": "André trabalha de Vitória",
+            "tipo": "fato_isolado",
+            "memoria_status": "ativa",
+            "data_criacao": "2026-10-10T10:00:00+00:00",
+        })
+        run_gemini = mock.Mock(return_value="ok")
+        patches = _patches_do_handler(_run_gemini_turn=run_gemini)
+        with mock.patch.multiple(thc, **patches):
+            thc._process_telegram_message(db, {"chat_id": "123", "text": _TEXTO_COM_CONTEXTO})
+
+        system_instruction = run_gemini.call_args.kwargs["system_instruction"]
+        self.assertIn("MEMÓRIA GLOBAL ATIVA", system_instruction)
+        self.assertIn("[fato_isolado] André trabalha de Vitória", system_instruction)
+        self.assertNotIn("já substituído", system_instruction)
+        self.assertNotIn("São Paulo", system_instruction)
 
 
 if __name__ == "__main__":
