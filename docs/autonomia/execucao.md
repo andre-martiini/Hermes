@@ -621,7 +621,7 @@ pendencias:
 
 ---
 pacote: "P06 sub-entrega 5/N -- passo 10 (relatório de memória suspeita), parte pura: functions/autonomy/memoria_suspeita.py. Sem I/O e sem tocar em main.py: dado um documento de knowledge_nodes, devolve sinais com evidência (campo + trecho) para REVISÃO HUMANA -- nunca apaga, rebaixa nem supera nada (aceite do passo 10: saneamento só por revisão com evidência). Sinais: sem_proveniencia (legacy_unknown), inferencia_como_regra_global, telemetria_como_fato, superada_sem_sucessor, possivel_injecao (padrões estritos de ordem ao modelo, em todos os campos de texto lidos por consumidores reais; NFKC + remoção de caracteres Unicode Cf; negação colada ao padrão não conta). Documento superada também é varrido por injeção porque main._build_memory_context injeta texto sem filtrar memoria_status."
-estado: pronto_para_revisao
+estado: validado
 inicio: "2026-10-18T14:20:00Z"
 fim: "2026-10-18T15:10:00Z"
 decisoes:
@@ -637,6 +637,7 @@ revisao_adversarial:
   - "Rodada 2: evidência truncada sem conter o casamento; superada não varrida; negação; unicode; doc_id não-string -- corrigidos."
   - "Rodada 3: negação mascarando injeção em outra linha/meio de palavra; variantes com possessivo; caracteres Cf -- corrigidos."
   - "Rodada 4: só falso positivo já aceito (negação com auxiliar). Sem achado real."
+  - "PR #463 MESCLADA em 2026-10-18 (merge commit 64205c8); checks do GitHub verdes no head 2ed4a91; thread do Codex resolvida."
   - "Codex (PR #463): P2 real -- remover caractere Cf colava palavras (ignore\u200bas) e escondia a injeção; corrigido varrendo as duas variantes (removido e trocado por espaço). Revisão adversarial focada: só lacuna de teste (variante removida e negação com Cf), corrigida; limitação residual documentada (Cf dentro da palavra E no lugar do espaço)."
 pendencias:
   - "Sub-entrega seguinte do passo 10: varredura paginada real de knowledge_nodes + destino do relatório (fila de atenção ou tool somente leitura)."
