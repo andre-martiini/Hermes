@@ -26,7 +26,7 @@ do relatório (aceite do passo 10), nunca efeito colateral daqui.
 - `POSSIVEL_INJECAO`: o texto contém instrução dirigida ao modelo
   ("ignore as instruções anteriores" e similares) -- um documento externo
   não pode virar POP/regra (testes do pacote). Heurística barata e
-  conservadora; um falso positivo só gera uma linha a revisar.
+  conservadora (ver `_PADROES_INJECAO`); um falso positivo só gera uma linha a revisar. Todos os campos de texto lidos por consumidores reais são varridos, e a evidência aponta o campo de onde veio o trecho.
 
 Sinais de documentos `superada` são reportados apenas como
 `SUPERADA_SEM_SUCESSOR`: um fato já histórico não é mais candidato a
@@ -64,14 +64,24 @@ SINAIS = (
 _TIPOS_MEMORIA = frozenset({"regra_global", "fato_isolado"})
 _MAX_TRECHO = 120
 
+# Campos de texto que algum consumidor real injeta em prompt
+# (`main.py::_find_similar_memory_nodes` lê texto_memoria/resumo/titulo;
+# `copilot_context.py` lê texto_memoria/fato/resumo): TODOS são varridos,
+# não só o primeiro preenchido.
+_CAMPOS_TEXTO = ("texto_memoria", "resumo", "fato", "titulo")
+
+# Padrões deliberadamente restritos a instruções dirigidas ao modelo. Frases
+# como "você deve obedecer ao regulamento" ou a simples menção a "system
+# prompt" são texto legítimo comum e NÃO são padrões; já "ignore as
+# instruções anteriores" pode aparecer em texto legítimo sobre editais --
+# aceito como falso positivo barato (uma linha a revisar), documentado acima.
 _PADROES_INJECAO = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
         r"ignor(e|ar|em)\s+(todas\s+)?(as\s+)?(instru[cç][õo]es|regras|ordens)\s+(anteriores|acima|pr[eé]vias)",
-        r"ignore\s+(all\s+)?(the\s+)?(previous|prior|above)\s+(instructions|rules)",
-        r"(desconsidere|esque[cç]a)\s+(tudo|as\s+instru[cç][õo]es|o\s+que)\s+(acima|anterior|foi\s+dito)",
-        r"\bsystem\s*prompt\b",
-        r"voc[eê]\s+(agora\s+)?(deve|precisa)\s+obedecer",
+        r"(ignore|disregard|forget)\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above)\s+(instructions|rules)",
+        r"(desconsidere|esque[cç]a)\s+(tudo|as\s+instru[cç][õo]es)(\s+o\s+que)?\s+(acima|anterior|foi\s+dito)",
+        r"\b(reveal|revele|mostre)\s+(o\s+|your\s+|the\s+)?system\s*prompt\b",
     )
 )
 
@@ -91,14 +101,6 @@ class SinalSuspeita:
 class MemoriaSuspeita:
     doc_id: str
     sinais: tuple[SinalSuspeita, ...]
-
-
-def _texto_do_fato(doc: dict) -> str:
-    for chave in ("texto_memoria", "resumo", "fato"):
-        valor = doc.get(chave)
-        if isinstance(valor, str) and valor.strip():
-            return valor
-    return ""
 
 
 def _trecho(texto: str) -> str:
@@ -131,9 +133,10 @@ def sinais_de_memoria_suspeita(doc: dict | None) -> tuple[SinalSuspeita, ...]:
     elif origem == TELEMETRIA_USO and tipo in _TIPOS_MEMORIA:
         sinais.append(SinalSuspeita(TELEMETRIA_COMO_FATO, "tipo", f"{origem}/{tipo}"))
 
-    texto = _texto_do_fato(doc)
-    if texto and any(p.search(texto) for p in _PADROES_INJECAO):
-        sinais.append(SinalSuspeita(POSSIVEL_INJECAO, "texto_memoria", _trecho(texto)))
+    for campo in _CAMPOS_TEXTO:
+        texto = doc.get(campo)
+        if isinstance(texto, str) and any(p.search(texto) for p in _PADROES_INJECAO):
+            sinais.append(SinalSuspeita(POSSIVEL_INJECAO, campo, _trecho(texto)))
 
     return tuple(sinais)
 
@@ -144,7 +147,11 @@ def relatorio_memoria_suspeita(
     """Relatório sobre pares `(doc_id, dict)`: só entram documentos com ao
     menos um sinal, na ordem recebida. Não altera nenhum documento."""
     achados = []
-    for doc_id, doc in documentos:
+    for item in documentos:
+        try:
+            doc_id, doc = item
+        except (TypeError, ValueError):
+            continue  # item torto: o relatório não falha por um documento
         sinais = sinais_de_memoria_suspeita(doc)
         if sinais:
             achados.append(MemoriaSuspeita(doc_id=str(doc_id), sinais=sinais))
