@@ -79,8 +79,9 @@ _CAMPOS_TEXTO = ("texto_memoria", "resumo", "fato", "titulo")
 _PADROES_INJECAO = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
-        r"ignor(e|ar|em)\s+(todas\s+)?(as\s+)?(instru[cç][õo]es|regras|ordens)\s+(anteriores|acima|pr[eé]vias)",
-        r"(ignore|disregard|forget)\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above)\s+(instructions|rules)",
+        r"ignor(e|ar|em)\s+(todas\s+)?(as\s+)?(suas?\s+)?(instru[cç][õo]es|regras|ordens)\s+(anteriores|acima|pr[eé]vias)",
+        r"(ignore|disregard|forget)\s+(all\s+|any\s+)?((the|your|my)\s+)?(previous|prior|above)\s+(instructions|rules)",
+        r"(ignore|disregard|forget)\s+(all\s+|any\s+)?((the|your|my)\s+)?(instructions|rules)\s+(above|before)",
         r"(desconsidere|esque[cç]a)\s+(tudo|as\s+instru[cç][õo]es)(\s+o\s+que)?\s+(acima|anterior|foi\s+dito|eu\s+disse|eu\s+falei)",
         r"\b(reveal|revele|mostre)\s+(o\s+|seu\s+|sua\s+|your\s+|the\s+)?system\s*prompt\b",
     )
@@ -89,14 +90,17 @@ _PADROES_INJECAO = tuple(
 
 # Negação imediatamente antes do padrão ("não ignore as instruções
 # anteriores") é uma regra legítima, não uma ordem ao modelo.
-_NEGACAO_ANTES = re.compile(r"(n[aã]o|nunca|jamais|do\s+not|don't|never)\s+$", re.IGNORECASE)
-_INVISIVEIS = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
+# Só espaço/tab entre a negação e o padrão (uma quebra de linha separa
+# frases) e fronteira de palavra antes ("whenever" não é "never").
+_NEGACAO_ANTES = re.compile(r"\b(n[aã]o|nunca|jamais|do\s+not|don't|never)[ \t]+$", re.IGNORECASE)
 
 
 def _normalizar(texto: str) -> str:
-    """NFKC + remoção de caracteres invisíveis: sem isso, um espaço de
+    """NFKC + remoção de caracteres de formatação (categoria Unicode Cf:
+    largura zero, marcas bidi etc.): sem isso, um espaço de
     largura zero ou a forma decomposta de "ç" desviam o padrão."""
-    return unicodedata.normalize("NFKC", texto).translate(_INVISIVEIS)
+    normalizado = unicodedata.normalize("NFKC", texto)
+    return "".join(c for c in normalizado if unicodedata.category(c) != "Cf")
 
 
 def _trecho_do_padrao(texto: str) -> str | None:
