@@ -95,23 +95,27 @@ _PADROES_INJECAO = tuple(
 _NEGACAO_ANTES = re.compile(r"\b(n[aã]o|nunca|jamais|do\s+not|don't|never)[ \t]+$", re.IGNORECASE)
 
 
-def _normalizar(texto: str) -> str:
-    """NFKC + remoção de caracteres de formatação (categoria Unicode Cf:
-    largura zero, marcas bidi etc.): sem isso, um espaço de
-    largura zero ou a forma decomposta de "ç" desviam o padrão."""
+def _variantes(texto: str) -> tuple[str, str]:
+    """NFKC + caracteres de formatação (categoria Unicode Cf: largura zero,
+    marcas bidi etc.) removidos OU trocados por espaço. As duas variantes
+    são varridas: remover cola "ignore\u200bas" em "ignoreas", e trocar por
+    espaço separaria "ig\u200bnore" em "ig nore" -- cada ofuscação só é
+    desfeita por uma das duas."""
     normalizado = unicodedata.normalize("NFKC", texto)
-    return "".join(c for c in normalizado if unicodedata.category(c) != "Cf")
+    removido = "".join(c for c in normalizado if unicodedata.category(c) != "Cf")
+    espaco = "".join(" " if unicodedata.category(c) == "Cf" else c for c in normalizado)
+    return removido, espaco
 
 
 def _trecho_do_padrao(texto: str) -> str | None:
     """Trecho (janela centrada no primeiro casamento não negado) ou None."""
-    texto = _normalizar(texto)
-    for padrao in _PADROES_INJECAO:
-        for m in padrao.finditer(texto):
-            if _NEGACAO_ANTES.search(texto[max(0, m.start() - 20) : m.start()]):
-                continue
-            ini = max(0, m.start() - _MAX_TRECHO // 4)
-            return _trecho(texto[ini : ini + _MAX_TRECHO * 2])
+    for variante in _variantes(texto):
+        for padrao in _PADROES_INJECAO:
+            for m in padrao.finditer(variante):
+                if _NEGACAO_ANTES.search(variante[max(0, m.start() - 20) : m.start()]):
+                    continue
+                ini = max(0, m.start() - _MAX_TRECHO // 4)
+                return _trecho(variante[ini : ini + _MAX_TRECHO * 2])
     return None
 
 
