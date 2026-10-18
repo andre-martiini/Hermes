@@ -166,6 +166,12 @@ def _consultar_promocoes_autonomia_sugeridas(ctx: ToolContext, args: dict):
     return promocao_autonomia.listar_promocoes_pendentes(ctx.db, limite=int(args.get("limite") or 20))
 
 
+def _consultar_memoria_suspeita(ctx: ToolContext, args: dict):
+    from tools.consultar_memoria_suspeita import consultar
+
+    return consultar(ctx, args)
+
+
 def _decidir_promocao_autonomia(ctx: ToolContext, args: dict):
     import promocao_autonomia
 
@@ -3091,6 +3097,7 @@ _HANDLERS: dict = {
     "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,
+    "consultar_memoria_suspeita": _consultar_memoria_suspeita,
     "decidir_promocao_autonomia": _decidir_promocao_autonomia,
     "revogar_promocao_autonomia": _revogar_promocao_autonomia,
     "consultar_historico_acoes": _consultar_historico_acoes,
