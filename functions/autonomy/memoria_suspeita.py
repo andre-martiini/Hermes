@@ -100,7 +100,9 @@ def _variantes(texto: str) -> tuple[str, str]:
     marcas bidi etc.) removidos OU trocados por espaço. As duas variantes
     são varridas: remover cola "ignore\u200bas" em "ignoreas", e trocar por
     espaço separaria "ig\u200bnore" em "ig nore" -- cada ofuscação só é
-    desfeita por uma das duas."""
+    desfeita por uma das duas. Limitação conhecida e aceita (o relatório é
+    heurística para revisão humana, não barreira): Cf DENTRO da palavra e no
+    lugar do espaço ao mesmo tempo ("ig\u200bnore\u200bas") escapa das duas."""
     normalizado = unicodedata.normalize("NFKC", texto)
     removido = "".join(c for c in normalizado if unicodedata.category(c) != "Cf")
     espaco = "".join(" " if unicodedata.category(c) == "Cf" else c for c in normalizado)
