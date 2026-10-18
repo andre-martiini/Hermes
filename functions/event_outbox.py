@@ -115,6 +115,7 @@ from types import MappingProxyType
 from typing import Any, Callable
 
 from firebase_admin import firestore
+from google.api_core import exceptions as gcp_exceptions
 from firebase_functions import options, scheduler_fn
 
 from autonomy.events import CategoriaEvento, EventEnvelope
@@ -499,7 +500,16 @@ def varrer_outbox_travado_core(
                 "ultimo_erro": resultado.entrada.ultimo_erro,
             }
             try:
-                snap.reference.update(campos)
+                # Precondição por `update_time`: o snapshot pode ter segundos
+                # de idade; se outro worker reivindicou/concluiu a entrada
+                # nesse intervalo, a escrita é recusada (nunca sobrescreve
+                # `estado`/`tentativas` de uma geração mais nova).
+                snap.reference.update(
+                    campos, option=db.write_option(last_update_time=snap.update_time)
+                )
+            except gcp_exceptions.FailedPrecondition:
+                print(f"[outbox_eventos] reconciliação de {entrada.entry_id} ignorada: documento mudou desde a leitura")
+                continue
             except Exception as exc:  # noqa: BLE001
                 print(f"[outbox_eventos] falha ao gravar reconciliação de {entrada.entry_id}: {exc}")
                 continue

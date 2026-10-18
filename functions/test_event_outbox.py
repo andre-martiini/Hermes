@@ -21,6 +21,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from google.api_core import exceptions as gcp_exceptions
+
 import event_outbox
 from autonomy.events import CategoriaEvento, montar_evento
 from autonomy.outbox import EstadoOutbox, criar_entrada, iniciar_despacho, registrar_falha
@@ -39,6 +41,10 @@ def _evento(doc_id: str = "digest-1", occurred_at: datetime = _AGORA):
     )
 
 
+class _Store(dict):
+    conflitos: set = frozenset()
+
+
 class _FakeDocRef:
     def __init__(self, store, doc_id):
         self._store = store
@@ -50,7 +56,9 @@ class _FakeDocRef:
     def set(self, data):
         self._store[self.id] = dict(data)
 
-    def update(self, data):
+    def update(self, data, option=None):
+        if self.id in getattr(self._store, "conflitos", ()):
+            raise gcp_exceptions.FailedPrecondition("documento mudou")
         self._store[self.id].update(data)
 
 
@@ -60,6 +68,7 @@ class _FakeDocSnap:
         self._data = data
         self.exists = data is not None
         self.reference = ref
+        self.update_time = "ut-fake"
 
     def to_dict(self):
         return dict(self._data) if self._data is not None else None
@@ -115,7 +124,10 @@ class _FakeQuery:
 
 class _FakeDb:
     def __init__(self, docs=None):
-        self._store = {doc_id: dict(dados) for doc_id, dados in (docs or {}).items()}
+        self._store = _Store({doc_id: dict(dados) for doc_id, dados in (docs or {}).items()})
+
+    def write_option(self, last_update_time=None):
+        return ("last_update_time", last_update_time)
 
     def collection(self, nome):
         assert nome == event_outbox.COLECAO
@@ -415,6 +427,22 @@ class TestVarrerOutboxTravadoCore(unittest.TestCase):
     def _em_processamento(self, doc_id="evt-1", *, criado_em=_AGORA, executor_id="worker-1"):
         entrada = criar_entrada(_evento(doc_id), criado_em)
         return iniciar_despacho(entrada, executor_id, criado_em)
+
+    def test_documento_alterado_desde_a_leitura_nao_e_sobrescrito(self):
+        db = _FakeDb()
+        em_processamento = self._em_processamento()
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+        db._store.conflitos = {em_processamento.entry_id}
+        depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 0))
+        mock_persistir.assert_not_called()
+        self.assertEqual(db._store[em_processamento.entry_id]["estado"], EstadoOutbox.EM_PROCESSAMENTO.value)
 
     def test_lease_vencida_com_tentativas_disponiveis_e_recuperada_sem_diagnostico(self):
         db = _FakeDb()
