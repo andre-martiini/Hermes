@@ -81,6 +81,10 @@ class ConsultarMemoriaSuspeitaTest(unittest.TestCase):
         self.assertEqual(r["documentos_lidos"], 1)
         self.assertNotIn("erro", r)
 
+    def test_fora_do_canal_de_voz(self):
+        from tools import registry
+        self.assertFalse(registry.is_voice_enabled("consultar_memoria_suspeita"))
+
     def test_handler_registrado_e_sem_escrita(self):
         self.assertIn("consultar_memoria_suspeita", hermes_tools._HANDLERS)
         with mock.patch.object(ms, "varrer_knowledge_nodes", return_value=_resultado(1)) as v:

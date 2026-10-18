@@ -325,6 +325,8 @@ _VOICE_EXCLUDED: set[str] = {
     "confirmar_edicao_em_lote",
     "confirmar_reagendamento_em_lote",
     "ler_documento_na_integra",
+    # Relatorio longo de revisao humana (ate 200 trechos de memoria nao confiavel): nao e canal de voz.
+    "consultar_memoria_suspeita",
     # Escrita de dinheiro por voz nao: um numero mal transcrito ("mil e
     # quinhentos") grava valor errado num registro que acumula e que o servico
     # nao sabe estornar. Consultar por voz continua liberado.

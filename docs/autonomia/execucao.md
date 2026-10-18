@@ -623,8 +623,9 @@ decisoes:
     motivo: "PR #466 (Live Ideas, avulsa do André, aberta há minutos) não é desta linha: não tocada."
 testes:
   resultados:
-    - "functions/ completo ANTES 4185 OK, DEPOIS 4190 OK (+5 em test_consultar_memoria_suspeita; +3 após a revisão, rodados com inventário/anotações/schemas: 67 OK)."
+    - "functions/ completo ANTES 4185 OK, DEPOIS 4190 OK (+5 em test_consultar_memoria_suspeita; 4193 OK após a revisão adversarial; +1 teste do achado do Codex)."
 revisao_adversarial:
   - "Rodada 1 (agente sem contexto): sem bug de contrato nem escrita; reais corrigidos: evidência com possível injeção sem aviso, limite com bool/inf, teste de somente leitura que só mockava a varredura (agora fake de db que proíbe qualquer método de escrita). Cap sem cursor e custo documentados nas decisões."
+  - "Codex (PR #467): P2 real -- a tool entraria no canal de voz (is_voice_enabled); adicionada a _VOICE_EXCLUDED com teste."
 pendencias:
   - "Passo 9 (modelo por pessoa); passos 5-8 (recuperação, obter_contexto_operacional/consultar_memoria_contextual, cursor, mapa de POPs)."
