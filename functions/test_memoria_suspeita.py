@@ -186,5 +186,132 @@ class TestRelatorio(unittest.TestCase):
         self.assertEqual(totais[ms.POSSIVEL_INJECAO], 0)
 
 
+class _Snap:
+    def __init__(self, doc_id, dados):
+        self.id = doc_id
+        self._dados = dados
+
+    def to_dict(self):
+        return self._dados
+
+
+class _Consulta:
+    def __init__(self, snaps, limite=None, cursor=None, ordenada=False):
+        self._snaps, self._limite, self._cursor, self._ordenada = snaps, limite, cursor, ordenada
+
+    def order_by(self, campo):
+        assert campo == "__name__"
+        return _Consulta(self._snaps, self._limite, self._cursor, True)
+
+    def limit(self, n):
+        return _Consulta(self._snaps, n, self._cursor, self._ordenada)
+
+    def start_after(self, snap):
+        return _Consulta(self._snaps, self._limite, snap, self._ordenada)
+
+    def stream(self):
+        assert self._ordenada, "paginação sem order_by('__name__')"
+        snaps = sorted(self._snaps, key=lambda s: s.id)
+        if self._cursor is not None:
+            snaps = [s for s in snaps if s.id > self._cursor.id]
+        return iter(snaps[: self._limite])
+
+
+class _Db:
+    def __init__(self, snaps):
+        self.snaps = snaps
+        self.colecoes = []
+
+    def collection(self, nome):
+        self.colecoes.append(nome)
+        return _Consulta(self.snaps)
+
+
+def _db_com(n_suspeitos, n_ok):
+    snaps = [_Snap(f"s{i:03d}", {"tipo": "fato_isolado", "texto_memoria": "x"}) for i in range(n_suspeitos)]
+    snaps += [_Snap(f"o{i:03d}", _doc()) for i in range(n_ok)]
+    return _Db(snaps)
+
+
+class TestVarredura(unittest.TestCase):
+    def test_pagina_todos_os_documentos_e_so_reporta_suspeitos(self):
+        db = _db_com(3, 4)
+        r = ms.varrer_knowledge_nodes(db, tamanho_pagina=2)
+        self.assertEqual(r.documentos_lidos, 7)
+        self.assertFalse(r.truncado)
+        self.assertEqual([m.doc_id for m in r.relatorio], ["s000", "s001", "s002"])
+        self.assertEqual(set(db.colecoes), {"knowledge_nodes"})
+
+    def test_limite_exato_nao_marca_truncado(self):
+        r = ms.varrer_knowledge_nodes(_db_com(0, 4), tamanho_pagina=2, max_documentos=4)
+        self.assertEqual(r.documentos_lidos, 4)
+        self.assertFalse(r.truncado)
+
+    def test_limite_com_sobra_marca_truncado(self):
+        r = ms.varrer_knowledge_nodes(_db_com(0, 5), tamanho_pagina=2, max_documentos=4)
+        self.assertEqual(r.documentos_lidos, 4)
+        self.assertTrue(r.truncado)
+
+    def test_limite_nao_multiplo_da_pagina_respeita_max(self):
+        r = ms.varrer_knowledge_nodes(_db_com(0, 7), tamanho_pagina=2, max_documentos=5)
+        self.assertEqual(r.documentos_lidos, 5)
+        self.assertTrue(r.truncado)
+
+    def test_max_menor_que_pagina(self):
+        r = ms.varrer_knowledge_nodes(_db_com(0, 7), max_documentos=3)
+        self.assertEqual(r.documentos_lidos, 3)
+        self.assertTrue(r.truncado)
+
+    def test_pagina_cheia_seguida_de_vazia_termina(self):
+        r = ms.varrer_knowledge_nodes(_db_com(0, 4), tamanho_pagina=2)
+        self.assertEqual(r.documentos_lidos, 4)
+
+    def test_nao_retem_os_documentos_lidos(self):
+        import gc
+        import weakref
+
+        class _Dict(dict):
+            pass
+
+        refs = []
+
+        class _SnapFresco(_Snap):
+            def to_dict(self):
+                d = _Dict(_doc())
+                refs.append(weakref.ref(d))
+                return d
+
+        db = _Db([_SnapFresco(f"o{i:03d}", None) for i in range(6)])
+        r = ms.varrer_knowledge_nodes(db, tamanho_pagina=2)
+        gc.collect()
+        self.assertEqual(len(refs), 6)
+        self.assertEqual(r.relatorio, ())
+        self.assertTrue(all(ref() is None for ref in refs))
+
+    def test_colecao_vazia(self):
+        r = ms.varrer_knowledge_nodes(_Db([]))
+        self.assertEqual((r.relatorio, r.documentos_lidos, r.truncado), ((), 0, False))
+
+    def test_parametros_invalidos(self):
+        with self.assertRaises(ValueError):
+            ms.varrer_knowledge_nodes(_Db([]), tamanho_pagina=0)
+        with self.assertRaises(ValueError):
+            ms.varrer_knowledge_nodes(_Db([]), max_documentos=0)
+
+    def test_erro_de_leitura_propaga(self):
+        class Quebrado(_Db):
+            def collection(self, nome):
+                raise RuntimeError("firestore fora")
+
+        with self.assertRaises(RuntimeError):
+            ms.varrer_knowledge_nodes(Quebrado([]))
+
+    def test_documento_sem_dict_nao_derruba(self):
+        db = _Db([_Snap("a", None), _Snap("b", _doc())])
+        r = ms.varrer_knowledge_nodes(db)
+        self.assertEqual(r.documentos_lidos, 2)
+        self.assertEqual(r.relatorio, ())
+
+
 if __name__ == "__main__":
     unittest.main()
