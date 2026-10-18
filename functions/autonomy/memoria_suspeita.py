@@ -213,3 +213,59 @@ def contagem_por_sinal(relatorio: Iterable[MemoriaSuspeita]) -> dict[str, int]:
         for sinal in item.sinais:
             totais[sinal.sinal] += 1
     return totais
+
+
+COLECAO_KNOWLEDGE_NODES = "knowledge_nodes"
+TAMANHO_PAGINA_VARREDURA = 200
+MAX_DOCUMENTOS_VARREDURA = 5000
+
+
+@dataclass(frozen=True)
+class ResultadoVarredura:
+    relatorio: tuple[MemoriaSuspeita, ...]
+    documentos_lidos: int
+    truncado: bool  # parou em `max_documentos` com ainda haver páginas
+
+
+def varrer_knowledge_nodes(
+    db,
+    *,
+    tamanho_pagina: int = TAMANHO_PAGINA_VARREDURA,
+    max_documentos: int = MAX_DOCUMENTOS_VARREDURA,
+) -> ResultadoVarredura:
+    """Varredura SOMENTE LEITURA de `knowledge_nodes`, paginada por
+    `order_by("__name__")` + `start_after(ultimo_doc)` (mesmo padrão de
+    `mcp_jobs`), limitada a `max_documentos`. Nunca grava. Um erro de leitura
+    propaga: relatório parcial silencioso esconderia memória suspeita."""
+    if tamanho_pagina < 1 or max_documentos < 1:
+        raise ValueError("tamanho_pagina e max_documentos devem ser >= 1")
+    consulta_base = db.collection(COLECAO_KNOWLEDGE_NODES).order_by("__name__")
+    lidos = 0
+    cursor = None
+    pares: list[tuple[str, dict | None]] = []
+    truncado = False
+    while True:
+        if lidos >= max_documentos:
+            sonda = consulta_base.limit(1)
+            if cursor is not None:
+                sonda = sonda.start_after(cursor)
+            truncado = bool(list(sonda.stream()))
+            break
+        limite = min(tamanho_pagina, max_documentos - lidos)
+        pagina = consulta_base.limit(limite)
+        if cursor is not None:
+            pagina = pagina.start_after(cursor)
+        snaps = list(pagina.stream())
+        if not snaps:
+            break
+        for snap in snaps:
+            lidos += 1
+            pares.append((snap.id, snap.to_dict()))
+        cursor = snaps[-1]
+        if len(snaps) < limite:
+            break
+    return ResultadoVarredura(
+        relatorio=relatorio_memoria_suspeita(pares),
+        documentos_lidos=lidos,
+        truncado=truncado,
+    )
