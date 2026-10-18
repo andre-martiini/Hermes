@@ -581,8 +581,11 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
     return entregues
 
 
-def _anexar_na_acao(db, task_id: str, *, nome: str, link: str, drive_id: str | None, prompt: str) -> str:
-    """Mesmo formato de `tools/anexar_arquivo.py`: item no pool + arquivo e nota no diário."""
+def _anexar_na_acao(db, task_id: str, *, nome: str, link: str, drive_id: str | None, prompt: str,
+                    nota: str | None = None) -> str:
+    """Mesmo formato de `tools/anexar_arquivo.py`: item no pool + arquivo e nota no diário.
+
+    `nota` troca a linha do diário (o Live Ideas anexa o `.bpmn` por aqui)."""
     from firebase_admin import firestore
 
     agora = datetime.now(timezone.utc).isoformat()
@@ -590,7 +593,7 @@ def _anexar_na_acao(db, task_id: str, *, nome: str, link: str, drive_id: str | N
     if drive_id:
         item["drive_file_id"] = drive_id
     arquivo = "FILE::JSON::" + json.dumps({"n": nome, "v": link}, ensure_ascii=False)
-    nota = f"Imagem gerada pelo Gaspar: {prompt[:300]}"
+    nota = nota or f"Imagem gerada pelo Gaspar: {prompt[:300]}"
     db.collection("tarefas").document(task_id).update({
         "pool_dados": firestore.ArrayUnion([item]),
         "acompanhamento": firestore.ArrayUnion([{"data": agora, "nota": arquivo}, {"data": agora, "nota": nota}]),

@@ -146,6 +146,7 @@ _L = LeituraEscrita
 _R = Reversibilidade
 _C = ClasseEfeito
 _I = Idempotencia
+_REDE_LIVEIDEAS = "Firebase Realtime Database do Live Ideas (canal /gaspar) até o notebook do Live Ideas"
 
 _INVENTORY: dict[str, ToolInventoryEntry] = {
     "consultar_historico_acoes": ToolInventoryEntry(
@@ -1470,6 +1471,87 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "outro projeto paga todos os clipes de novo; por isso fica fora da voz. Idempotente: cancelar um "
         "projeto já cancelado responde 'Já estava cancelado' sem escrever. A classe continua de escrita "
         "interna: nada sai do Hermes e nada gasta dinheiro.",
+    ),
+    # Live Ideas (18/10/2026): tools/liveideas_tools.py, pelo canal /gaspar do Firebase do notebook.
+    "liveideas_gerar": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
+        "liveideas_consultar acompanha até pronto ou falhou e traz o texto e o link",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Irreversível pelo gasto de IA no Live Ideas (o diagrama em si vai para a lixeira com "
+        "liveideas_apagar). Não idempotente: cada chamada cria uma geração nova no notebook e um pedido "
+        "novo em liveideas_pedidos (ID automático).",
+    ),
+    "liveideas_consultar": ToolInventoryEntry(
+        "liveideas", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "ela própria é o verificador de liveideas_gerar e liveideas_ajustar",
+        rede_servico=_REDE_LIVEIDEAS + "; Google Drive (o .bpmn de processo com task_id)",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Escreve só com task_id e estado pronto: anota no diário da ação e, para processo, grava o "
+        ".bpmn no Drive e anexa (removível com remover_anexo). Idempotente: `anexado` é marcado em "
+        "transação antes de anexar, então consultar de novo não anexa outra vez.",
+    ),
+    "liveideas_listar": ToolInventoryEntry(
+        "liveideas", _L.LEITURA, _R.NAO_APLICA, True, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+    ),
+    "liveideas_ler": ToolInventoryEntry(
+        "liveideas", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="conteúdo de reuniões (resumo, decisões e ações de participantes); "
+        "a transcrição não vem",
+    ),
+    "liveideas_ajustar": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
+        "liveideas_consultar traz a proposta; o diagrama só muda com liveideas_aplicar",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Não muda o diagrama: monta uma proposta. Irreversível pelo gasto de IA. Não idempotente: "
+        "cada chamada cria um ajuste novo no notebook e um pedido novo em liveideas_pedidos. Ajuste de "
+        "fluxo/mapa abre a reunião no notebook se ela não for a ativa.",
+    ),
+    "liveideas_aplicar": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a resposta traz o texto atualizado do diagrama",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        nota="Reversível com liveideas_desfazer. Idempotência não classificada: a repetição depende do "
+        "Especialista/Conversa do Live Ideas, não investigada aqui.",
+    ),
+    "liveideas_descartar": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL, "nenhum",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        nota="O diagrama não muda; a proposta descartada não volta, mas um novo liveideas_ajustar refaz.",
+    ),
+    "liveideas_desfazer": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a resposta traz o texto atualizado do diagrama",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+    ),
+    "liveideas_renomear": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "liveideas_ler ou liveideas_listar mostram o título novo",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente: o mesmo título de novo deixa tudo igual. Reversível renomeando de volta.",
+    ),
+    "liveideas_apagar": ToolInventoryEntry(
+        "liveideas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "liveideas_listar deixa de mostrar o item",
+        rede_servico=_REDE_LIVEIDEAS,
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Piso de confirmação (autonomy/policy.py, 18/10/2026). Reversível: vai para a lixeira do "
+        "notebook (reunioes/_lixeira, processos/_lixeira), com volta manual. Idempotente: apagar de novo "
+        "dá 'não encontrado' sem outro efeito.",
     ),
 }
 
