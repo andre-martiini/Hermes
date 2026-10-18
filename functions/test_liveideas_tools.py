@@ -150,6 +150,18 @@ class GerarTest(Base):
         self.assertEqual(r, {"erro": msg})
         self.assertEqual(self.db.pedidos(), {})
 
+    def test_task_id_com_barra_ou_vazio_e_recusado_antes_do_firestore(self):
+        for task_id in ("t1/../x", "   ", ""):
+            with self.subTest(task_id=task_id),                  mock.patch.object(self.db, "collection", side_effect=AssertionError("não pode ir ao Firestore")):
+                r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "task_id": task_id})
+                self.assertEqual(r, {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"})
+        self.assertEqual(self.chamadas, [])
+
+    def test_task_id_com_espacos_em_volta_vale_sem_eles(self):
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN})
+        r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "task_id": " t1 "})
+        self.assertEqual(self.db.pedidos()[r["pedido_id"]]["task_id"], "t1")
+
     def test_task_id_inexistente_e_recusado_antes_do_comando(self):
         r = hermes_tools.execute("liveideas_gerar", {"tipo": "mapa", "texto": "y" * 50, "task_id": "nao"}, self.ctx)
         self.assertIn("erro", r)
@@ -400,6 +412,8 @@ class ApagarConfirmacaoTest(Base):
         self.respostas["listar"] = self.respostas["ler"] = liveideas.LiveIdeasIndisponivel(liveideas.MSG_DESLIGADO)
         previa = hermes_tools.preview("liveideas_apagar", self.ctx, {"processo_id": PROC})
         self.assertEqual(previa["resumo"], f"vai para a lixeira: {PROC}")
+        # o listar já esgotou o prazo: o ler não é tentado (a prévia não passa de um prazo de 20 s)
+        self.assertEqual(self.chamadas, [("listar", {"tipo": "processo"})])
 
     @unittest.skipUnless(importlib.util.find_spec("firebase_functions"), "mcp_server precisa de firebase_functions")
     def test_pelo_mcp_a_primeira_chamada_so_devolve_a_previa(self):

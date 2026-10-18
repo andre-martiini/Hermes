@@ -11,6 +11,7 @@ biblioteca (que podem conter a chave privada) são trocadas por frases fixas.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 
@@ -23,6 +24,8 @@ NOME_APP = "liveideas"
 INTERVALO_S = 0.5
 # O padrão do firebase_admin é 120 s com retry, o que estouraria o prazo do comando.
 HTTP_TIMEOUT_S = 5
+# A regra do banco recusa `corpo` acima disto (comprimento de texto do JavaScript, em UTF-16).
+LIMITE_CORPO = 200000
 
 MSG_DESLIGADO = "o notebook do Live Ideas está desligado (ligue-o e peça de novo)"
 MSG_SEM_RESPOSTA = "o notebook não respondeu; tente de novo em instantes"
@@ -40,8 +43,14 @@ MSG_CREDENCIAL_RECUSADA = (
 )
 MSG_REDE = "não consegui falar com o Live Ideas agora; tente de novo em instantes"
 MSG_RESPOSTA_INVALIDA = "o notebook devolveu uma resposta inválida"
+MSG_GRANDE_DEMAIS = (
+    "o texto é grande demais para mandar ao Live Ideas "
+    "(limite de cerca de 200.000 caracteres)"
+)
+MSG_CORPO_INVALIDO = "o pedido ao Live Ideas tem um valor que não vira JSON; confira os campos e peça de novo"
 
 _apps: dict = {}  # raiz do banco, criada uma vez por instância
+_trava_app = threading.Lock()  # duas chamadas numa instância fria não podem criar o app duas vezes
 
 
 class LiveIdeasIndisponivel(Exception):
@@ -56,6 +65,23 @@ def banco_liveideas(db):
     """Raiz do Realtime Database do Live Ideas, com a conta de serviço do cofre."""
     if NOME_APP in _apps:
         return _apps[NOME_APP]
+    with _trava_app:
+        if NOME_APP not in _apps:
+            _apps[NOME_APP] = rtdb.reference("/", app=_app_liveideas(db))
+    return _apps[NOME_APP]
+
+
+def _app_existente():
+    try:
+        return firebase_admin.get_app(NOME_APP)
+    except ValueError:
+        return None
+
+
+def _app_liveideas(db):
+    app = _app_existente()
+    if app is not None:
+        return app
     doc = db.collection("system").document("api_keys").get()
     texto = ((doc.to_dict() or {}).get("liveideas_conta_servico") if doc.exists else None)
     if not texto:
@@ -69,8 +95,12 @@ def banco_liveideas(db):
         # texto codificado duas vezes ou lista: Certificate() vazaria o segredo na mensagem
         raise LiveIdeasIndisponivel(MSG_JSON_INVALIDO)
     try:
-        app = firebase_admin.initialize_app(
-            credentials.Certificate(conta),
+        cred = credentials.Certificate(conta)
+    except Exception:
+        raise LiveIdeasIndisponivel(MSG_CREDENCIAL_RECUSADA) from None
+    try:
+        return firebase_admin.initialize_app(
+            cred,
             {
                 "databaseURL": DATABASE_URL,
                 "databaseAuthVariableOverride": {"uid": "gaspar"},
@@ -79,9 +109,11 @@ def banco_liveideas(db):
             name=NOME_APP,
         )
     except Exception:
-        raise LiveIdeasIndisponivel(MSG_CREDENCIAL_RECUSADA) from None
-    _apps[NOME_APP] = rtdb.reference("/", app=app)
-    return _apps[NOME_APP]
+        # "já existe" (criado por outro caminho nesta instância) não é credencial recusada
+        app = _app_existente()
+        if app is None:
+            raise LiveIdeasIndisponivel(MSG_CREDENCIAL_RECUSADA) from None
+        return app
 
 
 def notebook_ligado(raiz) -> bool:
@@ -101,13 +133,27 @@ def _rede(chamada):
 def comando(raiz, acao: str, corpo: dict, espera_s: float = 20) -> tuple[int, dict]:
     """Envia `acao` ao notebook e devolve `(status, corpo)` da resposta."""
     limite = time.monotonic() + espera_s  # conta desde antes da primeira chamada de rede
+    try:
+        texto = json.dumps(corpo, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        raise LiveIdeasIndisponivel(MSG_CORPO_INVALIDO) from None
+    if len(texto.encode("utf-16-le", "surrogatepass")) // 2 > LIMITE_CORPO:
+        raise LiveIdeasIndisponivel(MSG_GRANDE_DEMAIS)
     if not _rede(lambda: notebook_ligado(raiz)):
         raise LiveIdeasIndisponivel(MSG_DESLIGADO)
     id_ = uuid.uuid4().hex
     pedido = raiz.child(f"gaspar/comandos/{id_}")
     resposta = raiz.child(f"gaspar/respostas/{id_}")
-    _rede(lambda: pedido.set(
-        {"acao": acao, "corpo": json.dumps(corpo, ensure_ascii=False), "em": int(time.time() * 1000)}))
+    try:
+        # `criado`: hora do servidor do Firebase; o notebook conta o prazo por ela, não pelo relógio daqui
+        _rede(lambda: pedido.set({"acao": acao, "corpo": texto, "em": int(time.time() * 1000),
+                                  "criado": {".sv": "timestamp"}}))
+    except LiveIdeasIndisponivel:
+        try:  # o set pode ter chegado ao banco mesmo sem resposta a tempo
+            pedido.delete()
+        except Exception:
+            pass
+        raise
     while True:
         r = _rede(resposta.get)
         if r is not None:

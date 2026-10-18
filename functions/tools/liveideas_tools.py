@@ -56,7 +56,11 @@ def _criar_pedido(ctx, dados: dict) -> str:
 
 def gerar(ctx, args: dict) -> dict:
     task_id = args.get("task_id")
-    if task_id and not ctx.db.collection("tarefas").document(str(task_id)).get().exists:
+    if task_id is not None:
+        task_id = str(task_id).strip()
+        if not task_id or "/" in task_id:  # "/" mudaria o caminho no Firestore
+            return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
+    if task_id and not ctx.db.collection("tarefas").document(task_id).get().exists:
         return {"erro": f"ação {task_id!r} não encontrada no Gaspar"}
     resp, erro = _enviar(ctx, "gerar", _sem_vazios({
         "tipo": args.get("tipo"), "texto": args.get("texto"),
@@ -228,13 +232,14 @@ def _data_br(iso) -> str | None:
 
 def previa_apagar(ctx, args: dict) -> dict:
     """Prévia do piso de confirmação, só com leituras: título e data pelo `listar`;
-    fora dos 50 mais recentes, o título pelo `ler`; sem nenhum dos dois, o id."""
+    fora dos 50 mais recentes, o título pelo `ler`; sem nenhum dos dois, o id.
+    O `ler` só vai se o `listar` respondeu: senão a prévia somaria dois prazos de 20 s."""
     alvo = _alvo(args)
     resp, _ = _enviar(ctx, "listar", {"tipo": "processo"} if "processo" in alvo else {})
     item = next((i for i in (resp or {}).get("itens") or [] if i.get("id") in alvo.values()), None)
-    if item is None:
-        resp, _ = _enviar(ctx, "ler", alvo)
-        item = resp or {}
+    if item is None and resp is not None:
+        item, _ = _enviar(ctx, "ler", alvo)
+    item = item or {}
     titulo = item.get("titulo") or ", ".join(alvo.values())
     data = _data_br(item["data"]) if item.get("data") else None
     return {"status": "confirmation_required",
