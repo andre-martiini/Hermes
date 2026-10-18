@@ -601,7 +601,7 @@ proximo_pacote: "Com a PR #444 mesclada, o backlog de PRs relacionadas a P06/P05
 
 ---
 pacote: "P05 sub-entrega 19/N (conclusão) -- PR #429 atualizada com main em sessão Claude Code cloud com git completo (conector GitHub): merge de origin/main na branch claude/p05-sub19-reconciliacao-outbox-wiring, conflitos só nos 2 arquivos de diário (resolvidos tomando a versão de main; o arquivo execucao-archive-p05sub18.md de main já existia), atencao.py e event_outbox.py mesclaram sem conflito. Linha `from event_outbox import varrer_outbox_travado` registrada em functions/main.py (pendência crítica do bloco original da sub-entrega 19/N, antes impossível por limite de tamanho da tool de escrita do Argos). Removido também functions/_scratch_nbsp_test.py (arquivo vazio esquecido em main desde 17/10)."
-estado: pronto_para_revisao
+estado: validado
 inicio: "2026-10-18T13:00:00Z"
 fim: "2026-10-18T13:30:00Z"
 decisoes:
@@ -611,5 +611,10 @@ decisoes:
 testes:
   resultados:
     - "functions/ completo, rodado de dentro de functions/: 4140 testes, OK (inclui test_event_outbox e test_atencao: 71 OK)."
+    - "Fechamento em 2026-10-18 (14h UTC): functions/ completo ANTES 4140 OK, DEPOIS 4141 OK (+1 teste de regressão da precondição); test_event_outbox 24 OK. Checks do GitHub verdes no head a03e7bb. PR #429 MESCLADA (merge commit 7ecd1e8)."
+revisao_adversarial:
+  - "Rodada 1 (foco no merge com main, linha em main.py e efeito de registrar a scheduled function): achado REAL -- varrer_outbox_travado_core gravava com update() incondicional sobre snapshot possivelmente antigo, podendo sobrescrever estado/tentativas de entrada reivindicada ou concluída por outro worker (latente: nenhum consumidor real chama iniciar_despacho ainda). Corrigido com precondição last_update_time (db.write_option) e FailedPrecondition tratado como 'pular'."
+  - "Rodada 2: código de produção correto; teste novo era fraco (passaria sem a precondição). Reforçado: o fake registra o option recebido e levanta FailedPrecondition se não bater; mutação (remover a precondição) agora derruba 2 testes."
+  - "Rodada 3: não achou nada."
 pendencias:
-  - "Mesclar a PR #429 após CI/revisão; depois verificar o deploy da scheduled function varrer_outbox_travado."
+  - "Verificar no próximo deploy que a scheduled function varrer_outbox_travado (a cada 15 min) foi publicada e roda sem erro; reconciliação só toca outbox_eventos em em_processamento com lease vencida."
