@@ -192,6 +192,17 @@ _CATALOG: dict[str, str] = {
     "consultar_objetivos_whatsapp": "Andamento dos objetivos de WhatsApp: estado, prazo, pergunta pendente ao André e resultado",
     "responder_objetivo_whatsapp": "Responde a pergunta do Modo Objetivo ou retoma/estende um objetivo; o Gaspar segue a conversa",
     "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",
+    # Live Ideas (18/10/2026): processos BPMN, fluxos e mapas de ideias no notebook, pelo canal /gaspar.
+    "liveideas_gerar": "Pede ao Live Ideas um processo BPMN, fluxo ou mapa de ideias de um texto ou de uma reuniao gravada; acompanhe com liveideas_consultar",
+    "liveideas_consultar": "Estado de um pedido do Live Ideas (gerando, pronto ou falhou), com custo, texto, link e propostas de ajuste; anexa na acao uma vez so",
+    "liveideas_listar": "Lista reunioes e processos do Live Ideas, mais recentes primeiro, com busca pelo titulo",
+    "liveideas_ler": "Le uma reuniao ou processo do Live Ideas: titulo, texto do diagrama e link",
+    "liveideas_ajustar": "Pede uma mudanca num diagrama do Live Ideas; a proposta sai por liveideas_consultar e so muda com liveideas_aplicar",
+    "liveideas_aplicar": "Aplica uma proposta de ajuste aprovada num diagrama do Live Ideas",
+    "liveideas_descartar": "Descarta uma proposta de ajuste do Live Ideas sem mudar o diagrama",
+    "liveideas_desfazer": "Desfaz uma proposta de ajuste ja aplicada num diagrama do Live Ideas",
+    "liveideas_renomear": "Troca o titulo de uma reuniao ou processo do Live Ideas",
+    "liveideas_apagar": "Manda uma reuniao ou processo do Live Ideas para a lixeira; exige confirmacao",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -278,6 +289,14 @@ _NEEDS_CONFIRMATION: set[str] = {
     "video_renderizar",
     "video_refazer_cena",
     "video_cancelar",
+    # Live Ideas: gravam no notebook direto (o apagar passa pelo piso de confirmacao).
+    "liveideas_gerar",
+    "liveideas_ajustar",
+    "liveideas_aplicar",
+    "liveideas_descartar",
+    "liveideas_desfazer",
+    "liveideas_renomear",
+    "liveideas_apagar",
 }
 
 _ASYNC_TOOLS: set[str] = {

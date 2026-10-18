@@ -1,0 +1,37 @@
+{
+  "name": "liveideas_gerar",
+  "description": "Pede ao Live Ideas (no notebook) um processo BPMN, um fluxo ou um mapa de ideias, a partir de um texto da conversa ou de uma reunião já gravada. Responde na hora com um pedido_id e estado 'gerando'; acompanhe com liveideas_consultar (uns 30 s entre as chamadas) até 'pronto' ou 'falhou'. Com task_id, o resultado pronto é anotado no diário da ação (processo também anexa o .bpmn). Gasta IA do Live Ideas; o custo aparece no consultar.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "enum": [
+          "processo",
+          "fluxo",
+          "mapa"
+        ],
+        "description": "processo (BPMN), fluxo (quadro) ou mapa (mapa de ideias)."
+      },
+      "texto": {
+        "type": "string",
+        "description": "Texto de onde gerar (as palavras do usuário ou o conteúdo da conversa). Informe este OU reuniao_id."
+      },
+      "reuniao_id": {
+        "type": "string",
+        "description": "Id de uma reunião já gravada no Live Ideas (de liveideas_listar), para gerar a partir da transcrição dela. Informe este OU texto."
+      },
+      "titulo": {
+        "type": "string",
+        "description": "Opcional: título do que será gerado."
+      },
+      "task_id": {
+        "type": "string",
+        "description": "Opcional: ação do Gaspar onde anotar (e, para processo, anexar o .bpmn) quando ficar pronto."
+      }
+    },
+    "required": [
+      "tipo"
+    ]
+  }
+}

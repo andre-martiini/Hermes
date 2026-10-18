@@ -1,0 +1,24 @@
+{
+  "name": "liveideas_renomear",
+  "description": "Troca o título de uma reunião ou de um processo do Live Ideas.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "reuniao_id": {
+        "type": "string",
+        "description": "Id da reunião do Live Ideas (formato AAAA-MM-DD_HH-MM-SS), como vem em liveideas_listar. Informe este OU processo_id."
+      },
+      "processo_id": {
+        "type": "string",
+        "description": "Id do processo do Live Ideas (começa com p_), como vem em liveideas_listar. Informe este OU reuniao_id."
+      },
+      "titulo": {
+        "type": "string",
+        "description": "O título novo."
+      }
+    },
+    "required": [
+      "titulo"
+    ]
+  }
+}

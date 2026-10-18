@@ -1,0 +1,24 @@
+{
+  "name": "liveideas_descartar",
+  "description": "Descarta uma proposta de ajuste sem mudar o diagrama.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "reuniao_id": {
+        "type": "string",
+        "description": "Id da reunião do Live Ideas (formato AAAA-MM-DD_HH-MM-SS), como vem em liveideas_listar. Informe este OU processo_id."
+      },
+      "processo_id": {
+        "type": "string",
+        "description": "Id do processo do Live Ideas (começa com p_), como vem em liveideas_listar. Informe este OU reuniao_id."
+      },
+      "proposta_id": {
+        "type": "string",
+        "description": "Id da proposta (começa com pr_), devolvido por liveideas_consultar do ajuste."
+      }
+    },
+    "required": [
+      "proposta_id"
+    ]
+  }
+}

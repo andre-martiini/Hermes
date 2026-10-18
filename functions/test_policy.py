@@ -78,9 +78,11 @@ class TestFloorIdenticoAoMcpServer(unittest.TestCase):
         # que gastam dólares no Veo (video_renderizar, video_refazer_cena).
         # 7 → 8 em 14/10/2026: criar_objetivo_whatsapp (Modo Objetivo), a
         # abertura da conversa em nome do dono é sempre aprovada por ele.
-        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 8)
-        self.assertTrue({"video_renderizar", "video_refazer_cena", "criar_objetivo_whatsapp"}
-                        <= policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
+        # 8 → 9 em 18/10/2026: liveideas_apagar (conector do Live Ideas), por
+        # decisão explícita do André: manda reunião ou processo para a lixeira.
+        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 9)
+        self.assertTrue({"video_renderizar", "video_refazer_cena", "criar_objetivo_whatsapp",
+                         "liveideas_apagar"} <= policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
 
     def test_classe_efeito_piso_cobre_exatamente_o_floor(self):
         # Achado da sub-entrega 12/N: `avaliar()` só consulta
