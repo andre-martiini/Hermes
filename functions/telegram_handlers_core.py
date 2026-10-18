@@ -561,8 +561,21 @@ def _process_telegram_message(db, data: dict):
                 # prompt como "MEMÓRIA GLOBAL ATIVA".
                 if memoria_status_de_leitura(m) == STATUS_SUPERADA:
                     continue
-                fato = m.get("fato", "")
-                cat = m.get("categoria", "")
+                # `_save_memory_node` (main.py, escritor compartilhado por MCP, web
+                # e -- desde a P06 sub-entrega 2/N -- também pelo motor Telegram
+                # legado) grava o fato em `texto_memoria`/`tipo`, nunca em
+                # `fato`/`categoria`. Sem este fallback, NENHUM fato gravado por
+                # qualquer canal aparecia aqui -- achado real do Codex (revisão
+                # automática da PR #434, comentário P1) sobre esta mesma seção:
+                # a partir daquela sub-entrega, até fatos de origem Telegram (que
+                # antes usavam o esquema antigo e portanto apareciam) passaram a
+                # ficar invisíveis para este bloco de contexto. `texto_memoria`/
+                # `tipo` primeiro, com `fato`/`categoria` como fallback só para
+                # documentos legados gravados antes desta migração -- mesmo
+                # padrão já usado em `copilot_context.py::_format_recent_memories`
+                # e `verificadores_escrita.py::salvar_memoria`.
+                fato = m.get("texto_memoria") or m.get("fato") or ""
+                cat = m.get("tipo") or m.get("categoria") or ""
                 if fato:
                     mem_lines.append(f"- [{cat}] {fato}")
             if mem_lines:
