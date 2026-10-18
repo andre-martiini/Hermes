@@ -266,6 +266,28 @@ class TestVarredura(unittest.TestCase):
         r = ms.varrer_knowledge_nodes(_db_com(0, 4), tamanho_pagina=2)
         self.assertEqual(r.documentos_lidos, 4)
 
+    def test_nao_retem_os_documentos_lidos(self):
+        import gc
+        import weakref
+
+        class _Dict(dict):
+            pass
+
+        refs = []
+
+        class _SnapFresco(_Snap):
+            def to_dict(self):
+                d = _Dict(_doc())
+                refs.append(weakref.ref(d))
+                return d
+
+        db = _Db([_SnapFresco(f"o{i:03d}", None) for i in range(6)])
+        r = ms.varrer_knowledge_nodes(db, tamanho_pagina=2)
+        gc.collect()
+        self.assertEqual(len(refs), 6)
+        self.assertEqual(r.relatorio, ())
+        self.assertTrue(all(ref() is None for ref in refs))
+
     def test_colecao_vazia(self):
         r = ms.varrer_knowledge_nodes(_Db([]))
         self.assertEqual((r.relatorio, r.documentos_lidos, r.truncado), ((), 0, False))

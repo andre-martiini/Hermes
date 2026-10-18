@@ -242,7 +242,7 @@ def varrer_knowledge_nodes(
     consulta_base = db.collection(COLECAO_KNOWLEDGE_NODES).order_by("__name__")
     lidos = 0
     cursor = None
-    pares: list[tuple[str, dict | None]] = []
+    achados: list[MemoriaSuspeita] = []
     truncado = False
     while True:
         if lidos >= max_documentos:
@@ -258,14 +258,15 @@ def varrer_knowledge_nodes(
         snaps = list(pagina.stream())
         if not snaps:
             break
-        for snap in snaps:
-            lidos += 1
-            pares.append((snap.id, snap.to_dict()))
+        # Classifica a página na hora e descarta os documentos (embeddings de
+        # 768 floats): só os achados ficam retidos, memória limitada a uma página.
+        achados.extend(relatorio_memoria_suspeita((snap.id, snap.to_dict()) for snap in snaps))
+        lidos += len(snaps)
         cursor = snaps[-1]
         if len(snaps) < limite:
             break
     return ResultadoVarredura(
-        relatorio=relatorio_memoria_suspeita(pares),
+        relatorio=tuple(achados),
         documentos_lidos=lidos,
         truncado=truncado,
     )

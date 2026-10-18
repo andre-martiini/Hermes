@@ -603,8 +603,8 @@ decisoes:
     motivo: "execucao.md passava de 61KB; bloco P06 sub-entrega 3/N movido para execucao-archive-p06sub3-consolidado.md."
 testes:
   resultados:
-    - "functions/ completo ANTES 4174 OK, DEPOIS 4184 OK (+10 testes de varredura; test_memoria_suspeita 43 OK)."
+    - "functions/ completo ANTES 4174 OK, DEPOIS 4185 OK no head final (+11 testes de varredura; test_memoria_suspeita 44 OK)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): código de produção sem bug; lacunas de teste (max_documentos não múltiplo da página, relatório com documento None) -- corrigidas com 3 testes. Rodada 2 não necessária: só testes mudaram e a suíte completa passa."
+  - "Rodada 1 (agente sem contexto): código de produção sem bug; lacunas de teste (max_documentos não múltiplo da página, relatório com documento None) -- corrigidas com 3 testes. Codex (PR #465): P2 real -- a varredura retinha todos os documentos (embeddings de 768 floats) até o fim; corrigido classificando cada página na hora e retendo só os achados. Rodada 2 (agente sem contexto): código sem bug; teste de retenção fraco, reforçado com weakref (mutação que retém documentos derruba 2 testes)."
 pendencias:
   - "Destino do relatório (fila de atenção ou tool somente leitura) e passo 9 (modelo por pessoa)."
