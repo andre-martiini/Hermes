@@ -42,7 +42,11 @@ def _evento(doc_id: str = "digest-1", occurred_at: datetime = _AGORA):
 
 
 class _Store(dict):
-    conflitos: set = frozenset()
+    # `update_time` "atual" no servidor por doc_id (default "ut-fake", o
+    # mesmo que os snapshots do fake leem); alterá-lo simula outro worker
+    # tendo escrito o documento depois da leitura.
+    versoes: dict = {}
+    opcoes_recebidas: list = []
 
 
 class _FakeDocRef:
@@ -57,8 +61,10 @@ class _FakeDocRef:
         self._store[self.id] = dict(data)
 
     def update(self, data, option=None):
-        if self.id in getattr(self._store, "conflitos", ()):
-            raise gcp_exceptions.FailedPrecondition("documento mudou")
+        self._store.opcoes_recebidas.append(option)
+        esperado = ("last_update_time", self._store.versoes.get(self.id, "ut-fake"))
+        if option is not None and option != esperado:
+            raise gcp_exceptions.FailedPrecondition("documento mudou desde a leitura")
         self._store[self.id].update(data)
 
 
@@ -125,6 +131,8 @@ class _FakeQuery:
 class _FakeDb:
     def __init__(self, docs=None):
         self._store = _Store({doc_id: dict(dados) for doc_id, dados in (docs or {}).items()})
+        self._store.versoes = {}
+        self._store.opcoes_recebidas = []
 
     def write_option(self, last_update_time=None):
         return ("last_update_time", last_update_time)
@@ -432,7 +440,7 @@ class TestVarrerOutboxTravadoCore(unittest.TestCase):
         db = _FakeDb()
         em_processamento = self._em_processamento()
         db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
-        db._store.conflitos = {em_processamento.entry_id}
+        db._store.versoes[em_processamento.entry_id] = "ut-novo"
         depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
 
         with patch("atencao._persistir_itens_atencao") as mock_persistir:
@@ -443,6 +451,7 @@ class TestVarrerOutboxTravadoCore(unittest.TestCase):
         self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 0))
         mock_persistir.assert_not_called()
         self.assertEqual(db._store[em_processamento.entry_id]["estado"], EstadoOutbox.EM_PROCESSAMENTO.value)
+        self.assertEqual(db._store.opcoes_recebidas, [("last_update_time", "ut-fake")])
 
     def test_lease_vencida_com_tentativas_disponiveis_e_recuperada_sem_diagnostico(self):
         db = _FakeDb()
@@ -460,6 +469,8 @@ class TestVarrerOutboxTravadoCore(unittest.TestCase):
         doc = db._store[em_processamento.entry_id]
         self.assertEqual(doc["estado"], EstadoOutbox.PENDENTE.value)
         self.assertEqual(doc["tentativas"], 1)
+        # A reconciliação DEVE gravar com precondição de update_time.
+        self.assertEqual(db._store.opcoes_recebidas, [("last_update_time", "ut-fake")])
         # Achado de revisão adversarial independente: a escrita de
         # reconciliação (`campos`) deliberadamente NÃO inclui a chave
         # "lease" -- `_FakeDocRef.update()`/o `.update()` real do Firestore
