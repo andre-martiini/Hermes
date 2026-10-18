@@ -82,26 +82,54 @@ para a sub-entrega que definir um consumidor real e decidir a forma dele --
 essa sub-entrega troca o `print()` de `_despachar_uma_entrada` pela entrega
 de verdade e só ENTÃO registra a scheduled function em `main.py` (mesmo
 padrão de import de `sweep_mcp_jobs_travados`).
+
+Reconciliação (passo 10 do pacote, P05 sub-entrega 19/N) -- DIFERENTE do
+despacho acima e JÁ REGISTRADA como scheduled function
+(`varrer_outbox_travado`, importada em `main.py`): `autonomy/outbox.py`
+(sub-entrega 17/N) modelou a lógica pura de crash-recovery para uma entrada
+presa em `EM_PROCESSAMENTO` com lease vencida (dispatcher que caiu no meio
+de uma tentativa), mas nenhuma consulta real ao Firestore existia ainda --
+ver a pendência registrada no bloco daquela sub-entrega em
+`docs/autonomia/execucao.md`. `varrer_outbox_travado_core` é essa consulta,
+no mesmo padrão de `despachar_outbox_eventos_core`/
+`mcp_jobs.sweep_mcp_jobs_travados_core` (paginada por `order_by("__name__")`,
+teto de segurança, escrita isolada por documento). Ao contrário do
+dispatcher, esta função NÃO depende de decidir quem é o primeiro consumidor
+real de evento -- ela só protege a bookkeeping do PRÓPRIO outbox contra um
+dispatcher morto, independente de qualquer wiring futuro de consumo (mesmo
+raciocínio já explícito na docstring de `autonomy.outbox`, seção
+"Reconciliação (passo 10)"). Por isso pode (e deve) ser registrada agora,
+mesmo com o dispatcher ainda desligado. Uma entrada que esgota as
+tentativas automáticas de reconciliação (`DiagnosticoOutbox`) gera um item
+na fila de atenção (`atencao.TIPO_OUTBOX_EVENTO_TRAVADO`) para o André
+decidir -- mesmo papel que `DiagnosticoPedido`/a "fila de diagnóstico" têm
+no pacote P04, só que `autonomy.sweep` (P04, passo 7) ainda não tem wiring
+real nenhum (nem a consulta, nem o destino do diagnóstico) -- ver pendência
+registrada no bloco desta sub-entrega.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Callable
 
 from firebase_admin import firestore
+from google.api_core import exceptions as gcp_exceptions
+from firebase_functions import options, scheduler_fn
 
 from autonomy.events import CategoriaEvento, EventEnvelope
 from autonomy.outbox import (
+    DiagnosticoOutbox,
     EstadoOutbox,
     OutboxEntry,
     criar_entrada,
     pronta_para_despachar,
     registrar_falha,
     registrar_sucesso,
+    varrer_lease_vencida_outbox,
 )
-from autonomy.requests import Lease
+from autonomy.requests import DEFAULT_MAX_TENTATIVAS, Lease, lease_expirada
 
 COLECAO = "outbox_eventos"
 
@@ -333,3 +361,210 @@ def despachar_outbox_eventos_core(db, *, agora: datetime) -> tuple[int, int]:
             break
         cursor = docs_da_pagina[-1]
     return varridas, despachadas
+
+
+# ---------------------------------------------------------------------------
+# Reconciliação (passo 10 do pacote) -- P05 sub-entrega 19/N, wiring real
+# de `autonomy.outbox.varrer_lease_vencida_outbox` (lógica pura definida na
+# sub-entrega 17/N). Ver docstring do módulo para por que esta função, ao
+# contrário de `despachar_outbox_eventos_core` acima, já é registrada como
+# scheduled function.
+# ---------------------------------------------------------------------------
+
+
+def _diagnostico_para_item_atencao(diagnostico: DiagnosticoOutbox) -> dict:
+    """`DiagnosticoOutbox` -> item pronto para `atencao._persistir_itens_atencao`
+    -- mesmo contrato dos outros detectores de `atencao.py` (ver
+    `atencao.avaliar_emails_nao_entregues` para o padrão de forma: origem,
+    tipo, prioridade, titulo, resumo, chave_dedupe, evidencia, sugestao).
+    Lógica pura, sem I/O -- quem persiste é o chamador."""
+    return {
+        "origem": "sistema",
+        "tipo": "outbox_evento_travado",
+        "prioridade": "alta",
+        "titulo": f"Evento travado no outbox de eventos ({diagnostico.entry_id})",
+        "resumo": diagnostico.motivo,
+        "acao_id": None,
+        "etapa_id": None,
+        "pessoa": None,
+        "prazo": None,
+        "evidencia": {
+            "entry_id": diagnostico.entry_id,
+            "estado_anterior": diagnostico.estado_anterior.value,
+            "tentativas": diagnostico.tentativas,
+        },
+        "sugestao": (
+            "Entrada esgotou as tentativas automáticas de reconciliação "
+            "(lease vencida repetidamente em 'em_processamento') -- "
+            "possível dispatcher que trava/cai no meio do despacho. "
+            "Verificar o evento de origem (fonte_colecao/fonte_doc_id) e, "
+            "se necessário, reabrir a entrada manualmente."
+        ),
+        "estado": "aberto",
+        "chave_dedupe": f"outbox_evento_travado:{diagnostico.entry_id}",
+    }
+
+
+def varrer_outbox_travado_core(
+    db, *, agora: datetime, max_tentativas: int = DEFAULT_MAX_TENTATIVAS
+) -> tuple[int, int, int]:
+    """Núcleo da reconciliação, separado do decorator `on_schedule` para ser
+    testável sem simular o `ScheduledEvent` real -- mesma separação de
+    `despachar_outbox_eventos_core`/`mcp_jobs.sweep_mcp_jobs_travados_core`.
+
+    Consulta `outbox_eventos` em `estado="em_processamento"`, pagina por
+    `order_by("__name__")` (mesmo motivo de `despachar_outbox_eventos_core`
+    -- ver sua docstring: sem isso, uma entrada nunca elegível poderia
+    ocupar a janela de uma página para sempre e esconder entradas realmente
+    travadas ordenadas depois dela) e, para cada entrada cuja lease já
+    venceu, aplica `autonomy.outbox.varrer_lease_vencida_outbox` -- que
+    decide se ela volta para `PENDENTE` (nova tentativa, com backoff) ou
+    desiste em `FALHA_FINAL` (com uma `DiagnosticoOutbox`).
+
+    Uma entrada `EM_PROCESSAMENTO` SEM lease vencida (um dispatcher ainda
+    vivo, dentro do prazo da sua lease) é PULADA, não é um caso de sweep --
+    `varrer_lease_vencida_outbox` levantaria `ValueError` se chamada sobre
+    ela (ver sua docstring); esta função confere `lease_expirada` ANTES de
+    chamar, mesmo estilo defensivo de `despachar_outbox_eventos_core`
+    conferir `pronta_para_despachar` antes de despachar. Documento sem
+    `lease` (não deveria acontecer para um `estado="em_processamento"" válido
+    -- `OutboxEntry.__post_init__` exige lease nesse estado -- mas um
+    documento corrompido por escrita manual/migração poderia omiti-la) é
+    tratado da mesma forma: pulado, não derruba a varredura.
+
+    A ESCRITA de cada documento é isolada em seu próprio `try/except`,
+    mesmo padrão de `despachar_outbox_eventos_core`/
+    `sweep_mcp_jobs_travados_core` -- uma falha transitória de rede ao
+    gravar UMA entrada não aborta o resto da página; essa entrada continua
+    elegível na próxima varredura (idempotente: reler o mesmo documento
+    ainda `em_processamento` com a mesma lease vencida produz a mesma
+    decisão).
+
+    Uma entrada que esgota tentativas (`DiagnosticoOutbox`) tem seu item na
+    fila de atenção (`atencao.py`, `TIPO_OUTBOX_EVENTO_TRAVADO`) persistido
+    IMEDIATAMENTE após a escrita do próprio documento, dentro do MESMO
+    `try/except` isolado por entrada (achado real de revisão adversarial
+    independente desta sub-entrega: uma versão anterior acumulava todos os
+    `DiagnosticoOutbox` da execução e só chamava
+    `atencao._persistir_itens_atencao` UMA VEZ ao final, depois do laço de
+    páginas inteiro -- uma falha nessa chamada única perderia em silêncio o
+    alerta de TODAS as entradas que esgotaram tentativas NESTA execução, não
+    só de uma; e, pior, como a consulta filtra por `estado="em_processamento"`,
+    uma entrada que esgota tentativas já é gravada como `FALHA_FINAL`
+    (terminal) e NUNCA mais aparece em nenhuma varredura futura -- a perda do
+    alerta seria permanente, não só adiada. Persistir por entrada, logo após
+    confirmar a escrita do próprio documento, limita o raio de uma falha de
+    `atencao` a UMA entrada por vez, mesmo padrão de isolamento por documento
+    já usado no restante da função. A entrada de outbox em si já está
+    `FALHA_FINAL` de qualquer forma quando isso acontece -- as duas escritas
+    são independentes; perder o alerta não desfaz a transição de estado, só
+    o diagnóstico é a notificação derivada). Devolve
+    `(varridas, recuperadas, falhas_finais)` -- `recuperadas` conta entradas
+    devolvidas a `PENDENTE` com nova tentativa agendada; `falhas_finais`
+    conta as que desistiram (com ou sem sucesso ao notificar a fila de
+    atenção)."""
+    consulta_base = (
+        db.collection(COLECAO)
+        .where(filter=firestore.FieldFilter("estado", "==", EstadoOutbox.EM_PROCESSAMENTO.value))
+        .order_by("__name__")
+    )
+    varridas = 0
+    recuperadas = 0
+    falhas_finais = 0
+    cursor = None
+    while varridas < _DESPACHO_MAX_DOCUMENTOS:
+        pagina = consulta_base.limit(_DESPACHO_TAMANHO_PAGINA)
+        if cursor is not None:
+            pagina = pagina.start_after(cursor)
+        docs_da_pagina = list(pagina.stream())
+        if not docs_da_pagina:
+            break
+        for snap in docs_da_pagina:
+            varridas += 1
+            dados = snap.to_dict() or {}
+            try:
+                entrada = _entrada_de_doc(snap.id, dados)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[outbox_eventos] entrada corrompida ignorada na reconciliação ({snap.id}): {exc}")
+                continue
+            if entrada.lease is None or not lease_expirada(entrada.lease, agora=agora):
+                # Lease ainda válida (dispatcher vivo) ou documento sem
+                # lease (corrompido) -- nenhum dos dois é um caso de sweep.
+                continue
+            resultado = varrer_lease_vencida_outbox(entrada, agora, max_tentativas=max_tentativas)
+            campos = {
+                "estado": resultado.entrada.estado.value,
+                "tentativas": resultado.entrada.tentativas,
+                "disponivel_em": resultado.entrada.disponivel_em,
+                "ultima_tentativa_em": resultado.entrada.ultima_tentativa_em,
+                "ultimo_erro": resultado.entrada.ultimo_erro,
+            }
+            try:
+                # Precondição por `update_time`: o snapshot pode ter segundos
+                # de idade; se outro worker reivindicou/concluiu a entrada
+                # nesse intervalo, a escrita é recusada (nunca sobrescreve
+                # `estado`/`tentativas` de uma geração mais nova).
+                snap.reference.update(
+                    campos, option=db.write_option(last_update_time=snap.update_time)
+                )
+            except gcp_exceptions.FailedPrecondition:
+                print(f"[outbox_eventos] reconciliação de {entrada.entry_id} ignorada: documento mudou desde a leitura")
+                continue
+            except Exception as exc:  # noqa: BLE001
+                print(f"[outbox_eventos] falha ao gravar reconciliação de {entrada.entry_id}: {exc}")
+                continue
+            if resultado.diagnostico is None:
+                recuperadas += 1
+                continue
+            falhas_finais += 1
+            # Persistido já aqui, por entrada -- ver docstring da função
+            # para o achado de revisão que motivou não acumular e persistir
+            # só ao final do laço (blast radius de uma falha em `atencao`).
+            import atencao as _atencao
+
+            try:
+                _atencao._persistir_itens_atencao(
+                    db, [_diagnostico_para_item_atencao(resultado.diagnostico)]
+                )
+            except Exception as exc:  # noqa: BLE001
+                # O documento de outbox JÁ foi gravado como falha_final
+                # acima -- uma falha aqui perde só a notificação desta
+                # entrada na fila de atenção, não a transição de estado em
+                # si, e não impede a próxima entrada da página de ser
+                # processada normalmente.
+                print(
+                    "[outbox_eventos] falha ao registrar diagnostico na fila de atencao "
+                    f"para {entrada.entry_id}: {exc}"
+                )
+        if len(docs_da_pagina) < _DESPACHO_TAMANHO_PAGINA:
+            break
+        cursor = docs_da_pagina[-1]
+    return varridas, recuperadas, falhas_finais
+
+
+@scheduler_fn.on_schedule(
+    schedule="every 15 minutes",
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=120,
+)
+def varrer_outbox_travado(event: scheduler_fn.ScheduledEvent) -> None:
+    """Wiring do passo 10 do pacote P05 (reconciliação do outbox de
+    eventos) -- fecha a lacuna apontada pela própria docstring de
+    `autonomy/outbox.py` desde a sub-entrega 17/N: uma entrada que fica
+    presa em `EM_PROCESSAMENTO` porque o dispatcher caiu no meio de uma
+    tentativa, sem nunca chamar `registrar_sucesso`/`registrar_falha`.
+
+    A cada 15 minutos (mesma cadência de `mcp_jobs.sweep_mcp_jobs_travados`,
+    mesma folga confortável sobre a duração padrão de uma lease,
+    `autonomy.requests.DEFAULT_LEASE_SEGUNDOS` -- 5 minutos) varre
+    `outbox_eventos` e aplica `varrer_outbox_travado_core` -- ver sua
+    docstring para a lógica de consulta e aplicação em si, mantida separada
+    para ser testável sem simular o `ScheduledEvent`."""
+    db = firestore.client()
+    agora = datetime.now(timezone.utc)
+    varridas, recuperadas, falhas_finais = varrer_outbox_travado_core(db, agora=agora)
+    if recuperadas or falhas_finais:
+        print(
+            f"[outbox_eventos] reconciliacao: {varridas} em 'em_processamento', "
+            f"{recuperadas} recuperada(s), {falhas_finais} falha(s) final(is)."
+        )

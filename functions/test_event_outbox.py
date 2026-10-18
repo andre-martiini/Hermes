@@ -19,6 +19,9 @@ teste exercita:
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+from google.api_core import exceptions as gcp_exceptions
 
 import event_outbox
 from autonomy.events import CategoriaEvento, montar_evento
@@ -38,6 +41,14 @@ def _evento(doc_id: str = "digest-1", occurred_at: datetime = _AGORA):
     )
 
 
+class _Store(dict):
+    # `update_time` "atual" no servidor por doc_id (default "ut-fake", o
+    # mesmo que os snapshots do fake leem); alterá-lo simula outro worker
+    # tendo escrito o documento depois da leitura.
+    versoes: dict = {}
+    opcoes_recebidas: list = []
+
+
 class _FakeDocRef:
     def __init__(self, store, doc_id):
         self._store = store
@@ -49,7 +60,11 @@ class _FakeDocRef:
     def set(self, data):
         self._store[self.id] = dict(data)
 
-    def update(self, data):
+    def update(self, data, option=None):
+        self._store.opcoes_recebidas.append(option)
+        esperado = ("last_update_time", self._store.versoes.get(self.id, "ut-fake"))
+        if option is not None and option != esperado:
+            raise gcp_exceptions.FailedPrecondition("documento mudou desde a leitura")
         self._store[self.id].update(data)
 
 
@@ -59,6 +74,7 @@ class _FakeDocSnap:
         self._data = data
         self.exists = data is not None
         self.reference = ref
+        self.update_time = "ut-fake"
 
     def to_dict(self):
         return dict(self._data) if self._data is not None else None
@@ -114,7 +130,12 @@ class _FakeQuery:
 
 class _FakeDb:
     def __init__(self, docs=None):
-        self._store = {doc_id: dict(dados) for doc_id, dados in (docs or {}).items()}
+        self._store = _Store({doc_id: dict(dados) for doc_id, dados in (docs or {}).items()})
+        self._store.versoes = {}
+        self._store.opcoes_recebidas = []
+
+    def write_option(self, last_update_time=None):
+        return ("last_update_time", last_update_time)
 
     def collection(self, nome):
         assert nome == event_outbox.COLECAO
@@ -399,6 +420,231 @@ class TestDespacharOutboxEventosCore(unittest.TestCase):
         self.assertEqual((varridas, despachadas), (5, 5))
         for entrada in entradas:
             self.assertEqual(db._store[entrada.entry_id]["estado"], EstadoOutbox.ENVIADO.value)
+
+
+class TestVarrerOutboxTravadoCore(unittest.TestCase):
+    """P05 sub-entrega 19/N (passo 10 do pacote) -- wiring real de
+    `autonomy.outbox.varrer_lease_vencida_outbox`. Reusa `_FakeDb`/
+    `_FakeQuery` (já suportam `.where()/.order_by()/.limit()/.start_after()/
+    .stream()` e `doc_ref.update()`, mesmo subconjunto que
+    `TestDespacharOutboxEventosCore` já exercita). A persistência na fila de
+    atenção (`atencao._persistir_itens_atencao`) é mockada -- tem sua
+    própria suíte em `test_atencao.py`; aqui só importa COM QUE argumentos
+    ela é chamada."""
+
+    def _em_processamento(self, doc_id="evt-1", *, criado_em=_AGORA, executor_id="worker-1"):
+        entrada = criar_entrada(_evento(doc_id), criado_em)
+        return iniciar_despacho(entrada, executor_id, criado_em)
+
+    def test_documento_alterado_desde_a_leitura_nao_e_sobrescrito(self):
+        db = _FakeDb()
+        em_processamento = self._em_processamento()
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+        db._store.versoes[em_processamento.entry_id] = "ut-novo"
+        depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 0))
+        mock_persistir.assert_not_called()
+        self.assertEqual(db._store[em_processamento.entry_id]["estado"], EstadoOutbox.EM_PROCESSAMENTO.value)
+        self.assertEqual(db._store.opcoes_recebidas, [("last_update_time", "ut-fake")])
+
+    def test_lease_vencida_com_tentativas_disponiveis_e_recuperada_sem_diagnostico(self):
+        db = _FakeDb()
+        em_processamento = self._em_processamento()
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+        depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 1, 0))
+        mock_persistir.assert_not_called()
+        doc = db._store[em_processamento.entry_id]
+        self.assertEqual(doc["estado"], EstadoOutbox.PENDENTE.value)
+        self.assertEqual(doc["tentativas"], 1)
+        # A reconciliação DEVE gravar com precondição de update_time.
+        self.assertEqual(db._store.opcoes_recebidas, [("last_update_time", "ut-fake")])
+        # Achado de revisão adversarial independente: a escrita de
+        # reconciliação (`campos`) deliberadamente NÃO inclui a chave
+        # "lease" -- `_FakeDocRef.update()`/o `.update()` real do Firestore
+        # fazem merge parcial, preservando o campo existente no documento.
+        # Perder "lease" aqui quebraria o fencing por geração da PRÓXIMA
+        # chamada a iniciar_despacho() (ver OutboxEntry.lease), que lê a
+        # geração anterior dali.
+        self.assertIsNotNone(doc["lease"])
+        self.assertEqual(doc["lease"]["generation"], em_processamento.lease.generation)
+        self.assertEqual(doc["lease"]["lease_token"], em_processamento.lease.lease_token)
+
+    def test_lease_ainda_valida_e_pulada_nao_e_um_caso_de_sweep(self):
+        db = _FakeDb()
+        em_processamento = self._em_processamento()
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+        ainda_dentro_da_lease = em_processamento.lease.expires_at - timedelta(seconds=1)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=ainda_dentro_da_lease
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 0))
+        mock_persistir.assert_not_called()
+        # Documento intocado -- dispatcher ainda é o dono legítimo da lease.
+        self.assertEqual(db._store[em_processamento.entry_id]["estado"], EstadoOutbox.EM_PROCESSAMENTO.value)
+
+    def _em_processamento_com_uma_tentativa_anterior(self, doc_id="evt-1"):
+        """Simula uma entrada que já falhou uma vez (`registrar_falha`,
+        tentativas=1) antes de ser retomada por um dispatcher (que depois
+        cai, deixando-a presa). Precisa de `tentativas>=1` ao entrar em
+        `EM_PROCESSAMENTO` para que `max_tentativas=1` já esgote na PRÓXIMA
+        lease vencida (tentativas_novas=2 > 1) -- ver docstring de
+        `varrer_lease_vencida_outbox`/`registrar_falha` sobre o corte
+        estritamente maior."""
+        entrada = criar_entrada(_evento(doc_id), _AGORA)
+        falhou_uma_vez = registrar_falha(entrada, _AGORA, "erro anterior", max_tentativas=5, rng=_RngFixo(0.0))
+        return iniciar_despacho(falhou_uma_vez, "worker-1", falhou_uma_vez.disponivel_em)
+
+    def test_esgota_tentativas_vira_falha_final_e_gera_item_na_fila_de_atencao(self):
+        db = _FakeDb()
+        em_processamento = self._em_processamento_com_uma_tentativa_anterior()
+        depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease, max_tentativas=1
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 1))
+        doc = db._store[em_processamento.entry_id]
+        self.assertEqual(doc["estado"], EstadoOutbox.FALHA_FINAL.value)
+        # Lease preservada mesmo em desfecho terminal -- ver mesma nota na
+        # outra variante deste teste (recuperação).
+        self.assertIsNotNone(doc["lease"])
+        self.assertEqual(doc["lease"]["generation"], em_processamento.lease.generation)
+        mock_persistir.assert_called_once()
+        chamada_db, itens = mock_persistir.call_args[0]
+        self.assertIs(chamada_db, db)
+        self.assertEqual(len(itens), 1)
+        item = itens[0]
+        self.assertEqual(item["tipo"], "outbox_evento_travado")
+        self.assertEqual(item["origem"], "sistema")
+        self.assertEqual(item["chave_dedupe"], f"outbox_evento_travado:{em_processamento.entry_id}")
+        self.assertEqual(item["evidencia"]["entry_id"], em_processamento.entry_id)
+        self.assertEqual(item["evidencia"]["tentativas"], 2)
+
+    def test_entrada_pendente_nao_aparece_na_consulta(self):
+        db = _FakeDb()
+        pendente = criar_entrada(_evento(), _AGORA)
+        db._store[pendente.entry_id] = event_outbox._entrada_para_doc(pendente)
+
+        with patch("atencao._persistir_itens_atencao") as mock_persistir:
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(db, agora=_AGORA)
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (0, 0, 0))
+        mock_persistir.assert_not_called()
+
+    def test_entrada_corrompida_e_ignorada_sem_derrubar_a_varredura(self):
+        db = _FakeDb()
+        boa = self._em_processamento("evt-boa")
+        db._store[boa.entry_id] = event_outbox._entrada_para_doc(boa)
+        db._store["entrada-corrompida"] = {
+            "estado": EstadoOutbox.EM_PROCESSAMENTO.value,
+            "categoria": "categoria_que_nao_existe",
+        }
+        depois_da_lease = boa.lease.expires_at + timedelta(seconds=1)
+
+        with patch("atencao._persistir_itens_atencao"):
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (2, 1, 0))
+        self.assertEqual(db._store[boa.entry_id]["estado"], EstadoOutbox.PENDENTE.value)
+
+    def test_falha_ao_persistir_diagnostico_nao_desfaz_a_transicao_ja_gravada(self):
+        # Achado a verificar na revisão: as duas escritas (estado da
+        # entrada de outbox vs. item na fila de atenção) são independentes
+        # -- uma falha na segunda não deveria reverter a primeira, já
+        # confirmada no Firestore.
+        db = _FakeDb()
+        em_processamento = self._em_processamento_com_uma_tentativa_anterior()
+        depois_da_lease = em_processamento.lease.expires_at + timedelta(seconds=1)
+        db._store[em_processamento.entry_id] = event_outbox._entrada_para_doc(em_processamento)
+
+        with patch("atencao._persistir_itens_atencao", side_effect=RuntimeError("firestore indisponivel")):
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease, max_tentativas=1
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (1, 0, 1))
+        self.assertEqual(db._store[em_processamento.entry_id]["estado"], EstadoOutbox.FALHA_FINAL.value)
+
+    def test_falha_ao_persistir_diagnostico_de_uma_entrada_nao_afeta_outra_na_mesma_pagina(self):
+        # Achado real de revisão adversarial independente (1a rodada): uma
+        # versão anterior acumulava todos os DiagnosticoOutbox da execução
+        # e chamava atencao._persistir_itens_atencao UMA VEZ só, ao final --
+        # uma falha ali perderia o alerta de TODAS as entradas que
+        # esgotaram tentativas na mesma varredura, não só de uma. Este
+        # teste prova que, com a persistência por entrada (dentro do mesmo
+        # try/except isolado por documento), uma falha ao notificar a
+        # PRIMEIRA entrada não impede a notificação da SEGUNDA.
+        db = _FakeDb()
+        falha_1 = self._em_processamento_com_uma_tentativa_anterior("evt-falha-1")
+        falha_2 = self._em_processamento_com_uma_tentativa_anterior("evt-falha-2")
+        db._store[falha_1.entry_id] = event_outbox._entrada_para_doc(falha_1)
+        db._store[falha_2.entry_id] = event_outbox._entrada_para_doc(falha_2)
+        depois_da_lease = max(falha_1.lease.expires_at, falha_2.lease.expires_at) + timedelta(seconds=1)
+
+        chamadas = []
+
+        def _persistir_com_falha_na_primeira(db_arg, itens):
+            chamadas.append(itens)
+            if len(chamadas) == 1:
+                raise RuntimeError("firestore indisponivel")
+
+        with patch("atencao._persistir_itens_atencao", side_effect=_persistir_com_falha_na_primeira):
+            varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                db, agora=depois_da_lease, max_tentativas=1
+            )
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (2, 0, 2))
+        # As duas entradas foram gravadas como falha_final independente da
+        # falha de notificação da primeira.
+        self.assertEqual(db._store[falha_1.entry_id]["estado"], EstadoOutbox.FALHA_FINAL.value)
+        self.assertEqual(db._store[falha_2.entry_id]["estado"], EstadoOutbox.FALHA_FINAL.value)
+        # _persistir_itens_atencao foi chamada 2 vezes (uma por entrada) --
+        # a 2a chamada aconteceu mesmo depois da 1a ter levantado.
+        self.assertEqual(len(chamadas), 2)
+        self.assertEqual(chamadas[1][0]["chave_dedupe"], f"outbox_evento_travado:{falha_2.entry_id}")
+
+    def test_pagina_alem_do_primeiro_lote(self):
+        db = _FakeDb()
+        tamanho_original = event_outbox._DESPACHO_TAMANHO_PAGINA
+        event_outbox._DESPACHO_TAMANHO_PAGINA = 2
+        try:
+            entradas = [self._em_processamento(f"evt-{i}") for i in range(5)]
+            for entrada in entradas:
+                db._store[entrada.entry_id] = event_outbox._entrada_para_doc(entrada)
+            depois_da_lease = entradas[0].lease.expires_at + timedelta(seconds=1)
+
+            with patch("atencao._persistir_itens_atencao") as mock_persistir:
+                varridas, recuperadas, falhas_finais = event_outbox.varrer_outbox_travado_core(
+                    db, agora=depois_da_lease
+                )
+        finally:
+            event_outbox._DESPACHO_TAMANHO_PAGINA = tamanho_original
+
+        self.assertEqual((varridas, recuperadas, falhas_finais), (5, 5, 0))
+        mock_persistir.assert_not_called()
+        for entrada in entradas:
+            self.assertEqual(db._store[entrada.entry_id]["estado"], EstadoOutbox.PENDENTE.value)
 
 
 if __name__ == "__main__":

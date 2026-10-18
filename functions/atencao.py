@@ -31,7 +31,13 @@ _TZ_SP = zoneinfo.ZoneInfo("America/Sao_Paulo")
 COLLECTION = "atencao"
 
 # Origens permitidas
-ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude", "secretario_whatsapp")
+# "sistema" (P05 sub-entrega 19/N, passo 10 do pacote): não é um canal de
+# comunicação como os demais -- é a própria infraestrutura de despacho de
+# eventos (functions/event_outbox.py) relatando que uma entrada do outbox
+# ficou presa e esgotou as tentativas automáticas de reconciliação. Nenhuma
+# origem existente descreve isso (não é "repo" -- esse já denota eventos de
+# repositório de código, categoria de EventEnvelope, não o outbox em si).
+ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude", "secretario_whatsapp", "sistema")
 
 # Tipos de detectores
 TIPO_AGUARDANDO_TERCEIRO_VENCIDO = "aguardando_terceiro_vencido"
@@ -43,6 +49,9 @@ TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
 TIPO_SECRETARIO_PERGUNTOU_SE_ROBO = "secretario_perguntou_se_robo"
 TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
+#: P05 sub-entrega 19/N (passo 10 do pacote) -- ver
+#: `event_outbox.varrer_outbox_travado_core`/`_diagnostico_para_item_atencao`.
+TIPO_OUTBOX_EVENTO_TRAVADO = "outbox_evento_travado"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"

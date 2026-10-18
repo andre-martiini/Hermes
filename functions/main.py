@@ -85,6 +85,12 @@ from mcp_jobs import sweep_mcp_jobs_travados  # noqa: F401 — registra a Cloud 
 # rodar o dispatcher a cada 15 min só fecharia entradas como "enviadas"
 # sem entregar nada a ninguém, destruindo a garantia de reconciliação do
 # outbox à toa. Ver a docstring de functions/event_outbox.py.
+# event_outbox.varrer_outbox_travado (P05 sub-entrega 19/N, passo 10 do
+# pacote) é DIFERENTE do dispatcher acima e é importada abaixo -- é a
+# reconciliação de crash-recovery do próprio outbox (entrada presa em
+# "em_processamento" com lease vencida), não depende de nenhum consumidor
+# real existir. Ver a docstring de functions/event_outbox.py.
+from event_outbox import varrer_outbox_travado  # noqa: F401 — registra a Cloud Function
 # Fatias 2 e 3 da sincronização por webhook (Calendar/Drive, ação e7fe01f4): desligadas por
 # padrão (system/settings.calendar_watch.enabled / drive_watch.enabled).
 from google_push_watch import (  # noqa: F401 — registra as Cloud Functions
