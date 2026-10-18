@@ -1,0 +1,28 @@
+{
+  "name": "gerenciar_categorias_cartao",
+  "description": "Regras que dão categoria e natureza aos lançamentos do cartão, por palavra do nome do estabelecimento. 'listar' mostra as categorias e as regras; 'definir' cria ou troca a regra de um padrão (ex.: padrao='uber', categoria='Transporte'); 'remover' desliga a regra daquele padrão (inclusive a padrão do código). As regras valem na leitura: consultar_fatura_cartao passa a mostrar a nova categoria inclusive em faturas antigas. Use os itens de 'sem_categoria' da consulta para propor regras ao usuário",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "acao": {
+        "type": "string",
+        "enum": ["listar", "definir", "remover"],
+        "description": "O que fazer (padrão: listar)"
+      },
+      "padrao": {
+        "type": "string",
+        "description": "Palavra ou palavras inteiras do nome do estabelecimento, ex.: 'emily da silva', 'google cloud'. Obrigatório em definir e remover"
+      },
+      "categoria": {
+        "type": "string",
+        "description": "Categoria para definir. Prefira uma das de 'listar' (ex.: 'Mercado', 'IA e software'); nome novo cria uma categoria nova"
+      },
+      "natureza": {
+        "type": "string",
+        "enum": ["pessoal", "projeto", "misto"],
+        "description": "Uso do gasto (padrão: pessoal). IA e software é 'misto'"
+      }
+    },
+    "required": []
+  }
+}

@@ -826,8 +826,47 @@ def consumir_autorizacao_argos(ctx: ToolContext, args: dict):
     return consumir_autorizacao(ctx.db, solicitacao_id=args.get("solicitacao_id"))
 
 
+def criar_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    return objetivos_whatsapp.criar_e_iniciar(ctx.db, args, ctx=ctx)
+
+
+def consultar_objetivos_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    try:
+        limite = max(1, min(int(args.get("limite") or 10), 50))
+    except (TypeError, ValueError):
+        limite = 10
+    return objetivos_whatsapp.consultar(ctx.db, objetivo_id=args.get("objetivo_id"), limite=limite)
+
+
+def responder_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    objetivo_id = str(args.get("objetivo_id") or "").strip()
+    if not objetivo_id:
+        return {"erro": "objetivo_id é obrigatório."}
+    return objetivos_whatsapp.responder_do_dono(
+        ctx.db, objetivo_id, resposta=args.get("resposta"), estender_min=args.get("estender_min"))
+
+
+def encerrar_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    objetivo_id = str(args.get("objetivo_id") or "").strip()
+    if not objetivo_id:
+        return {"erro": "objetivo_id é obrigatório."}
+    return objetivos_whatsapp.encerrar(ctx.db, objetivo_id, str(args.get("motivo") or ""))
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
+    if name == "criar_objetivo_whatsapp":
+        import objetivos_whatsapp
+
+        return objetivos_whatsapp.previa(ctx.db, args, ctx=ctx)
     if name == "pausar_conversa":
         from tools.pausar_conversa import preview as _preview
         return _preview(ctx, args)
@@ -2043,7 +2082,111 @@ def consultar_fatura_cartao(ctx: ToolContext, args: dict):
         estabelecimento=args.get("estabelecimento"),
         apenas_parceladas=bool(args.get("apenas_parceladas")),
         limite=int(args.get("limite") or 200),
+        cartao=args.get("cartao"),
+        categoria=args.get("categoria"),
     )
+
+
+def _hoje_brasilia():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def consultar_historico_financeiro(ctx: ToolContext, args: dict):
+    """Retrato de cada mes (renda por fonte, contas, cartao por categoria, saldo), de mes_inicio a mes_fim."""
+    import historico_financeiro as hf
+
+    hoje = _hoje_brasilia()
+    fim = args.get("mes_fim") or f"{hoje.year:04d}-{hoje.month:02d}"
+    try:
+        if args.get("mes_inicio"):
+            inicio = args["mes_inicio"]
+        else:
+            mes0, ano = hf.comp.ler(fim)
+            mes0 -= 11
+            while mes0 < 0:
+                ano, mes0 = ano - 1, mes0 + 12
+            inicio = hf.comp.periodo(mes0, ano)["competencia"]
+        return hf.consultar(ctx.db, inicio, fim, hoje=hoje)
+    except ValueError as exc:
+        return {"erro": str(exc)}
+
+
+def fechar_mes_financeiro(ctx: ToolContext, args: dict):
+    """Congela o retrato de um mes encerrado; refazer exige retificar=true e motivo."""
+    import historico_financeiro as hf
+
+    try:
+        resultado = hf.fechar_mes(ctx.db, str(args.get("competencia") or ""), hoje=_hoje_brasilia(),
+                                  retificar=bool(args.get("retificar")), motivo=args.get("motivo") or "")
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] == "falhou":
+        return {"erro": f"Fechamento nao confirmado: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
+def consultar_rendas_servico(ctx: ToolContext, args: dict):
+    """Contratos de servico ativos (quanto falta, quando acaba) e renda dos proximos meses."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import rendas_servico
+
+    meses = max(1, min(int(args.get("meses") or 6), 24))
+    return rendas_servico.resumo(ctx.db, datetime.now(ZoneInfo("America/Sao_Paulo")).date(), meses)
+
+
+def atualizar_reserva_emergencia(ctx: ToolContext, args: dict):
+    """Valor atual e/ou alvo da reserva de emergencia, com historico."""
+    from reserva_emergencia import atualizar
+
+    try:
+        resultado = atualizar(
+            ctx.db, valor_atual=args.get("valor_atual"), valor_alvo=args.get("valor_alvo"),
+            fonte=args.get("fonte") or "", observacao=args.get("observacao") or "",
+        )
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Reserva nao confirmada: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
+def gerenciar_categorias_cartao(ctx: ToolContext, args: dict):
+    """Lista, define ou desliga regras de categoria por estabelecimento."""
+    import categorias_cartao as cc
+
+    acao = str(args.get("acao") or "listar").strip()
+    try:
+        if acao == "listar":
+            regras = cc.carregar_regras(ctx.db)
+            por_categoria: dict[str, list[str]] = {}
+            for regra in sorted(regras, key=lambda r: r["padrao"]):
+                por_categoria.setdefault(regra["categoria"], []).append(
+                    regra["padrao"] + (" (dono)" if regra["origem"] == "dono" else ""))
+            return {"categorias": list(cc.CATEGORIAS), "naturezas": list(cc.NATUREZAS),
+                    "regras_por_categoria": por_categoria, "total_regras": len(regras)}
+        padrao = str(args.get("padrao") or "").strip()
+        if not padrao:
+            return {"erro": "Informe o padrao (palavra do nome do estabelecimento, ex.: 'uber')."}
+        if acao == "definir":
+            relido = cc.definir(ctx.db, padrao, str(args.get("categoria") or ""),
+                                str(args.get("natureza") or "pessoal"))
+            ok = relido.get("ativo") is True and relido.get("categoria") == str(args.get("categoria")).strip()
+        elif acao == "remover":
+            relido = cc.remover(ctx.db, padrao)
+            ok = relido.get("ativo") is False
+        else:
+            return {"erro": f"Acao desconhecida: {acao!r}. Use listar, definir ou remover."}
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if not ok:
+        return {"erro": "A regra nao foi confirmada ao reler o banco.", "relido": relido}
+    return {"estado": "verificado", "acao": acao, "regra": relido,
+            "observacao": "Vale na proxima consulta, inclusive para faturas antigas."}
 
 
 def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
@@ -2055,6 +2198,59 @@ def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
     from fatura_cartao import projetar_parcelas
 
     return projetar_parcelas(ctx.db, meses=int(args.get("meses") or 12))
+
+
+def importar_contracheque(ctx: ToolContext, args: dict):
+    """Contracheque do Ifes (PDF no Drive) por rubrica, sem dados pessoais."""
+    from datetime import datetime, timezone
+
+    import contracheque
+    from tools.anexar_arquivo import _do_drive, id_do_drive
+
+    try:
+        dados, nome = _do_drive({"drive_file_id": args.get("drive_file_id")})
+        if not dados.lstrip().startswith(b"%PDF-"):
+            return {"erro": f"'{nome}' nao e PDF."}
+        from google.genai import types
+
+        registro = contracheque.normalizar(contracheque.extrair(ctx.genai_client, types, dados))
+        resultado = contracheque.gravar(ctx.db, registro, origem={
+            "arquivo": nome, "drive_file_id": id_do_drive(args.get("drive_file_id")),
+            "origem": "arquivo", "registrado_em": datetime.now(timezone.utc).isoformat()})
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Contracheque nao confirmado: {resultado['motivo']}.", **resultado}
+    return resultado
+
+
+def importar_fatura_cartao(ctx: ToolContext, args: dict):
+    """Fatura do cartao a partir de um arquivo no Drive (PDF do Elo, CSV da XP)."""
+    from datetime import datetime, timezone
+
+    from importar_fatura import extrair_pdf, importar
+    from tools.anexar_arquivo import _do_drive, id_do_drive
+
+    try:
+        dados, nome = _do_drive({"drive_file_id": args.get("drive_file_id")})
+
+        def _ler_pdf(pdf, cartao):
+            from google.genai import types
+
+            return extrair_pdf(ctx.db, ctx.genai_client, types, pdf, cartao)
+
+        resultado = importar(
+            ctx.db, dados, nome,
+            cartao=args.get("cartao"), vencimento=args.get("vencimento"),
+            extrair_pdf_fn=_ler_pdf,
+            origem={"arquivo": nome, "drive_file_id": id_do_drive(args.get("drive_file_id")),
+                    "importado_em": datetime.now(timezone.utc).isoformat()},
+        )
+    except ValueError as exc:
+        return {"erro": str(exc)}
+    if resultado["estado"] != "verificado":
+        return {"erro": f"Importacao nao confirmada: {resultado['motivo']}.", **resultado}
+    return resultado
 
 
 # `perfil_pessoal` de `obter_estado_atual`: listas curtas e texto aparado --
@@ -2903,6 +3099,10 @@ _HANDLERS: dict = {
     "schedule_whatsapp_message": _schedule_whatsapp_message,
     "confirmar_acao": confirmar_acao,
     "pausar_conversa": pausar_conversa,
+    "criar_objetivo_whatsapp": criar_objetivo_whatsapp,
+    "consultar_objetivos_whatsapp": consultar_objetivos_whatsapp,
+    "responder_objetivo_whatsapp": responder_objetivo_whatsapp,
+    "encerrar_objetivo_whatsapp": encerrar_objetivo_whatsapp,
     "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,
@@ -2955,6 +3155,13 @@ _HANDLERS: dict = {
     "remover_anexo": remover_anexo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
+    "importar_fatura_cartao": importar_fatura_cartao,
+    "importar_contracheque": importar_contracheque,
+    "gerenciar_categorias_cartao": gerenciar_categorias_cartao,
+    "atualizar_reserva_emergencia": atualizar_reserva_emergencia,
+    "consultar_rendas_servico": consultar_rendas_servico,
+    "consultar_historico_financeiro": consultar_historico_financeiro,
+    "fechar_mes_financeiro": fechar_mes_financeiro,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,

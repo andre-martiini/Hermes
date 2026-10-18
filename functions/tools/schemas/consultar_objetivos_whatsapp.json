@@ -1,0 +1,12 @@
+{
+  "name": "consultar_objetivos_whatsapp",
+  "description": "Andamento dos objetivos de WhatsApp (Modo Objetivo): estado (em_andamento, aguardando_dono, pausado, concluido, expirado, cancelado), contato, prazo, pergunta pendente ao André e resultado. Com objetivo_id, traz também as mensagens enviadas e as respostas do André.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {"type": "string", "description": "ID do objetivo. Omitido: lista os mais recentes"},
+      "limite": {"type": "integer", "description": "Quantos listar sem objetivo_id (padrão 10)"}
+    },
+    "required": []
+  }
+}

@@ -45,6 +45,7 @@ from gmail_bill_pdf import (
     validate_bill_payload,
 )
 import fatura_cartao
+import conciliacao_pix
 from bill_pdf_passwords import (
     find_password_config,
     list_password_configs,
@@ -84,6 +85,12 @@ from mcp_jobs import sweep_mcp_jobs_travados  # noqa: F401 — registra a Cloud 
 # rodar o dispatcher a cada 15 min só fecharia entradas como "enviadas"
 # sem entregar nada a ninguém, destruindo a garantia de reconciliação do
 # outbox à toa. Ver a docstring de functions/event_outbox.py.
+# event_outbox.varrer_outbox_travado (P05 sub-entrega 19/N, passo 10 do
+# pacote) é DIFERENTE do dispatcher acima e é importada abaixo -- é a
+# reconciliação de crash-recovery do próprio outbox (entrada presa em
+# "em_processamento" com lease vencida), não depende de nenhum consumidor
+# real existir. Ver a docstring de functions/event_outbox.py.
+from event_outbox import varrer_outbox_travado  # noqa: F401 — registra a Cloud Function
 # Fatias 2 e 3 da sincronização por webhook (Calendar/Drive, ação e7fe01f4): desligadas por
 # padrão (system/settings.calendar_watch.enabled / drive_watch.enabled).
 from google_push_watch import (  # noqa: F401 — registra as Cloud Functions
@@ -1982,7 +1989,9 @@ def sync_pix_emails(service, sync_ref, logs):
             d = r.to_dict()
             desc = d.get('description', '')
             keywords = [w.strip().lower() for w in re.split(r'[\(\)\s,-]+', desc) if len(w.strip()) > 2]
-            bill_rubrics_cache.append({'id': r.id, 'desc': desc.lower(), 'keywords': keywords, 'full_desc': desc})
+            bill_rubrics_cache.append({'id': r.id, 'desc': desc.lower(), 'keywords': keywords, 'full_desc': desc,
+                                       'default': d.get('defaultAmount'),
+                                       'pix_recebedor': d.get('pix_recebedor')})
 
         # Orçamento do mês corrente e gasto acumulado, para exibir "Saldo disponível" nas notificações de Pix
         now_utc = datetime.now(timezone.utc)
@@ -2081,53 +2090,69 @@ def sync_pix_emails(service, sync_ref, logs):
                 description = f"Pix: {subject}"
                 iso_date = dt.isoformat()
 
-                # Conciliação com Rubricas de Contas (Contas Fixas / Saídas)
+                # Conciliação com Rubricas de Contas (Contas Fixas / Saídas).
+                # Só o nome de quem recebeu o Pix conta, por palavra inteira, e a
+                # conta só é baixada se o valor bater (ver conciliacao_pix).
                 if not is_income:
-                    matched_bill_rubric = None
-                    clean_content = content.lower()
-                    for rb in bill_rubrics_cache:
-                        if rb['desc'] in clean_content or any(kw in clean_content for kw in rb['keywords']):
-                            matched_bill_rubric = rb
-                            break
+                    recebedor = conciliacao_pix.extrair_recebedor(content)
+                    matched_bill_rubric = conciliacao_pix.rubrica_do_recebedor(recebedor, bill_rubrics_cache)
 
                     if matched_bill_rubric:
                         month = dt.month - 1
                         year = dt.year
-                        
-                        found_bill_doc = None
+                        desc_norm = conciliacao_pix.normalizar(matched_bill_rubric['full_desc'])
+
+                        cards_da_rubrica = []
                         for fb_doc in db.collection('fixed_bills').where('month', '==', month).where('year', '==', year).stream():
-                            fb_data = fb_doc.to_dict()
-                            if fb_data.get('rubricId') == matched_bill_rubric['id'] or matched_bill_rubric['desc'] in fb_data.get('description', '').lower():
-                                found_bill_doc = fb_doc
+                            fb_data = fb_doc.to_dict() or {}
+                            if (fb_data.get('rubricId') == matched_bill_rubric['id']
+                                    or conciliacao_pix.normalizar(fb_data.get('description', '')) == desc_norm):
+                                cards_da_rubrica.append((fb_doc, fb_data))
+
+                        baixado = False
+                        for fb_doc, fb_data in cards_da_rubrica:
+                            campos = conciliacao_pix.baixa_da_conta(
+                                fb_data, amount, data_iso=iso_date, msg_id=msg_id, pix_id=pix_id)
+                            if campos:
+                                db.collection('fixed_bills').document(fb_doc.id).update(campos)
+                                log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Conta Fixa '{matched_bill_rubric['full_desc']}' baixada como PAGA (Pix de R$ {amount:.2f} para {recebedor}). Ignorada nos lançamentos avulsos.")
+                                baixado = True
                                 break
-                        
-                        if found_bill_doc:
-                            db.collection('fixed_bills').document(found_bill_doc.id).update({
-                                'isPaid': True,
-                                'amount': amount,
-                                'data_pagamento': iso_date,
-                                'google_message_id': msg_id,
-                                'pix_id': pix_id
-                            })
-                            log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Conta Fixa '{matched_bill_rubric['full_desc']}' baixada como PAGA (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
-                        else:
-                            db.collection('fixed_bills').add({
-                                'description': matched_bill_rubric['full_desc'],
-                                'amount': amount,
-                                'dueDay': dt.day,
-                                'month': month,
-                                'year': year,
-                                'isPaid': True,
-                                'rubricId': matched_bill_rubric['id'],
-                                'google_message_id': msg_id,
-                                'pix_id': pix_id,
-                                'created_at': iso_date
-                            })
-                            log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Criada e baixada Conta Fixa '{matched_bill_rubric['full_desc']}' (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
-                        
-                        new_processed_ids.append(msg_id)
-                        archive_gmail_message(service, msg_id, sync_ref, logs, "pix-conciliado-conta-fixa")
-                        continue
+
+                        padrao = matched_bill_rubric.get('default')
+                        cria_conta = (
+                            not cards_da_rubrica
+                            and (not padrao or conciliacao_pix.valor_bate(padrao, amount))
+                        )
+                        if cria_conta:
+                            ref_conta = db.collection('fixed_bills').document(
+                                conciliacao_pix.id_da_conta(matched_bill_rubric['id'], year, month))
+                            try:
+                                ref_conta.create({
+                                    'description': matched_bill_rubric['full_desc'],
+                                    'amount': amount,
+                                    'valor_pago': amount,
+                                    'dueDay': dt.day,
+                                    'month': month,
+                                    'year': year,
+                                    'isPaid': True,
+                                    'pago_via': 'pix',
+                                    'rubricId': matched_bill_rubric['id'],
+                                    'google_message_id': msg_id,
+                                    'pix_id': pix_id,
+                                    'data_pagamento': iso_date,
+                                    'created_at': iso_date
+                                })
+                                log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Criada e baixada Conta Fixa '{matched_bill_rubric['full_desc']}' (Pix de R$ {amount:.2f} para {recebedor}). Ignorada nos lançamentos avulsos.")
+                                baixado = True
+                            except Exception as _criar_err:
+                                log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Conta '{matched_bill_rubric['full_desc']}' não criada ({_criar_err}); Pix segue como lançamento avulso.")
+
+                        if baixado:
+                            new_processed_ids.append(msg_id)
+                            archive_gmail_message(service, msg_id, sync_ref, logs, "pix-conciliado-conta-fixa")
+                            continue
+                        log_to_firestore(sync_ref, logs, f"[CONCILIAÇÃO] Pix de R$ {amount:.2f} para {recebedor} parece '{matched_bill_rubric['full_desc']}', mas o valor não bate ou a conta já está paga; segue como lançamento avulso.")
 
                 is_duplicate = False
                 target_cache = existing_income if is_income else existing_transactions
@@ -2702,6 +2727,11 @@ def sync_boletos_gmail(service, sync_ref, logs):
                         'google_message_id': msg_id,
                         'updated_at': datetime.now().isoformat()
                     }
+
+                    # Total que veio do PDF da fatura, lançamento por lançamento,
+                    # vale mais que o número que o leitor de boleto achou no e-mail.
+                    _card_atual = db.collection('fixed_bills').document(found_existing_id).get().to_dict() or {}
+                    update_data = fatura_cartao.campos_do_boleto_no_card(update_data, _card_atual)
                     
                     # Se o card existente não tiver rubricId, usa o da IA ou tenta achar
                     if not found_existing_rubric_id:
@@ -14765,6 +14795,7 @@ from morning_summary import gerar_resumo_matinal, gerarResumoMatinal
 
 # Import monthly recurring actions job
 from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
+from historico_financeiro import fechar_mes_financeiro  # noqa: F401 — rotina agendada (dia 10)
 
 # Import attention queue action detector job
 from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detectar_atencao_saude
@@ -14772,6 +14803,7 @@ from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detecta
 # Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 from visao_atividade import on_whatsapp_outbox_escrito  # noqa: F401 — fila de WhatsApp -> agent_runs
+from objetivos_whatsapp import on_whatsapp_message_objetivo, varrer_objetivos_whatsapp  # noqa: F401 — Modo Objetivo
 
 # Jobs agendados removidos em 26/09/2026 (sem uso; ver docs/okf/operacoes/custos.md):
 # ai_notification_planner_daily, detectar_subproduto_semanal,

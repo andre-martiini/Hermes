@@ -1,0 +1,22 @@
+{
+  "name": "fechar_mes_financeiro",
+  "description": "Congela o retrato de um mês financeiro já encerrado em financeiro_historico (o Gaspar faz isso sozinho todo dia 10 para o mês anterior). Use depois de corrigir dados de um mês: com retificar=true e o motivo, refaz o retrato e guarda os totais da versão anterior",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "competencia": {
+        "type": "string",
+        "description": "Mês a fechar, YYYY-MM (só mês já encerrado)"
+      },
+      "retificar": {
+        "type": "boolean",
+        "description": "true para refazer um mês já fechado"
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Obrigatório ao retificar: o que foi corrigido"
+      }
+    },
+    "required": ["competencia"]
+  }
+}

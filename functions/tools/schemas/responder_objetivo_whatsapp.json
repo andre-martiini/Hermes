@@ -1,0 +1,13 @@
+{
+  "name": "responder_objetivo_whatsapp",
+  "description": "Responde a pergunta que o Modo Objetivo fez ao André, ou retoma um objetivo pausado/expirado, e o Gaspar segue a conversa na hora. Use resposta para passar o dado ou a decisão que ele pediu; estender_min para dar mais prazo.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {"type": "string", "description": "ID do objetivo"},
+      "resposta": {"type": "string", "description": "A resposta do André à pergunta pendente (dado, decisão ou orientação)"},
+      "estender_min": {"type": "integer", "description": "Minutos a mais de prazo"}
+    },
+    "required": ["objetivo_id"]
+  }
+}

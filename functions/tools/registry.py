@@ -133,6 +133,13 @@ _CATALOG: dict[str, str] = {
     # ja esta comprometido nos meses seguintes.
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
+    "importar_contracheque": "Importa o contracheque do Ifes (PDF no Drive) por rubrica, com o per capita de saude, sem dados pessoais",
+    "importar_fatura_cartao": "Importa a fatura do cartao de um arquivo no Drive (PDF do Elo ou CSV da XP) e acerta a conta do mes",
+    "consultar_historico_financeiro": "Historico mensal do financeiro (renda por fonte, contas, cartao por categoria, saldo, reserva) de varios meses numa chamada",
+    "fechar_mes_financeiro": "Congela o retrato de um mes financeiro encerrado; refazer exige retificacao com motivo",
+    "consultar_rendas_servico": "Contratos de servico ativos (parcelas pagas e restantes, quando acabam) e a renda prevista dos proximos meses, Ifes separado de servicos",
+    "atualizar_reserva_emergencia": "Atualiza o valor atual e/ou o alvo da reserva de emergencia, com historico e releitura",
+    "gerenciar_categorias_cartao": "Lista, define ou desliga as regras que dao categoria e natureza (pessoal/projeto/misto) aos lancamentos do cartao",
     # WhatsApp: a consolidacao ja existia e so era acionavel pela Caixa de
     # Entrada na web. Leitura de conteudo exige chat na allowlist.
     "listar_conversas_whatsapp": "Lista as conversas de WhatsApp, marcando quais estao monitoradas",
@@ -180,6 +187,11 @@ _CATALOG: dict[str, str] = {
     "video_renderizar": "Renderiza o vídeo aprovado no storyboard (clipes no Veo + montagem + Drive); pago, exige confirmação com o custo na prévia",
     "video_refazer_cena": "Refaz o clipe de uma cena de um vídeo pronto (opcionalmente as seguintes) e remonta; pago, exige confirmação",
     "video_cancelar": "Cancela um projeto de vídeo; se estiver renderizando, o worker para antes do próximo clipe",
+    # Modo Objetivo no WhatsApp (14/10/2026): o Gaspar conduz a conversa até cumprir um objetivo.
+    "criar_objetivo_whatsapp": "Modo Objetivo: o Gaspar conversa no WhatsApp em primeira pessoa com uma pessoa até cumprir um objetivo (ex.: marcar consulta); exige confirmação da abertura",
+    "consultar_objetivos_whatsapp": "Andamento dos objetivos de WhatsApp: estado, prazo, pergunta pendente ao André e resultado",
+    "responder_objetivo_whatsapp": "Responde a pergunta do Modo Objetivo ou retoma/estende um objetivo; o Gaspar segue a conversa",
+    "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -204,6 +216,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     "schedule_whatsapp_message",
     "criar_rascunho_whatsapp",
     "pausar_conversa",
+    "criar_objetivo_whatsapp",
+    "responder_objetivo_whatsapp",
+    "encerrar_objetivo_whatsapp",
     "criar_rascunho_email",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",
@@ -277,6 +292,9 @@ _ASYNC_TOOLS: set[str] = {
     # Imagens: de dezenas de segundos a ~2 min em qualidade alta.
     "gerar_imagem",
     "editar_imagem",
+    # Fatura em PDF: leitura pelo Gemini.
+    "importar_fatura_cartao",
+    "importar_contracheque",
 }
 
 # Tools disponiveis via servidor MCP. A fonte da verdade e o executor
@@ -328,6 +346,13 @@ _VOICE_EXCLUDED: set[str] = {
     "video_renderizar",
     "video_refazer_cena",
     "video_cancelar",
+    # Importar fatura parte de um arquivo do Drive, que nao se dita.
+    "importar_fatura_cartao",
+    "importar_contracheque",
+    # Valor de dinheiro por voz nao (mesmo motivo das escritas de investimento).
+    "atualizar_reserva_emergencia",
+    # A abertura e os limites do objetivo se aprovam lendo, nao ouvindo.
+    "criar_objetivo_whatsapp",
 }
 
 _schema_cache: dict[str, dict] = {}

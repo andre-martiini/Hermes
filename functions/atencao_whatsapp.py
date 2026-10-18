@@ -426,7 +426,7 @@ def _processar_promessa(db, mensagem: dict) -> None:
 
     # A resposta do secretário sai pela conta do André e volta como from_me: não é promessa dele, nem
     # cumpre a que ele fez (uma resposta longa do bot fecharia a promessa em aberto).
-    if eh_mensagem_do_bot(mensagem):
+    if eh_mensagem_do_bot(mensagem, db):
         return
     enabled, horas = _flag_promessa(db)
     if not enabled:

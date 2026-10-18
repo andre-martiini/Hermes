@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 COL_FATURAS = "fatura_cartao"
@@ -286,7 +287,7 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
             "competencia": competencia,
             "ano": ano,
             "mes": mes,
-            "data": str(item.get("data") or "").strip() or None,
+            "data": corrigir_ano_da_compra(str(item.get("data") or "").strip() or None, vencimento),
             "estabelecimento": estabelecimento,
             "valor": valor,
             "parcela_atual": _inteiro(item.get("parcela_atual")),
@@ -339,9 +340,74 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
 # Consulta
 # --------------------------------------------------------------------------
 
+def corrigir_ano_da_compra(data: str | None, vencimento: str | None) -> str | None:
+    """A compra nao acontece depois do vencimento da fatura em que e cobrada.
+
+    O prompt manda usar "o ano da competencia" quando o extrato so traz dia e mes,
+    e o modelo erra o ano na virada: na fatura de 05/02/2026, compras de janeiro
+    de 2026 vieram como 2027 e as de dezembro de 2025 como dezembro de 2026 (120
+    lancamentos em out/2026). Volta o ano ate a data ficar antes do vencimento.
+    """
+    if not (data and vencimento and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(vencimento)[:10])):
+        return data
+    venc = str(vencimento)[:10]
+    for _ in range(3):
+        if data <= venc:
+            return data
+        data = f"{int(data[:4]) - 1:04d}{data[4:]}"
+    return data
+
+
+def _vencimentos(db) -> dict[str, str]:
+    return {snap.id: (snap.to_dict() or {}).get("vencimento")
+            for snap in db.collection(COL_FATURAS).stream()}
+
+
+def conciliar(db, competencia: str) -> list[dict]:
+    """Fatura de cada cartao contra a conta "Fatura ..." do mes do vencimento.
+
+    Fecha a conta: fatura bruta = pago + saldo em aberto. A conta do mes guarda o
+    valor cheio da fatura (corrigido pelo PDF) e, quando o Pix a baixou,
+    `valor_pago`; sem `valor_pago`, conta paga vale o proprio valor.
+    """
+    import competencia as _competencia
+
+    mes0, ano = _competencia.ler(competencia)
+    contas = [(snap.id, snap.to_dict() or {}) for snap in db.collection("fixed_bills")
+              .where("month", "==", mes0).where("year", "==", ano).stream()]
+    saida = []
+    for snap in db.collection(COL_FATURAS).where("competencia", "==", competencia).stream():
+        cabecalho = snap.to_dict() or {}
+        cartao = cabecalho.get("cartao") or snap.id[:-8]
+        marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao)
+        total = cabecalho.get("total") or 0.0
+        candidatas = [(i, c) for i, c in contas if marcador in _palavras(c.get("description", ""))]
+        if not candidatas:
+            saida.append({"cartao": cartao, "competencia": competencia, "vencimento": cabecalho.get("vencimento"),
+                          "fatura_total": total, "obrigacao": None, "pago": 0.0,
+                          "saldo_em_aberto": round(total, 2),
+                          "observacao": "nenhuma conta do mes para esta fatura"})
+            continue
+        doc_id, conta = max(candidatas, key=lambda par: float(par[1].get("amount") or 0))
+        valor = float(conta.get("amount") or 0)
+        pago = float(conta.get("valor_pago") or (valor if conta.get("isPaid") else 0))
+        saida.append({
+            "cartao": cartao, "competencia": competencia, "vencimento": cabecalho.get("vencimento"),
+            "fatura_total": round(total, 2),
+            "obrigacao": {"id": doc_id, "descricao": conta.get("description"), "valor": round(valor, 2),
+                          "paga": bool(conta.get("isPaid")), "data_pagamento": conta.get("data_pagamento")},
+            "pago": round(pago, 2),
+            "saldo_em_aberto": round(total - pago, 2),
+            "diferenca_conta_x_fatura": round(valor - total, 2),
+        })
+    return saida
+
+
 def consultar(db, *, competencia: str | None = None, desde: str | None = None,
               estabelecimento: str | None = None, apenas_parceladas: bool = False,
-              limite: int = 200) -> dict:
+              limite: int = 200, cartao: str | None = None,
+              categoria: str | None = None) -> dict:
     """Lancamentos por periodo e/ou estabelecimento, com totais por estabelecimento.
 
     Devolve dado agregado junto com a lista porque o agregado e o que quase sempre
@@ -354,6 +420,11 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
     elif desde:
         consulta = consulta.where("competencia", ">=", str(desde))
 
+    import categorias_cartao
+
+    regras = categorias_cartao.carregar_regras(db)
+    categoria_alvo = categorias_cartao.normalizar(categoria) if categoria else None
+
     itens = []
     alvo = (estabelecimento or "").strip().lower()
     for snap in consulta.limit(2000).stream():
@@ -364,7 +435,20 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
             continue
         if alvo and alvo not in str(item.get("estabelecimento", "")).lower():
             continue
+        if cartao and _cartao_do_item(item) != cartao:
+            continue
+        item.update(categorias_cartao.classificar_lancamento(item, regras))
+        item.pop("regra", None)
+        if categoria_alvo and categorias_cartao.normalizar(item["categoria"]) != categoria_alvo:
+            continue
         itens.append(item)
+
+    vencimentos = _vencimentos(db)
+    for item in itens:
+        cobranca = vencimentos.get(item.get("fatura_id"))
+        item["data"] = corrigir_ano_da_compra(item.get("data"), cobranca)
+        item["data_compra"] = item["data"]
+        item["data_cobranca"] = cobranca
 
     itens.sort(key=lambda i: (str(i.get("competencia") or ""), str(i.get("data") or "")))
 
@@ -380,10 +464,34 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
 
     ranking = sorted(por_estabelecimento.values(), key=lambda x: -x["total"])
 
+    por_cartao: dict[str, float] = {}
+    por_categoria: dict[str, dict] = {}
+    por_natureza: dict[str, float] = {}
+    sem_categoria: dict[str, dict] = {}
+    for item in itens:
+        chave = _cartao_do_item(item)
+        por_cartao[chave] = round(por_cartao.get(chave, 0.0) + item["valor"], 2)
+        cat = por_categoria.setdefault(item["categoria"], {"categoria": item["categoria"], "total": 0.0, "lancamentos": 0})
+        cat["total"] = round(cat["total"] + item["valor"], 2)
+        cat["lancamentos"] += 1
+        natureza = item["natureza"] or "sem natureza"
+        por_natureza[natureza] = round(por_natureza.get(natureza, 0.0) + item["valor"], 2)
+        if item["categoria"] == categorias_cartao.SEM_CATEGORIA:
+            sem = sem_categoria.setdefault(item["estabelecimento"], {"estabelecimento": item["estabelecimento"], "total": 0.0, "lancamentos": 0})
+            sem["total"] = round(sem["total"] + item["valor"], 2)
+            sem["lancamentos"] += 1
+
     total_encargos = round(sum(i["valor"] for i in encargos), 2)
     return {
         "total_lancamentos": len(itens),
         "total_gasto": round(sum(i["valor"] for i in itens), 2),
+        "por_cartao": por_cartao,
+        # Soma de por_categoria = total_gasto (inclui "Sem categoria"). Encargos ficam fora, como no total.
+        "por_categoria": sorted(por_categoria.values(), key=lambda x: -x["total"]),
+        "por_natureza": por_natureza,
+        "sem_categoria": sorted(sem_categoria.values(), key=lambda x: -x["total"])[:15],
+        # Fatura de cada cartao contra a conta do mes: so com uma competencia.
+        "conciliacao": conciliar(db, competencia) if competencia else None,
         # Separado de proposito: IOF e juros sao custo real, mas nao sao gasto
         # num estabelecimento — misturar esconde os dois.
         "total_encargos": total_encargos,
@@ -395,6 +503,7 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         "filtros": {
             "competencia": competencia, "desde": desde,
             "estabelecimento": estabelecimento, "apenas_parceladas": apenas_parceladas,
+            "cartao": cartao, "categoria": categoria,
         },
     }
 
@@ -410,11 +519,27 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
     hoje = datetime.now(timezone.utc)
     futuro: dict[str, dict] = {}
 
+    # So a fatura mais recente de cada cartao entra. A mesma compra parcelada
+    # aparece em toda fatura (3/10, 4/10, 5/10...), e projetar a partir de todas
+    # contava cada mes futuro uma vez por fatura importada: R$ 20.642 projetados
+    # contra R$ 4.729 que o banco informava em out/2026.
+    itens = []
+    mais_recente: dict[str, str] = {}
     for snap in db.collection(COL_ITENS).where("parcelado", "==", True).limit(3000).stream():
         item = snap.to_dict() or {}
-        atual, total = item.get("parcela_atual"), item.get("parcela_total")
         competencia = str(item.get("competencia") or "")
-        if not (atual and total and total > atual and re.fullmatch(r"\d{4}-\d{2}", competencia)):
+        if not re.fullmatch(r"\d{4}-\d{2}", competencia):
+            continue
+        cartao = _cartao_do_item(item)
+        itens.append((cartao, competencia, item))
+        if competencia > mais_recente.get(cartao, ""):
+            mais_recente[cartao] = competencia
+
+    for cartao, competencia, item in itens:
+        if competencia != mais_recente[cartao]:
+            continue
+        atual, total = item.get("parcela_atual"), item.get("parcela_total")
+        if not (atual and total and total > atual):
             continue
 
         ano, mes = int(competencia[:4]), int(competencia[5:7])
@@ -432,6 +557,7 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
             })
 
     meses_ordenados = [futuro[k] for k in sorted(futuro)][:meses]
+    fonte = {c: f"fatura {comp}" for c, comp in sorted(mais_recente.items())}
     for m in meses_ordenados:
         m["parcelas"].sort(key=lambda p: -p["valor"])
         m["qtd_parcelas"] = len(m["parcelas"])
@@ -441,7 +567,19 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
         "meses": meses_ordenados,
         "total_comprometido": round(sum(m["total"] for m in meses_ordenados), 2),
         "gerado_em": hoje.strftime("%Y-%m-%d"),
+        "base": fonte,
+        "observacao": ("So parcelas ja lancadas na fatura mais recente de cada cartao; "
+                       "compras novas e assinaturas nao entram."),
     }
+
+
+def _cartao_do_item(item: dict) -> str:
+    cartao = item.get("cartao")
+    if cartao:
+        return str(cartao)
+    fatura_id = str(item.get("fatura_id") or "")
+    return fatura_id[:-8] if re.search(r"-\d{4}-\d{2}$", fatura_id) else fatura_id or "?"
+
 
 
 # --------------------------------------------------------------------------
@@ -450,6 +588,23 @@ def projetar_parcelas(db, *, meses: int = 12) -> dict:
 
 # Como achar o card de `fixed_bills` que corresponde a cada cartao.
 _DESCRICAO_DO_CARTAO = {"elo-caixa": "elo"}
+
+
+def campos_do_boleto_no_card(campos: dict, card_atual: dict) -> dict:
+    """O leitor de boleto nao troca o total que veio do PDF da fatura.
+
+    A fatura e lida lancamento por lancamento e o total confere com a soma; o
+    boleto e um numero achado no e-mail, as vezes o pagamento minimo.
+    """
+    if (card_atual or {}).get("amount_origem") == "fatura_cartao":
+        return {k: v for k, v in campos.items() if k != "amount"}
+    return campos
+
+
+def _palavras(texto) -> set[str]:
+    sem_acento = unicodedata.normalize("NFKD", str(texto or ""))
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return set(re.sub(r"[^a-z0-9]+", " ", sem_acento.lower()).split())
 
 
 def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
@@ -474,10 +629,12 @@ def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
 
     marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao)
     alterados = []
+    # `mes` da fatura vai de 1 a 12; `fixed_bills.month` vai de 0 a 11. Sem o -1
+    # a fatura com vencimento em setembro corrigia o card de outubro.
     for snap in (db.collection("fixed_bills")
-                 .where("month", "==", mes).where("year", "==", ano).stream()):
+                 .where("month", "==", int(mes) - 1).where("year", "==", ano).stream()):
         dados = snap.to_dict() or {}
-        if marcador not in str(dados.get("description", "")).lower():
+        if marcador not in _palavras(dados.get("description", "")):
             continue
         anterior = dados.get("amount")
         if anterior == total:

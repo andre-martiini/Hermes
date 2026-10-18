@@ -28,6 +28,12 @@ e consulta do Modo Secretário estão ligadas aos mesmos handlers do MCP por
 `ToolContext(canal="telegram")`. Os testes em `test_tool_schemas.py` verificam
 as declarações enviadas ao Gemini e a execução dos handlers.
 
+Modo Objetivo (14/10/2026): `criar_objetivo_whatsapp` está no piso de confirmação
+obrigatória — a prévia mostra destinatário, objetivo, abertura e limites, e a
+abertura só sai depois do "sim". O andamento é pelo próprio Gaspar (gatilho em
+`whatsapp_messages` e Telegram); pelo MCP há `consultar_objetivos_whatsapp`,
+`responder_objetivo_whatsapp` e `encerrar_objetivo_whatsapp`.
+
 Se uma ferramenta não aparecer no Cowork, conferir `tools/list` autenticado no
 endpoint configurado antes de concluir que falta deploy. Compare com
 `https://gestao-hermes.web.app/mcp` e a revisão de `mcpServer` no Cloud Functions.
@@ -185,7 +191,7 @@ Três camadas, todas obrigatórias:
    `arguments._confirmed = true`.
 
 Além disso: rate limit de 60 chamadas/minuto por UID e log de auditoria de toda
-chamada em `mcp_audit_log` (uid, tool, argumentos, latência e, nas execuções diretas, `result_chars`: o tamanho da resposta em caracteres, para achar as ferramentas que enchem o contexto do cliente).
+chamada em `mcp_audit_log` (uid, tool, argumentos, latência e, nas execuções diretas, `result_chars`: o tamanho da resposta em caracteres, para achar as ferramentas que enchem o contexto do cliente). Nos erros grava também `erro_tipo`, `erro_resumo` e `recusa_esperada` (recusa: id inexistente, argumento errado, política, conflito; ver `functions/auditoria_mcp.py`), e a Retro Semanal reporta só as falhas reais como defeito. Antes de executar, o servidor conserta o ID da ação mandado com outro nome (`id`, `acao_id`, `tarefa_id` → `task_id`/`task_id_alvo`) e `*_id` com o texto "null" (`functions/mcp_argumentos.py`).
 
 ### Por que só o WhatsApp
 

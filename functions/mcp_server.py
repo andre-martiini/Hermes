@@ -64,6 +64,8 @@ from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, previe
 from tools.tool_context import ToolContext, principal_de
 from copilot_context import build_mcp_voice_context
 from trava_confirmacao import verificar_e_anotar_mcp as _trava_mcp
+import auditoria_mcp
+import mcp_argumentos
 from autonomy import policy as autonomy_policy
 from autonomy.contracts import (
     Decisao,
@@ -201,6 +203,11 @@ _TOOLS_LONGAS: set[str] = {
     # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
     "gerar_imagem",
     "editar_imagem",
+    # Fatura em PDF passa pelo Gemini (dezenas de segundos); o CSV e instantaneo,
+    # mas a tool e uma so.
+    "importar_fatura_cartao",
+    # Contracheque em PDF: leitura pelo Gemini.
+    "importar_contracheque",
 }
 
 _RATE_LIMIT_MAX_CALLS = 60
@@ -1065,7 +1072,8 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
                        arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
                        latency_ms=(time.monotonic() - start) * 1000,
-                       is_error=is_err)
+                       is_error=is_err, db=getattr(ctx, "_db", None),
+                       causa=auditoria_mcp.classificar_erro(confirmed_tool, result) if is_err else None)
         # `confirmed_tool` so garante que a tool foi IDENTIFICADA (setado
         # antes do try/except em `_executar_confirmacao`, de proposito, para
         # o audit log acima cobrir tambem uma execucao que falhou) -- nao que
@@ -1080,6 +1088,8 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
 
     if not registry.is_mcp_enabled(name):
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
+
+    arguments, ajustes_argumentos = _normalizar_argumentos(name, arguments)
 
     confirmed = arguments.pop("_confirmed", None)
     confirmation_id = arguments.pop("_confirmation_id", None)
@@ -1099,7 +1109,8 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                 _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
                            arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
                            latency_ms=(time.monotonic() - start) * 1000,
-                           is_error=is_err)
+                           is_error=is_err, db=getattr(ctx, "_db", None),
+                           causa=auditoria_mcp.classificar_erro(confirmed_tool, result) if is_err else None)
             # Mesmo raciocinio do ramo `confirmar_acao` acima: `confirmed_tool`
             # so identifica a tool (para o audit log cobrir tambem uma
             # execucao que falhou); `schema_tool` so vai junto quando o
@@ -1266,9 +1277,11 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         return erro_valores
 
     # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
-    # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
-    # `ai_profile.historico_deduzido` congela — sem erro e sem log. Registrar
-    # aqui mantem o sistema sabendo o que o usuario anda pedindo.
+    # interacao migrando para clientes MCP, aquele caminho para de ser exercido.
+    # Registrar aqui mantem o sistema sabendo o que o usuario anda pedindo — mas
+    # em `ai_profile.atividade_operacional`, trilha separada de
+    # `historico_deduzido` (achado A07 / P06 passo 3): consulta de rotina nao
+    # pode virar preferencia pessoal.
     try:
         from mcp_signals import registrar as registrar_sinal
 
@@ -1283,7 +1296,8 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             ctx.user_uid, name, arguments,
             session_id=ctx.session_id, task_id=ctx.task_id,
         )
-        _audit_log(uid=ctx.user_uid, tool=name, arguments=arguments, latency_ms=0.0, is_error=False)
+        _audit_log(uid=ctx.user_uid, tool=name, arguments=arguments, latency_ms=0.0, is_error=False,
+                   db=getattr(ctx, "_db", None), ajustes=ajustes_argumentos)
         return _text_result({
             "status": "processing",
             "job_id": job_id,
@@ -1298,6 +1312,8 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     start = time.monotonic()
     is_error = False
     text = ""
+    result = None
+    excecao = None
     estruturado = None  # ver comentario de `outputSchema`/`structuredContent` abaixo
     try:
         result = execute_tool(name, arguments, ctx)
@@ -1333,6 +1349,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         raise McpError(-32003, f"Tool '{name}' nao tem executor ligado ao MCP")
     except Exception as exc:  # noqa: BLE001
         is_error = True
+        excecao = exc
         text = json.dumps({"erro": str(exc)}, ensure_ascii=False)
     finally:
         _audit_log(
@@ -1342,6 +1359,9 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             latency_ms=(time.monotonic() - start) * 1000,
             is_error=is_error,
             result_chars=len(text),
+            db=getattr(ctx, "_db", None),
+            causa=auditoria_mcp.classificar_erro(name, result, excecao) if is_error else None,
+            ajustes=ajustes_argumentos,
         )
 
     # Mesmo motivo do `resultType` em `_text_result` acima — este e o unico
@@ -1388,6 +1408,18 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
 
         envelope["content"].extend(blocos_de_previa(result.get("resultado")))
     return envelope
+
+
+def _normalizar_argumentos(name: str, arguments: dict) -> tuple[dict, list[str]]:
+    """Conserta enganos repetidos de argumento (ver mcp_argumentos). Falha aberta."""
+    try:
+        propriedades = (registry.get_schema(name).get("parameters") or {}).get("properties") or {}
+        if not isinstance(propriedades, dict):
+            return arguments, []
+        return mcp_argumentos.normalizar(arguments, propriedades)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mcp_server] Falha ao normalizar argumentos de {name}: {exc}")
+        return arguments, []
 
 
 def _erro_campos_obrigatorios(name: str, arguments: dict) -> dict | None:
@@ -1677,9 +1709,14 @@ def _audit_log(
     latency_ms: float,
     is_error: bool = False,
     result_chars: int | None = None,
+    db=None,
+    causa: dict | None = None,
+    ajustes: list[str] | None = None,
 ) -> None:
     try:
-        db = firestore.client()
+        db = auditoria_mcp.destino(db)
+        if db is None:
+            return
         registro = {
             "uid": uid,
             "tool": tool,
@@ -1693,7 +1730,11 @@ def _audit_log(
         # direta (as demais, como job assíncrono e confirmação, não medem).
         if result_chars is not None:
             registro["result_chars"] = int(result_chars)
-        db.collection("mcp_audit_log").add(registro)
+        if is_error and causa:
+            registro.update(causa)
+        if ajustes:
+            registro["argumentos_ajustados"] = list(ajustes)
+        db.collection(auditoria_mcp.COLECAO).add(registro)
     except Exception as exc:
         print(f"[mcp_server] Falha ao gravar audit log (tool={tool}): {exc}")
 

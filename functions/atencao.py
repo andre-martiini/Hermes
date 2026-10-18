@@ -47,6 +47,7 @@ TIPO_SECRETARIO_DECISAO_FORCADA = "secretario_decisao_forcada"
 TIPO_SECRETARIO_INSISTENCIA = "secretario_insistencia"
 TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
+TIPO_SECRETARIO_PERGUNTOU_SE_ROBO = "secretario_perguntou_se_robo"
 TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
 #: P05 sub-entrega 19/N (passo 10 do pacote) -- ver
 #: `event_outbox.varrer_outbox_travado_core`/`_diagnostico_para_item_atencao`.
@@ -529,6 +530,15 @@ def detectar_atencao_financeiro(
         return []
 
     itens = avaliar_contas_vencendo(contas, hoje_dt)
+    # Contrato de servico mensal com 2 parcelas ou menos a receber. Falha aqui
+    # nao pode calar o aviso de conta vencendo.
+    try:
+        import rendas_servico
+
+        resumos = [rendas_servico.resumir_contrato(c, hoje_dt) for c in rendas_servico.contratos_ativos(db)]
+        itens += rendas_servico.itens_atencao(resumos, hoje_dt)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[AtencaoFinanceiro] Rendas de servico indisponiveis: {exc}")
     if itens:
         _persistir_itens_atencao(db, itens)
     return itens

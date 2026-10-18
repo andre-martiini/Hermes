@@ -671,6 +671,35 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "para o mesmo pedido do usuário gera um `mcp_confirmation_id` diferente e delega de novo, mesmo "
         "caveat já aceito em `pausar_conversa` (sub-entrega 17/N).",
     ),
+    "criar_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
+        "consultar_envio_whatsapp (abertura) e consultar_objetivos_whatsapp (andamento)",
+        dados_sensiveis_categoria="conversa com terceiro em nome do dono",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Modo Objetivo (14/10/2026): no piso de confirmação obrigatória (autonomy/policy.py) — a abertura "
+        "sai em nome do André. Recusa um segundo objetivo na mesma conversa enquanto o primeiro estiver ativo, "
+        "mas uma nova confirmação depois do fim cria outro objetivo e outra abertura.",
+    ),
+    "consultar_objetivos_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        dados_sensiveis_categoria="mensagens enviadas a terceiro e respostas do dono",
+    ),
+    "responder_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
+        "consultar_objetivos_whatsapp",
+        rede_servico="Gemini (decisão do próximo passo) e Google Calendar (agenda)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="conversa com terceiro em nome do dono",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="retoma um objetivo cuja abertura o dono já confirmou (criar_objetivo_whatsapp, no piso); o "
+        "ciclo seguinte pode mandar mensagem ao contato dentro dos limites aprovados.",
+    ),
+    "encerrar_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "consultar_objetivos_whatsapp",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="encerrar de novo devolve o estado atual sem nova escrita.",
+    ),
     "pausar_conversa": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS, "nenhum",
         dados_sensiveis_categoria="conversa com terceiro",
@@ -1105,6 +1134,58 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "consultar_compromissos_futuros": ToolInventoryEntry(
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — projeção determinística sobre dados já gravados", dados_sensiveis_categoria="financeiro",
+    ),
+    "consultar_historico_financeiro": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — mês fechado vem congelado de financeiro_historico; o resto é calculado dos dados gravados",
+        dados_sensiveis_categoria="financeiro pessoal",
+    ),
+    "fechar_mes_financeiro": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o retrato gravado e só devolve sucesso se a versão bater",
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="mês já fechado não muda sem retificar=true e motivo; a retificação guarda os totais da versão anterior.",
+    ),
+    "consultar_rendas_servico": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — resumo determinístico de servicos e income_entries já gravados",
+        dados_sensiveis_categoria="financeiro pessoal",
+    ),
+    "atualizar_reserva_emergencia": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê finance_settings/config e só devolve sucesso se os valores baterem",
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="grava só emergencyReserveCurrent/Target (merge); repetir o mesmo valor não muda nada nem gera "
+        "histórico; o valor anterior fica em reserva_emergencia_historico para desfazer.",
+    ),
+    "gerenciar_categorias_cartao": ToolInventoryEntry(
+        "financas_pessoais", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê a regra gravada e só devolve sucesso se bater",
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="regra com ID determinístico pelo padrão normalizado: definir de novo sobrescreve; remover grava "
+        "ativo=false (desliga também a regra padrão do código com o mesmo padrão) e definir de novo religa.",
+    ),
+    "importar_contracheque": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o contracheque gravado e confere rubricas x totais impressos",
+        rede_servico="Google Drive (download) e Gemini (leitura do PDF)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="financeiro pessoal (sem CPF, matrícula nem conta)",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="um documento por mês em contracheques/{YYYY-MM}; reimportar o mesmo mês substitui.",
+    ),
+    "importar_fatura_cartao": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê cabeçalho e lançamentos gravados e só devolve sucesso se baterem",
+        rede_servico="Google Drive (download) e Gemini (só para PDF)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="financeiro pessoal",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="reimportar a mesma fatura apaga e regrava os lançamentos da competência "
+        "(fatura_cartao.salvar); a correção da conta do mês guarda o valor anterior em amount_anterior.",
     ),
     "listar_conversas_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",

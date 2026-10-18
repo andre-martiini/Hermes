@@ -1,0 +1,12 @@
+{
+  "name": "encerrar_objetivo_whatsapp",
+  "description": "Encerra um objetivo de WhatsApp: o Gaspar para de conduzir a conversa e descarta o rascunho que estiver esperando aprovação.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {"type": "string", "description": "ID do objetivo"},
+      "motivo": {"type": "string", "description": "Por que está encerrando"}
+    },
+    "required": ["objetivo_id"]
+  }
+}

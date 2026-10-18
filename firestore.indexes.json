@@ -218,6 +218,12 @@
       "indexes": []
     },
     {
+      "collectionGroup": "whatsapp_enviados_gaspar",
+      "fieldPath": "expira_em",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "agent_runs",
       "fieldPath": "expira_em",
       "ttl": true,

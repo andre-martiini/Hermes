@@ -262,6 +262,27 @@ def _tipos_promovidos(db) -> set[str]:
     return promovidos
 
 
+# Envio "para agora" vai com o horário 30 s no passado. O worker escolhe a mensagem por
+# `scheduled_for <= agora` no relógio do notebook, que anda ~3 s atrás do servidor
+# (medido em 15/10/2026): sem a folga, o aviso em tempo real chega antes de a mensagem
+# "vencer" para ele, e ela espera a rodada do minuto seguinte (0 a 84 s, mediana 35 s).
+FOLGA_RELOGIO_WORKER = datetime.timedelta(seconds=30)
+
+
+def horario_envio_imediato() -> datetime.datetime:
+    return datetime.datetime.now(timezone.utc) - FOLGA_RELOGIO_WORKER
+
+
+def _registrar_se_autonomo(db, dados: dict, outbox_id: str) -> None:
+    """Mensagem do Secretário ou do Objetivo sai em primeira pessoa: registra o texto
+    final antes do envio para o eco `from_me` não ser lido como o André (mensagens_gaspar)."""
+    from mensagens_gaspar import ORIGENS_AUTONOMAS, registrar
+
+    if dados.get("origem") in ORIGENS_AUTONOMAS:
+        registrar(db, dados.get("content") or "", origem=dados.get("origem"),
+                  chat_id=str(dados.get("to_number") or ""), ref_id=dados.get("ref_id") or outbox_id)
+
+
 def criar_rascunho(
     db,
     contact_number: str,
@@ -276,6 +297,7 @@ def criar_rascunho(
     tipo: str = "outro",
     envio_imediato: bool = False,
     destinatario_resolvido: dict | None = None,
+    ref_id: str | None = None,
 ) -> dict:
     """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram.
 
@@ -344,7 +366,7 @@ def criar_rascunho(
         # Envio imediato é "agendado para agora", não "sem agendamento": o worker
         # seleciona jobs pendentes com scheduled_for <= agora(), e essa comparação
         # no Firestore exclui documentos com o campo null/ausente.
-        scheduled_for = datetime.datetime.now(timezone.utc)
+        scheduled_for = horario_envio_imediato()
     else:
         promovidos = _tipos_promovidos(db)
         is_promovido = tipo_limpo.lower() in promovidos
@@ -373,12 +395,15 @@ def criar_rascunho(
         payload["envio_liberado_em"] = envio_liberado_em
     if scheduled_for is not None:
         payload["scheduled_for"] = scheduled_for
+    if ref_id:
+        payload["ref_id"] = str(ref_id)
 
     doc_ref.set(payload)
 
     # Envio imediato não avisa no Telegram: o dono já vê a mensagem enviada no próprio
     # WhatsApp, e um eco do texto no Telegram seria só ruído (decisão do dono, 19/09/2026).
     if envio_imediato:
+        _registrar_se_autonomo(db, payload, outbox_id)
         return {
             "status": STATUS_PENDING,
             "outbox_id": outbox_id,
@@ -563,7 +588,7 @@ def aprovar_rascunho(
                     "status": STATUS_PENDING,
                     "aprovado_em": firestore.SERVER_TIMESTAMP,
                     "aprovado_via": aprovado_via,
-                    "scheduled_for": agora_utc,
+                    "scheduled_for": agora_utc - FOLGA_RELOGIO_WORKER,
                 },
             )
             return {"status": "ok", "dados": data}
@@ -583,6 +608,7 @@ def aprovar_rascunho(
         return transaction_result
 
     data = transaction_result.get("dados") or {}
+    _registrar_se_autonomo(db, data, outbox_id)
     item_atencao_id = data.get("item_atencao_id")
     acao_id = data.get("acao_id")
     dest_nome = data.get("destinatario_nome") or data.get("to_number") or ""

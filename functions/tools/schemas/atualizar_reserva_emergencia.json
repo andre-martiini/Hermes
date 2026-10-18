@@ -1,0 +1,26 @@
+{
+  "name": "atualizar_reserva_emergencia",
+  "description": "Atualiza a reserva de emergência do financeiro: o valor que há hoje (ex.: o saldo do Pós-Fixado na corretora) e/ou o alvo. Grava só esses dois campos, registra a mudança no histórico com a fonte e devolve o valor relido do banco. Use quando o usuário informar o saldo atual da reserva; diga de onde veio o valor em 'fonte'",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "valor_atual": {
+        "type": "number",
+        "description": "Quanto há hoje na reserva, em reais (ex.: 25780.07)"
+      },
+      "valor_alvo": {
+        "type": "number",
+        "description": "Meta da reserva, em reais. Omita para manter a atual"
+      },
+      "fonte": {
+        "type": "string",
+        "description": "De onde veio o valor (ex.: 'XP, Pós-Fixado, print de 02/10/2026')"
+      },
+      "observacao": {
+        "type": "string",
+        "description": "Nota livre para o histórico"
+      }
+    },
+    "required": []
+  }
+}

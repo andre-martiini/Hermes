@@ -5,7 +5,7 @@ por area -- hermes_core_logic.py e telegram_utils.py cresceram alem do teto de
 ~64000 tokens de saida por chamada de escrita do Argos; ver decisao do Andre em
 2026-09-08). Split puramente mecanico: nenhuma linha de logica foi reescrita, so
 movida para dentro de `build_telegram_tool_closures(...)`, uma factory function
-que recebe exatamente as variaveis externas que os 21 closures capturam (nomes
+que recebe exatamente as variaveis externas que os 25 closures capturam (nomes
 identicos aos originais, preservados de proposito -- ver ATENCAO abaixo) e
 devolve `tools_list`.
 
@@ -32,7 +32,7 @@ from firebase_admin import firestore
 from telegram_utils import _get_api_keys, _normalize_for_matching, normalizar_area_tematica
 
 def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, request_acao_id, internal_hermes_request, explicit_web_request, _areas_validas):
-    """Monta e devolve tools_list: os 21 closures de function-calling do Gemini para o Telegram."""
+    """Monta e devolve tools_list: os 25 closures de function-calling do Gemini para o Telegram."""
     # --- Tool definitions ---
     def consultar_historico_acoes(
         query: str,
@@ -583,19 +583,249 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
 
     def salvar_memoria_global(fato: str, categoria: str):
         """Persiste fato durável na memória global do Gaspar. Apenas para regras estáveis e preferências permanentes."""
+        # P06 sub-entrega 2/N (docs/plano-hermes-autonomo-2026-09-06.md,
+        # pacote P06, passo 1) -- fecha a pendência registrada na docstring
+        # de autonomy/context.py (P06 sub-entrega 1/N): antes desta
+        # sub-entrega, este closure (motor Telegram legado, fallback quando
+        # o copiloto web falha -- ver telegram_handlers_core.py, "Fallback
+        # para motor Telegram") escrevia direto em `knowledge_nodes` com um
+        # esquema PRÓPRIO e divergente (`fato`/`categoria`/`origem` soltos),
+        # sem `origem_fato`, sem embedding e sem dedup/conflito -- o mesmo
+        # fato podia ser salvo várias vezes por este canal, sem nenhuma
+        # proteção. `_save_memory_node` (main.py) é o escritor real já usado
+        # pelo servidor MCP e pelo copiloto web
+        # (tools/hermes_tools.py::_salvar_memoria_global) -- reaproveitá-lo
+        # aqui unifica o esquema gravado em `knowledge_nodes` e ganha a
+        # detecção de duplicata/conflito que este motor nunca teve. Esse
+        # "conflito" é um status novo que ESTE canal nunca produzia antes
+        # (só "saved"/"error") -- por isso o closure `resolver_conflito_memoria`
+        # abaixo é adicionado NA MESMA sub-entrega: sem ele, um conflito
+        # detectado aqui não teria nenhuma ferramenta deste motor para
+        # resolvê-lo (achado real de revisão adversarial independente desta
+        # sub-entrega), e o fato novo ficaria preso sem ser gravado.
+        #
+        # Import local (não no topo do módulo) para evitar import circular:
+        # main.py não importa telegram_message_tools diretamente, mas
+        # importa (nível de módulo) hermes_core_logic, que importa
+        # telegram_handlers_core, que importa este módulo -- um
+        # `from main import ...` no topo deste arquivo formaria um ciclo na
+        # cadeia main -> hermes_core_logic -> telegram_handlers_core ->
+        # telegram_message_tools -> main. Mesmo padrão já usado por
+        # agendar_lembrete_acao (acima) com tools.telegram_extended.
+        from main import _save_memory_node
+        from autonomy.context import origem_fato_para_canal_de_salvar_memoria
+
         try:
-            import uuid as _uuid
-            node_id = str(_uuid.uuid4())[:16]
-            db.collection("knowledge_nodes").document(node_id).set({
-                "id": node_id,
-                "fato": fato,
-                "categoria": categoria,
-                "data_criacao": datetime.now(timezone.utc).isoformat(),
-                "origem": "telegram",
-            })
-            return json.dumps({"status": "saved", "id": node_id}, ensure_ascii=False)
+            gemini_key = (_get_api_keys(db) or {}).get("gemini_api_key")
+            if not gemini_key:
+                return json.dumps({
+                    "status": "error",
+                    "reason": "gemini_api_key_nao_configurada",
+                }, ensure_ascii=False)
+            # "telegram" é um canal ainda não auditado (ver docstring de
+            # origem_fato_para_canal_de_salvar_memoria em autonomy/context.py)
+            # -- cai no default seguro INFERENCIA_AGENTE, nunca
+            # DECLARACAO_HUMANA, mesmo este sendo o motor de fallback do
+            # copiloto web (cujo próprio texto de system prompt também já é
+            # INFERENCIA_AGENTE): o texto desta ferramenta especificamente
+            # ("Apenas para regras estáveis e preferências permanentes") não
+            # foi auditado quanto a exigir ou não afirmação literal do
+            # usuário, então não deve herdar a classificação mais forte das
+            # duas por suposição.
+            resultado = _save_memory_node(
+                db=db,
+                api_key=gemini_key,
+                fato=fato,
+                categoria=categoria,
+                session_id=session.get("chat_id"),
+                origem_fato=origem_fato_para_canal_de_salvar_memoria("telegram"),
+            )
+            # P06 sub-entrega 3/N -- fecha a LIMITAÇÃO CONHECIDA registrada no
+            # comentário de `resolver_conflito_memoria` abaixo desde a
+            # sub-entrega 2/N: quando `_save_memory_node` devolve
+            # status="conflict", o `memory_id` (main.py::_save_memory_node,
+            # confirmado lendo o branch real) é persistido aqui em
+            # `session["pending_confirmations"]["memoria_conflito"]` -- MESMO
+            # dict e mesmo mecanismo de sobrevivência entre turnos já usado
+            # por `propor_lancamento_financeiro`/`propor_acao_para_confirmacao`
+            # (mesmo módulo, abaixo): `telegram_handlers_core.py::
+            # _process_telegram_message` já copia
+            # `session["pending_confirmations"]` inteiro para a sessão fresca
+            # antes de salvar, então nenhuma mudança foi necessária naquele
+            # arquivo -- só gravar sob uma chave nova no MESMO dict já
+            # sincronizado. Isso NÃO define `session["_pending_confirm_type"]`
+            # (esse campo só decide qual teclado inline anexar -- acao/
+            # financeiro/whatsapp; conflito de memória não tem teclado, o
+            # modelo resolve por texto).
+            if isinstance(resultado, dict) and resultado.get("status") == "conflict":
+                memoria_id_conflito = resultado.get("memory_id")
+                if memoria_id_conflito:
+                    session.setdefault("pending_confirmations", {})["memoria_conflito"] = {
+                        "memoria_id": str(memoria_id_conflito),
+                        "fato": fato,
+                        "categoria": categoria,
+                    }
+            return json.dumps(resultado, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+    def resolver_conflito_memoria(
+        decisao: str,
+        memoria_id: str = "",
+        fato_atualizado: str = "",
+        categoria: str = "",
+    ):
+        """Resolve um conflito explícito de memória após confirmação do usuário. decisao aceita: manter_existente, substituir_pelo_novo. memoria_id pode ser omitido quando houver um conflito de memória pendente desta mesma conversa."""
+        # `decisao` foi colocado ANTES de `memoria_id` nesta assinatura (achado
+        # real da revisão adversarial desta sub-entrega): dar um default a
+        # `memoria_id` e deixá-lo na 1ª posição, como na versão original,
+        # obrigaria por sintaxe Python a dar default também a `decisao` (todo
+        # parâmetro depois de um com default também precisa de um) -- o que
+        # tornaria `decisao` opcional no schema de function-calling real
+        # exposto ao Gemini (gerado por introspecção da assinatura, ver
+        # `telegram_utils.py::_build_gemini_tools`/`FunctionDeclaration.
+        # from_callable`), sem nenhum fallback seguro equivalente ao de
+        # `memoria_id` abaixo -- omiti-la sempre resultaria em erro
+        # (`decisao_invalida` em `tools/telegram_extended.py`). A chamada real
+        # (`telegram_utils.py::_execute_tool_call`) sempre invoca por
+        # `fn(**kwargs)` (nomeado, nunca posicional), então reordenar os
+        # parâmetros Python não muda nada para o Gemini nem para o MCP -- só
+        # para quem chamar esta função posicionalmente (nenhum caso em
+        # produção).
+        # P06 sub-entrega 2/N -- adicionado junto com a mudança de
+        # `salvar_memoria_global` acima (ver seu comentário): sem este
+        # closure, um status "conflict" devolvido por `_save_memory_node`
+        # (agora alcançável por este motor) não tinha nenhuma ferramenta
+        # deste engine para ser resolvido -- o fato novo ficava preso,
+        # nunca gravado, sem possibilidade de o usuário decidir. A lógica de
+        # resolução em si já existe e já é testada em
+        # `tools/telegram_extended.py::execute("resolver_conflito_memoria", ...)`
+        # (P03 sub-entrega 19/N) -- reaproveitada aqui por delegação, mesmo
+        # padrão de `agendar_lembrete_acao` (acima) para o mesmo módulo, em
+        # vez de duplicar a implementação.
+        #
+        # LIMITAÇÃO DA SUB-ENTREGA 2/N, FECHADA AQUI (P06 sub-entrega 3/N):
+        # o `memoria_id` que o MODELO precisava repassar aqui (devolvido pelo
+        # "conflict" de `salvar_memoria_global`, acima) não era persistido
+        # entre turnos neste motor -- `telegram_handlers_core.py` só persiste
+        # o TEXTO final de cada turno no histórico da sessão, não as partes
+        # de function-call/response, então um `memoria_id` que o texto
+        # visível ao usuário não repetisse se perdia ao fim do turno. Agora
+        # `memoria_id` é opcional: quando omitido (ou vazio), cai no valor
+        # gravado por `salvar_memoria_global` em
+        # `session["pending_confirmations"]["memoria_conflito"]` -- mesmo
+        # padrão de sessão pendente de `propor_lancamento_financeiro` (mesmo
+        # módulo, abaixo), em vez de depender do modelo carregar um ID opaco
+        # entre turnos. Quando o modelo INFORMA um `memoria_id` explícito
+        # (ex.: recuperou o conflito chamando `salvar_memoria_global` de novo
+        # com o mesmo fato), ele continua prevalecendo sobre o pendente --
+        # este fallback só cobre a ausência, nunca sobrescreve uma escolha
+        # explícita do modelo. A pendência só é removida da sessão quando
+        # coincide com o `memoria_id` efetivamente resolvido por esta
+        # chamada E a resolução teve sucesso real -- achado real da revisão
+        # adversarial desta sub-entrega: a 1ª versão apagava a pendência só
+        # por o `memoria_id` coincidir, mesmo quando `execute()` devolvia uma
+        # falha (ex.: `decisao` vazia/inválida cai em
+        # `{"status":"error","reason":"decisao_invalida"}`, prefixado com
+        # `"ERRO|"`, em `tools/telegram_extended.py`, sem gravar nada no
+        # Firestore) -- o conflito nunca era de fato resolvido, mas o
+        # fallback que permitiria o modelo tentar de novo sem repassar o
+        # `memoria_id` era destruído de qualquer forma, prendendo o fato do
+        # usuário sem solução automática.
+        from tools.telegram_extended import execute
+
+        memoria_id = (memoria_id or "").strip()
+        pendente = (session.get("pending_confirmations") or {}).get("memoria_conflito")
+        pendente = pendente if isinstance(pendente, dict) else None
+        if not memoria_id and pendente:
+            memoria_id = str(pendente.get("memoria_id") or "")
+
+        if not memoria_id:
+            return json.dumps({
+                "status": "error",
+                "reason": "memoria_id_ausente_sem_conflito_pendente",
+            }, ensure_ascii=False)
+
+        # Achado real da 2ª rodada de revisão adversarial desta sub-entrega:
+        # igual a `memoria_id` acima, `fato_atualizado` também precisa de um
+        # fallback para o valor pendente. Sem isto, quando o modelo chama
+        # `decisao="substituir_pelo_novo"` sem repassar `fato_atualizado`
+        # (plausível: tem default "" e não é obrigatório no schema real do
+        # Gemini), `tools/telegram_extended.py::execute(...)` delega para
+        # `main.py::_save_memory_node(fato="", force_update_id=memoria_id, ...)`,
+        # que checa `fato` vazio ANTES de checar `force_update_id` e devolve
+        # `{"status":"ignored","reason":"empty_fact"}` -- sem gravar nada no
+        # Firestore. Como "ignored" != "error", a checagem de sucesso abaixo
+        # (antes desta correção) classificava isso como sucesso e apagava a
+        # pendência, perdendo o fato do usuário e o próprio `memoria_id` que
+        # permitiria tentar de novo. Corrigido na raiz: `fato_atualizado`
+        # vazio cai no texto original gravado por `salvar_memoria_global` em
+        # `pendente["fato"]` -- mesmo padrão do fallback de `memoria_id`.
+        # `categoria` recebe o mesmo tratamento por simetria (impacto menor,
+        # já tinha um default seguro ["fato_isolado"]).
+        #
+        # Achado real da 3ª rodada de revisão adversarial: este fallback só é
+        # seguro quando `pendente` se refere ao MESMO `memoria_id` que está
+        # sendo resolvido nesta chamada -- `pending_confirmations["memoria_conflito"]`
+        # é um slot ÚNICO por sessão (sobrescrito por `salvar_memoria_global`
+        # a cada novo conflito). Sem esta checagem, dois conflitos em
+        # sequência (ex.: o modelo detecta o conflito B antes de resolver o
+        # conflito A, e depois resolve A passando um `memoria_id` explícito
+        # sem `fato_atualizado`) faziam o fato/categoria do conflito B (o
+        # único que sobrava no slot) serem gravados por engano no nó de
+        # memória de A -- corrupção silenciosa de dados, confirmada por
+        # execução real contra `_save_memory_node`, não só perda de pendência
+        # como o achado da 2ª rodada. Mesma condição já usada abaixo para
+        # decidir se a pendência pode ser apagada.
+        # Achado real do revisor automatico Codex na propria PR desta
+        # sub-entrega (nao de uma das 4 rodadas de revisao adversarial
+        # interna, que ja tinham encerrado quando o comentario chegou):
+        # `categoria` tinha default "fato_isolado" (em vez de "", como
+        # `fato_atualizado`), entao um valor explicito do modelo igual ao
+        # default era indistinguivel de uma omissao -- `categoria="fato_isolado"`
+        # passado deliberadamente pelo modelo (ex.: para corrigir a
+        # categoria de um fato que o pendente tinha como outra, diferente)
+        # caia no mesmo fallback de pendente e era sobrescrito sem
+        # necessidade. Corrigido trocando o default do parametro para ""
+        # (mesmo sentinela de "omitido" ja usado por `fato_atualizado`) e
+        # so aplicando o default real "fato_isolado" DEPOIS de tentar o
+        # fallback de pendente -- agora um valor explicito (inclusive
+        # "fato_isolado") nunca e sobrescrito, e so a ausencia real cai no
+        # pendente ou, na falta deste, no mesmo default de sempre.
+        pendente_corresponde = bool(pendente) and pendente.get("memoria_id") == memoria_id
+        fato_atualizado = (fato_atualizado or "").strip()
+        if not fato_atualizado and pendente_corresponde:
+            fato_atualizado = str(pendente.get("fato") or "")
+        categoria = (categoria or "").strip()
+        if not categoria and pendente_corresponde and pendente.get("categoria"):
+            categoria = str(pendente.get("categoria"))
+        if not categoria:
+            categoria = "fato_isolado"
+
+        slots = {
+            "memoria_id": memoria_id,
+            "decisao": decisao,
+            "fato_atualizado": fato_atualizado,
+            "categoria": categoria,
+        }
+        resultado = execute("resolver_conflito_memoria", slots, db)
+
+        # Defesa em profundidade além do fallback acima: mesmo que
+        # `fato_atualizado` chegue vazio por algum outro caminho não previsto,
+        # "ignored" nunca deve ser tratado como sucesso aqui -- só "error" era
+        # checado antes, o que é exatamente o que permitiu o achado real da
+        # 2ª rodada de revisão passar incólume pela 1ª correção.
+        resolvido_com_sucesso = False
+        if isinstance(resultado, str) and not resultado.startswith("ERRO|"):
+            try:
+                resolvido_com_sucesso = json.loads(resultado).get("status") not in ("error", "ignored")
+            except (ValueError, AttributeError):
+                resolvido_com_sucesso = False
+
+        if resolvido_com_sucesso and pendente_corresponde:
+            session.get("pending_confirmations", {}).pop("memoria_conflito", None)
+
+        return resultado
 
     def registrar_correcao_procedimento(
         area_tematica: str,
@@ -919,6 +1149,7 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         reagendar_acoes_em_lote,
         editar_acoes_em_lote,
         salvar_memoria_global,
+        resolver_conflito_memoria,
         registrar_correcao_procedimento,
         buscar_e_analisar_email,
         consultar_financas_v2,
