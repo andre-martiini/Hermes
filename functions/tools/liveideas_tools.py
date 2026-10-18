@@ -134,13 +134,16 @@ def _marcar_anexado(db, ref) -> bool:
 def _anexar(db, ref, pedido: dict, resp: dict):
     task_id, tipo = str(pedido["task_id"]), pedido.get("tipo")
     titulo = resp.get("titulo") or pedido.get("processo") or pedido.get("reuniao")
-    nota = f"{_ROTULO.get(tipo, 'Diagrama')} gerado no Live Ideas: {titulo} — {resp.get('link')}"
+    nota = f"{_ROTULO.get(tipo, 'Diagrama')} gerado no Live Ideas: {titulo}, {resp.get('link')}"
     marcou = False
     try:
         marcou = _marcar_anexado(db, ref)
         if not marcou:
             return "já estava anexado na ação"
         if tipo == "processo":
+            if not resp.get("bpmn"):
+                # Fica marcado: consultar de novo não traria o arquivo.
+                return {"aviso": "o Live Ideas não devolveu o arquivo do processo; anexe pela tela"}
             import imagens_geradas
             from tools import anexar_arquivo
 
@@ -207,9 +210,32 @@ def apagar(ctx, args: dict) -> dict:
     return erro or resp
 
 
+def _data_br(iso) -> str | None:
+    """`data` do `listar` (ISO) em dd/mm/aaaa, no horário de Brasília quando vem com fuso."""
+    try:
+        quando = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if quando.tzinfo:
+        try:
+            from zoneinfo import ZoneInfo
+
+            quando = quando.astimezone(ZoneInfo("America/Sao_Paulo"))
+        except Exception:  # noqa: BLE001 - sem base de fusos, fica a data como veio
+            pass
+    return quando.strftime("%d/%m/%Y")
+
+
 def previa_apagar(ctx, args: dict) -> dict:
-    """Prévia do piso de confirmação: só lê o título (sem ele, mostra o id)."""
+    """Prévia do piso de confirmação, só com leituras: título e data pelo `listar`;
+    fora dos 50 mais recentes, o título pelo `ler`; sem nenhum dos dois, o id."""
     alvo = _alvo(args)
-    resp, _ = _enviar(ctx, "ler", alvo)
-    titulo = (resp or {}).get("titulo") or ", ".join(alvo.values())
-    return {"status": "confirmation_required", "resumo": f"vai para a lixeira: {titulo}"}
+    resp, _ = _enviar(ctx, "listar", {"tipo": "processo"} if "processo" in alvo else {})
+    item = next((i for i in (resp or {}).get("itens") or [] if i.get("id") in alvo.values()), None)
+    if item is None:
+        resp, _ = _enviar(ctx, "ler", alvo)
+        item = resp or {}
+    titulo = item.get("titulo") or ", ".join(alvo.values())
+    data = _data_br(item["data"]) if item.get("data") else None
+    return {"status": "confirmation_required",
+            "resumo": f"vai para a lixeira: {titulo}" + (f", {data}" if data else "")}

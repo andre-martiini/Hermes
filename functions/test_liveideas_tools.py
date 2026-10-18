@@ -2,6 +2,8 @@
 
 O canal (`liveideas.comando`) e o Firestore são falsos; o Drive também.
 """
+import importlib.util
+import json
 import threading
 import time
 import unittest
@@ -231,7 +233,7 @@ class ConsultarTest(Base):
                                             b"<bpmn:definitions/>", "application/xml")])
         notas, itens = self._notas_tarefa()
         self.assertEqual([(i["nome"], i["drive_file_id"]) for i in itens], [("Diárias.bpmn", "drv1")])
-        self.assertIn(f"Processo gerado no Live Ideas: Diárias — {LINK_P}", notas)
+        self.assertIn(f"Processo gerado no Live Ideas: Diárias, {LINK_P}", notas)
         self.assertTrue(any(n.startswith("FILE::JSON::") for n in notas))
         self.assertTrue(self.db.docs[(lt.COLECAO, "ped1")]["anexado"])
 
@@ -244,7 +246,7 @@ class ConsultarTest(Base):
         notas, itens = self._notas_tarefa()
         self.assertEqual(self.publicados, [])
         self.assertEqual(itens, [])
-        self.assertEqual(notas, [f"Mapa de ideias gerado no Live Ideas: Planejamento — {link}"])
+        self.assertEqual(notas, [f"Mapa de ideias gerado no Live Ideas: Planejamento, {link}"])
 
     def test_fluxo_pronto_so_anota(self):
         self._pedido(tipo="fluxo", reuniao=REUN, task_id="t1")
@@ -252,7 +254,7 @@ class ConsultarTest(Base):
         self.respostas["consultar"] = (200, {"estado": "pronto", "custo": 0.3, "texto": "Fluxo",
                                              "link": link, "titulo": "Compras", "tipo": "fluxo"})
         hermes_tools.execute("liveideas_consultar", {"pedido_id": "ped1"}, self.ctx)
-        self.assertEqual(self._notas_tarefa(), ([f"Fluxo gerado no Live Ideas: Compras — {link}"], []))
+        self.assertEqual(self._notas_tarefa(), ([f"Fluxo gerado no Live Ideas: Compras, {link}"], []))
 
     def test_sem_task_id_nao_anexa(self):
         self._pedido(tipo="processo", processo=PROC, geracao="g1")
@@ -280,6 +282,19 @@ class ConsultarTest(Base):
             t.join()
         self.assertEqual(len(self.publicados), 1)
         self.assertEqual(len(self._notas_tarefa()[1]), 1)
+
+    def test_processo_sem_bpmn_avisa_e_nao_tenta_de_novo(self):
+        self._pedido(tipo="processo", processo=PROC, geracao="g1", task_id="t1")
+        self.respostas["consultar"] = (200, {"estado": "pronto", "custo": 0.1, "texto": "t", "link": LINK_P,
+                                             "titulo": "Diárias", "tipo": "processo"})
+        r = hermes_tools.execute("liveideas_consultar", {"pedido_id": "ped1"}, self.ctx)
+        self.assertEqual(r["anexo"],
+                         {"aviso": "o Live Ideas não devolveu o arquivo do processo; anexe pela tela"})
+        self.assertTrue(self.db.docs[(lt.COLECAO, "ped1")]["anexado"])
+        r = hermes_tools.execute("liveideas_consultar", {"pedido_id": "ped1"}, self.ctx)
+        self.assertEqual(r["anexo"], "já estava anexado na ação")
+        self.assertEqual(self.publicados, [])
+        self.assertEqual(self._notas_tarefa(), ([], []))
 
     def test_falha_no_anexo_desmarca_para_tentar_de_novo(self):
         self._pedido(tipo="processo", processo=PROC, geracao="g1", task_id="t1")
@@ -359,16 +374,57 @@ class ApagarConfirmacaoTest(Base):
             if nome != "apagar":
                 self.assertNotIn(f"liveideas_{nome}", policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
 
-    def test_previa_mostra_o_titulo_e_nao_apaga(self):
-        self.respostas["ler"] = (200, {"texto": "t", "link": "l", "titulo": "Reunião de equipe", "tipo": "mapa"})
+    def test_previa_mostra_titulo_e_data_e_nao_apaga(self):
+        self.respostas["listar"] = (200, {"itens": [
+            {"tipo": "mapa", "id": "2026-10-17_09-00-00", "titulo": "Outra", "data": "2026-10-17T12:00:00.000Z"},
+            {"tipo": "mapa", "id": REUN, "titulo": "Reunião de equipe", "data": "2026-10-18T12:00:00.000Z"}]})
         previa = hermes_tools.preview("liveideas_apagar", self.ctx, {"reuniao_id": REUN})
-        self.assertIn("vai para a lixeira: Reunião de equipe", str(previa))
-        self.assertEqual(self.chamadas, [("ler", {"reuniao": REUN})])
+        self.assertEqual(previa["resumo"], "vai para a lixeira: Reunião de equipe, 18/10/2026")
+        self.assertEqual(self.chamadas, [("listar", {})])
+
+    def test_previa_de_processo_filtra_por_tipo(self):
+        self.respostas["listar"] = (200, {"itens": [
+            {"tipo": "processo", "id": PROC, "titulo": "Diárias", "data": "2026-10-16T15:30:00+00:00"}]})
+        previa = hermes_tools.preview("liveideas_apagar", self.ctx, {"processo_id": PROC})
+        self.assertEqual(previa["resumo"], "vai para a lixeira: Diárias, 16/10/2026")
+        self.assertEqual(self.chamadas, [("listar", {"tipo": "processo"})])
+
+    def test_previa_fora_da_lista_usa_o_titulo_do_ler_sem_data(self):
+        self.respostas["listar"] = (200, {"itens": []})
+        self.respostas["ler"] = (200, {"texto": "t", "link": "l", "titulo": "Antiga", "tipo": "mapa"})
+        previa = hermes_tools.preview("liveideas_apagar", self.ctx, {"reuniao_id": REUN})
+        self.assertEqual(previa["resumo"], "vai para a lixeira: Antiga")
+        self.assertEqual(self.chamadas, [("listar", {}), ("ler", {"reuniao": REUN})])
 
     def test_previa_sem_o_titulo_usa_o_id(self):
-        self.respostas["ler"] = liveideas.LiveIdeasIndisponivel(liveideas.MSG_DESLIGADO)
+        self.respostas["listar"] = self.respostas["ler"] = liveideas.LiveIdeasIndisponivel(liveideas.MSG_DESLIGADO)
         previa = hermes_tools.preview("liveideas_apagar", self.ctx, {"processo_id": PROC})
-        self.assertIn(f"vai para a lixeira: {PROC}", str(previa))
+        self.assertEqual(previa["resumo"], f"vai para a lixeira: {PROC}")
+
+    @unittest.skipUnless(importlib.util.find_spec("firebase_functions"), "mcp_server precisa de firebase_functions")
+    def test_pelo_mcp_a_primeira_chamada_so_devolve_a_previa(self):
+        import mcp_server
+        from autonomy.contracts import EstadoAutonomia
+
+        self.respostas["listar"] = (200, {"itens": [
+            {"tipo": "mapa", "id": REUN, "titulo": "Reunião de equipe", "data": "2026-10-18T12:00:00.000Z"}]})
+        self.respostas["apagar"] = AssertionError("apagar não pode ir ao canal sem confirmar_acao")
+        with mock.patch.object(mcp_server.autonomy_policy, "estado_autonomia_atual",
+                               return_value=EstadoAutonomia.ATIVO),                 mock.patch.object(mcp_server.autonomy_policy, "registrar_decisao"),                 mock.patch.object(mcp_server, "_access_config", return_value={"confirm_tools": set()}):
+            ctx = ToolContext(user_uid="andre", canal="mcp", _db=self.db)
+            resultado = mcp_server._handle_tools_call(
+                {"name": "liveideas_apagar", "arguments": {"reuniao_id": REUN}}, ctx=ctx)
+            # Insistir com _confirmed sem confirmation_id também não apaga.
+            atalho = mcp_server._handle_tools_call(
+                {"name": "liveideas_apagar", "arguments": {"reuniao_id": REUN, "_confirmed": True}}, ctx=ctx)
+        corpo = json.loads(resultado["content"][0]["text"])
+        self.assertFalse(resultado["isError"])
+        self.assertTrue(corpo["confirmation_id"])
+        self.assertEqual(corpo["preview"]["resumo"], "vai para a lixeira: Reunião de equipe, 18/10/2026")
+        self.assertTrue(atalho["isError"])
+        self.assertNotIn("apagar", [acao for acao, _ in self.chamadas])
+        guardada = self.db.docs[("mcp_confirmations", corpo["confirmation_id"])]
+        self.assertEqual((guardada["tool"], guardada["arguments"]), ("liveideas_apagar", {"reuniao_id": REUN}))
 
 
 class CatalogoTest(unittest.TestCase):
