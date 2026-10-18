@@ -618,3 +618,24 @@ revisao_adversarial:
   - "Rodada 3: não achou nada."
 pendencias:
   - "Verificar no próximo deploy que a scheduled function varrer_outbox_travado (a cada 15 min) foi publicada e roda sem erro; reconciliação só toca outbox_eventos em em_processamento com lease vencida."
+
+---
+pacote: "P06 sub-entrega 5/N -- passo 10 (relatório de memória suspeita), parte pura: functions/autonomy/memoria_suspeita.py. Sem I/O e sem tocar em main.py: dado um documento de knowledge_nodes, devolve sinais com evidência (campo + trecho) para REVISÃO HUMANA -- nunca apaga, rebaixa nem supera nada (aceite do passo 10: saneamento só por revisão com evidência). Sinais: sem_proveniencia (legacy_unknown), inferencia_como_regra_global, telemetria_como_fato, superada_sem_sucessor, possivel_injecao (padrões estritos de ordem ao modelo, em todos os campos de texto lidos por consumidores reais; NFKC + remoção de caracteres Unicode Cf; negação colada ao padrão não conta). Documento superada também é varrido por injeção porque main._build_memory_context injeta texto sem filtrar memoria_status."
+estado: pronto_para_revisao
+inicio: "2026-10-18T14:20:00Z"
+fim: "2026-10-18T15:10:00Z"
+decisoes:
+  - id: p06-sub5-so-logica-pura
+    motivo: "Mesmo padrão incremental de context.py/temporal.py: classificação testável sem Firestore primeiro. A consulta real (varredura paginada de knowledge_nodes) e a exposição como tool/relatório ficam para sub-entrega seguinte, que também decide o destino do relatório."
+  - id: p06-sub5-falso-positivo-aceito
+    motivo: "Frases legítimas de regra com negação não colada ('você não deve ignorar as instruções anteriores') ou de revogação ('ignorar as regras anteriores') ainda geram uma linha a revisar; custo aceito (relatório é para revisão humana), documentado no módulo."
+testes:
+  resultados:
+    - "test_memoria_suspeita: 31 testes OK (novo arquivo)."
+revisao_adversarial:
+  - "Rodada 1: injeção só no primeiro campo; evidência com campo errado; falsos positivos (system prompt solto, 'deve obedecer'); testes que sobreviviam a mutações -- corrigidos."
+  - "Rodada 2: evidência truncada sem conter o casamento; superada não varrida; negação; unicode; doc_id não-string -- corrigidos."
+  - "Rodada 3: negação mascarando injeção em outra linha/meio de palavra; variantes com possessivo; caracteres Cf -- corrigidos."
+  - "Rodada 4: só falso positivo já aceito (negação com auxiliar). Sem achado real."
+pendencias:
+  - "Sub-entrega seguinte do passo 10: varredura paginada real de knowledge_nodes + destino do relatório (fila de atenção ou tool somente leitura)."
