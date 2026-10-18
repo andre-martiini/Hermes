@@ -4,6 +4,9 @@ O Gaspar grava um pedido em `gaspar/comandos/<id>` e espera a resposta do
 notebook em `gaspar/respostas/<id>`. O notebook publica presença em
 `quadro/servidor/online`. A credencial (JSON da conta de serviço) fica em
 `system/api_keys.liveideas_conta_servico`; o acesso é sempre como `uid: gaspar`.
+
+Nenhuma mensagem de erro daqui carrega texto da credencial: as exceções da
+biblioteca (que podem conter a chave privada) são trocadas por frases fixas.
 """
 from __future__ import annotations
 
@@ -18,6 +21,8 @@ from firebase_admin import db as rtdb
 DATABASE_URL = "https://quadro-ao-vivo-andre-default-rtdb.firebaseio.com"
 NOME_APP = "liveideas"
 INTERVALO_S = 0.5
+# O padrão do firebase_admin é 120 s com retry, o que estouraria o prazo do comando.
+HTTP_TIMEOUT_S = 5
 
 MSG_DESLIGADO = "o notebook do Live Ideas está desligado (ligue-o e peça de novo)"
 MSG_SEM_RESPOSTA = "o notebook não respondeu; tente de novo em instantes"
@@ -25,6 +30,16 @@ MSG_SEM_CREDENCIAL = (
     "falta a credencial do Live Ideas no cofre do Gaspar "
     "(system/api_keys.liveideas_conta_servico)"
 )
+MSG_JSON_INVALIDO = (
+    "a credencial do Live Ideas no cofre do Gaspar não é um JSON válido "
+    "(system/api_keys.liveideas_conta_servico)"
+)
+MSG_CREDENCIAL_RECUSADA = (
+    "a credencial do Live Ideas no cofre do Gaspar não foi aceita "
+    "(system/api_keys.liveideas_conta_servico)"
+)
+MSG_REDE = "não consegui falar com o Live Ideas agora; tente de novo em instantes"
+MSG_RESPOSTA_INVALIDA = "o notebook devolveu uma resposta inválida"
 
 _apps: dict = {}  # raiz do banco, criada uma vez por instância
 
@@ -46,16 +61,25 @@ def banco_liveideas(db):
     if not texto:
         raise LiveIdeasIndisponivel(MSG_SEM_CREDENCIAL)
     try:
-        conta = json.loads(texto) if isinstance(texto, str) else dict(texto)
+        conta = json.loads(texto) if isinstance(texto, str) else texto
     except ValueError:
-        raise LiveIdeasIndisponivel(
-            "a credencial do Live Ideas no cofre do Gaspar não é um JSON válido "
-            "(system/api_keys.liveideas_conta_servico)")
-    app = firebase_admin.initialize_app(
-        credentials.Certificate(conta),
-        {"databaseURL": DATABASE_URL, "databaseAuthVariableOverride": {"uid": "gaspar"}},
-        name=NOME_APP,
-    )
+        # `from None`: o erro de JSON guarda o segredo em `.doc`
+        raise LiveIdeasIndisponivel(MSG_JSON_INVALIDO) from None
+    if not isinstance(conta, dict):
+        # texto codificado duas vezes ou lista: Certificate() vazaria o segredo na mensagem
+        raise LiveIdeasIndisponivel(MSG_JSON_INVALIDO)
+    try:
+        app = firebase_admin.initialize_app(
+            credentials.Certificate(conta),
+            {
+                "databaseURL": DATABASE_URL,
+                "databaseAuthVariableOverride": {"uid": "gaspar"},
+                "httpTimeout": HTTP_TIMEOUT_S,
+            },
+            name=NOME_APP,
+        )
+    except Exception:
+        raise LiveIdeasIndisponivel(MSG_CREDENCIAL_RECUSADA) from None
     _apps[NOME_APP] = rtdb.reference("/", app=app)
     return _apps[NOME_APP]
 
@@ -64,22 +88,45 @@ def notebook_ligado(raiz) -> bool:
     return raiz.child("quadro/servidor/online").get() is True
 
 
+def _rede(chamada):
+    """Roda uma chamada ao banco; falha de rede vira LiveIdeasIndisponivel com texto fixo."""
+    try:
+        return chamada()
+    except LiveIdeasIndisponivel:
+        raise
+    except Exception:
+        raise LiveIdeasIndisponivel(MSG_REDE) from None
+
+
 def comando(raiz, acao: str, corpo: dict, espera_s: float = 20) -> tuple[int, dict]:
     """Envia `acao` ao notebook e devolve `(status, corpo)` da resposta."""
-    if not notebook_ligado(raiz):
+    limite = time.monotonic() + espera_s  # conta desde antes da primeira chamada de rede
+    if not _rede(lambda: notebook_ligado(raiz)):
         raise LiveIdeasIndisponivel(MSG_DESLIGADO)
     id_ = uuid.uuid4().hex
     pedido = raiz.child(f"gaspar/comandos/{id_}")
     resposta = raiz.child(f"gaspar/respostas/{id_}")
-    pedido.set({"acao": acao, "corpo": json.dumps(corpo, ensure_ascii=False), "em": int(time.time() * 1000)})
-    limite = time.monotonic() + espera_s
+    _rede(lambda: pedido.set(
+        {"acao": acao, "corpo": json.dumps(corpo, ensure_ascii=False), "em": int(time.time() * 1000)}))
     while True:
-        r = resposta.get()
+        r = _rede(resposta.get)
         if r is not None:
-            resposta.delete()
-            return int(r["status"]), json.loads(r["corpo"])
+            try:  # melhor esforço: o notebook também limpa respostas esquecidas
+                resposta.delete()
+            except Exception:
+                pass
+            try:
+                status, corpo_resp = int(r["status"]), json.loads(r["corpo"])
+            except (KeyError, TypeError, ValueError):
+                raise LiveIdeasIndisponivel(MSG_RESPOSTA_INVALIDA) from None
+            if not isinstance(corpo_resp, dict):
+                raise LiveIdeasIndisponivel(MSG_RESPOSTA_INVALIDA)
+            return status, corpo_resp
         restante = limite - time.monotonic()
         if restante <= 0:
-            pedido.delete()
+            try:  # a falha da limpeza não pode esconder a mensagem de sem resposta
+                pedido.delete()
+            except Exception:
+                pass
             raise LiveIdeasIndisponivel(MSG_SEM_RESPOSTA)
         time.sleep(min(INTERVALO_S, restante))

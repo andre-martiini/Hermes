@@ -96,6 +96,30 @@ class ComandoTest(unittest.TestCase):
         self.assertEqual(e.exception.mensagem, "o notebook não respondeu; tente de novo em instantes")
         self.assertFalse([c for c in self.dados if c.startswith("gaspar/")])
 
+    def test_resposta_malformada_vira_indisponivel(self):
+        malformadas = ({"corpo": "{}"}, {"status": 200, "corpo": "nao e json"},
+                       {"status": 200, "corpo": "[1]"}, {"status": "x", "corpo": "{}"})
+        for r in malformadas:
+            self.dados["gaspar/respostas/abc"] = r
+            with mock.patch.object(liveideas.uuid, "uuid4", return_value=mock.Mock(hex="abc")):
+                with self.assertRaises(liveideas.LiveIdeasIndisponivel) as e:
+                    liveideas.comando(self.raiz, "listar", {}, espera_s=1)
+            self.assertEqual(e.exception.mensagem, "o notebook devolveu uma resposta inválida")
+            self.assertNotIn("gaspar/respostas/abc", self.dados)
+
+    def test_erro_de_rede_vira_indisponivel(self):
+        with mock.patch.object(RefFalsa, "get", side_effect=OSError("detalhe interno")):
+            with self.assertRaises(liveideas.LiveIdeasIndisponivel) as e:
+                liveideas.comando(self.raiz, "listar", {})
+        self.assertEqual(e.exception.mensagem, liveideas.MSG_REDE)
+        self.assertNotIn("detalhe interno", str(e.exception))
+
+    def test_delete_que_falha_nao_esconde_sem_resposta(self):
+        with mock.patch.object(RefFalsa, "delete", side_effect=OSError("rede")):
+            with self.assertRaises(liveideas.LiveIdeasIndisponivel) as e:
+                liveideas.comando(self.raiz, "listar", {}, espera_s=0.1)
+        self.assertEqual(e.exception.mensagem, liveideas.MSG_SEM_RESPOSTA)
+
 
 class BancoTest(unittest.TestCase):
     def setUp(self):
@@ -110,6 +134,30 @@ class BancoTest(unittest.TestCase):
                 e.exception.mensagem,
                 "falta a credencial do Live Ideas no cofre do Gaspar (system/api_keys.liveideas_conta_servico)")
 
+    def test_credencial_invalida_nao_vaza_o_segredo(self):
+        segredo = "-----BEGIN PRIVATE KEY-----SEGREDO"
+        conta = {"type": "service_account", "private_key": segredo}
+        casos = {
+            "dupla codificacao": json.dumps(json.dumps(conta)),
+            "lista": json.dumps([conta]),
+            "json quebrado": json.dumps(conta)[:-1],
+        }
+        for nome, texto in casos.items():
+            with self.subTest(nome):
+                with self.assertRaises(liveideas.LiveIdeasIndisponivel) as e:
+                    liveideas.banco_liveideas(FirestoreFalso({"liveideas_conta_servico": texto}))
+                self.assertNotIn("SEGREDO", str(e.exception))
+                self.assertNotIn("SEGREDO", e.exception.mensagem)
+                self.assertEqual(e.exception.mensagem, liveideas.MSG_JSON_INVALIDO)
+        # Certificate() falhando com texto que contém a chave
+        fs = FirestoreFalso({"liveideas_conta_servico": json.dumps(conta)})
+        with mock.patch.object(liveideas.credentials, "Certificate", side_effect=OSError(segredo)):
+            with self.assertRaises(liveideas.LiveIdeasIndisponivel) as e:
+                liveideas.banco_liveideas(fs)
+        self.assertNotIn("SEGREDO", str(e.exception))
+        self.assertEqual(e.exception.mensagem, liveideas.MSG_CREDENCIAL_RECUSADA)
+        self.assertTrue(e.exception.__suppress_context__)
+
     def test_app_criado_com_override_gaspar_uma_vez_so(self):
         conta = {"type": "service_account", "project_id": "x"}
         fs = FirestoreFalso({"liveideas_conta_servico": json.dumps(conta)})
@@ -122,6 +170,7 @@ class BancoTest(unittest.TestCase):
         ini.assert_called_once_with("cred", {
             "databaseURL": "https://quadro-ao-vivo-andre-default-rtdb.firebaseio.com",
             "databaseAuthVariableOverride": {"uid": "gaspar"},
+            "httpTimeout": 5,
         }, name="liveideas")
         self.assertEqual(ref.call_args.kwargs["app"], "app")
 
