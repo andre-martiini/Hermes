@@ -150,12 +150,25 @@ class GerarTest(Base):
         self.assertEqual(r, {"erro": msg})
         self.assertEqual(self.db.pedidos(), {})
 
-    def test_task_id_com_barra_ou_vazio_e_recusado_antes_do_firestore(self):
-        for task_id in ("t1/../x", "   ", ""):
-            with self.subTest(task_id=task_id),                  mock.patch.object(self.db, "collection", side_effect=AssertionError("não pode ir ao Firestore")):
-                r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "task_id": task_id})
-                self.assertEqual(r, {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"})
+    def test_task_id_com_barra_e_recusado_antes_do_firestore(self):
+        with mock.patch.object(self.db, "collection", side_effect=AssertionError("não pode ir ao Firestore")):
+            r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "task_id": "t1/../x"})
+        self.assertEqual(r, {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"})
         self.assertEqual(self.chamadas, [])
+
+    def test_opcionais_vazios_valem_como_ausentes(self):
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN})
+        for task_id in ("", "   "):
+            with self.subTest(task_id=task_id):
+                r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "reuniao_id": "", "titulo": "  ",
+                                        "task_id": task_id})
+                self.assertNotIn("erro", r)
+                self.assertNotIn("task_id", self.db.pedidos()[r["pedido_id"]])  # sem ação: nada a anexar
+        self.assertEqual(self.chamadas, [("gerar", {"tipo": "mapa", "texto": "y" * 50})] * 2)
+        self.chamadas.clear()
+        self.respostas["ler"] = (200, {"texto": "t", "link": "l", "titulo": "X", "tipo": "processo"})
+        lt.ler(self.ctx, {"processo_id": PROC, "reuniao_id": " "})
+        self.assertEqual(self.chamadas, [("ler", {"processo": PROC})])
 
     def test_task_id_com_espacos_em_volta_vale_sem_eles(self):
         self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN})

@@ -26,7 +26,8 @@ _ROTULO = {"processo": "Processo", "fluxo": "Fluxo", "mapa": "Mapa de ideias"}
 
 
 def _sem_vazios(dados: dict) -> dict:
-    return {k: v for k, v in dados.items() if v is not None}
+    """Tira os ausentes: None e texto vazio ou só com espaços (o Claude manda "" para "nenhum")."""
+    return {k: v for k, v in dados.items() if v is not None and not (isinstance(v, str) and not v.strip())}
 
 
 def _enviar(ctx, acao: str, corpo: dict) -> tuple[dict | None, dict | None]:
@@ -55,11 +56,9 @@ def _criar_pedido(ctx, dados: dict) -> str:
 
 
 def gerar(ctx, args: dict) -> dict:
-    task_id = args.get("task_id")
-    if task_id is not None:
-        task_id = str(task_id).strip()
-        if not task_id or "/" in task_id:  # "/" mudaria o caminho no Firestore
-            return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
+    task_id = str(args.get("task_id") or "").strip() or None  # vazio ou só espaços: sem ação
+    if task_id and "/" in task_id:  # "/" mudaria o caminho no Firestore
+        return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
     if task_id and not ctx.db.collection("tarefas").document(task_id).get().exists:
         return {"erro": f"ação {task_id!r} não encontrada no Gaspar"}
     resp, erro = _enviar(ctx, "gerar", _sem_vazios({
