@@ -631,11 +631,12 @@ decisoes:
     motivo: "Frases legítimas de regra com negação não colada ('você não deve ignorar as instruções anteriores') ou de revogação ('ignorar as regras anteriores') ainda geram uma linha a revisar; custo aceito (relatório é para revisão humana), documentado no módulo."
 testes:
   resultados:
-    - "test_memoria_suspeita: 31 testes OK (novo arquivo)."
+    - "test_memoria_suspeita: 33 testes OK (novo arquivo). functions/ completo ANTES 4141 OK, DEPOIS 4173 OK no head 9bfbfc9 (+ 1 teste adicionado depois, 4174 esperado no head final; só testes/docstring mudaram entre os dois)."
 revisao_adversarial:
   - "Rodada 1: injeção só no primeiro campo; evidência com campo errado; falsos positivos (system prompt solto, 'deve obedecer'); testes que sobreviviam a mutações -- corrigidos."
   - "Rodada 2: evidência truncada sem conter o casamento; superada não varrida; negação; unicode; doc_id não-string -- corrigidos."
   - "Rodada 3: negação mascarando injeção em outra linha/meio de palavra; variantes com possessivo; caracteres Cf -- corrigidos."
   - "Rodada 4: só falso positivo já aceito (negação com auxiliar). Sem achado real."
+  - "Codex (PR #463): P2 real -- remover caractere Cf colava palavras (ignore\u200bas) e escondia a injeção; corrigido varrendo as duas variantes (removido e trocado por espaço). Revisão adversarial focada: só lacuna de teste (variante removida e negação com Cf), corrigida; limitação residual documentada (Cf dentro da palavra E no lugar do espaço)."
 pendencias:
   - "Sub-entrega seguinte do passo 10: varredura paginada real de knowledge_nodes + destino do relatório (fila de atenção ou tool somente leitura)."
