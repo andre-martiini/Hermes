@@ -28,14 +28,15 @@ do relatório (aceite do passo 10), nunca efeito colateral daqui.
   não pode virar POP/regra (testes do pacote). Heurística barata e
   conservadora (ver `_PADROES_INJECAO`); um falso positivo só gera uma linha a revisar. Todos os campos de texto lidos por consumidores reais são varridos, e a evidência aponta o campo de onde veio o trecho.
 
-Sinais de documentos `superada` são reportados apenas como
-`SUPERADA_SEM_SUCESSOR`: um fato já histórico não é mais candidato a
-contaminar contexto, então os demais sinais seriam ruído.
+Documentos `superada` reportam `SUPERADA_SEM_SUCESSOR` e `POSSIVEL_INJECAO`
+(`main._build_memory_context` ainda injeta texto sem filtrar `memoria_status`);
+os demais sinais seriam ruído num fato já histórico.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -80,10 +81,34 @@ _PADROES_INJECAO = tuple(
     for p in (
         r"ignor(e|ar|em)\s+(todas\s+)?(as\s+)?(instru[cç][õo]es|regras|ordens)\s+(anteriores|acima|pr[eé]vias)",
         r"(ignore|disregard|forget)\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above)\s+(instructions|rules)",
-        r"(desconsidere|esque[cç]a)\s+(tudo|as\s+instru[cç][õo]es)(\s+o\s+que)?\s+(acima|anterior|foi\s+dito)",
-        r"\b(reveal|revele|mostre)\s+(o\s+|your\s+|the\s+)?system\s*prompt\b",
+        r"(desconsidere|esque[cç]a)\s+(tudo|as\s+instru[cç][õo]es)(\s+o\s+que)?\s+(acima|anterior|foi\s+dito|eu\s+disse|eu\s+falei)",
+        r"\b(reveal|revele|mostre)\s+(o\s+|seu\s+|sua\s+|your\s+|the\s+)?system\s*prompt\b",
     )
 )
+
+
+# Negação imediatamente antes do padrão ("não ignore as instruções
+# anteriores") é uma regra legítima, não uma ordem ao modelo.
+_NEGACAO_ANTES = re.compile(r"(n[aã]o|nunca|jamais|do\s+not|don't|never)\s+$", re.IGNORECASE)
+_INVISIVEIS = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
+
+
+def _normalizar(texto: str) -> str:
+    """NFKC + remoção de caracteres invisíveis: sem isso, um espaço de
+    largura zero ou a forma decomposta de "ç" desviam o padrão."""
+    return unicodedata.normalize("NFKC", texto).translate(_INVISIVEIS)
+
+
+def _trecho_do_padrao(texto: str) -> str | None:
+    """Trecho (janela centrada no primeiro casamento não negado) ou None."""
+    texto = _normalizar(texto)
+    for padrao in _PADROES_INJECAO:
+        for m in padrao.finditer(texto):
+            if _NEGACAO_ANTES.search(texto[max(0, m.start() - 20) : m.start()]):
+                continue
+            ini = max(0, m.start() - _MAX_TRECHO // 4)
+            return _trecho(texto[ini : ini + _MAX_TRECHO * 2])
+    return None
 
 
 @dataclass(frozen=True)
@@ -108,6 +133,18 @@ def _trecho(texto: str) -> str:
     return texto if len(texto) <= _MAX_TRECHO else texto[: _MAX_TRECHO - 1] + "…"
 
 
+def _sinais_de_injecao(doc: dict) -> list[SinalSuspeita]:
+    achados = []
+    for campo in _CAMPOS_TEXTO:
+        texto = doc.get(campo)
+        if not isinstance(texto, str):
+            continue
+        trecho = _trecho_do_padrao(texto)
+        if trecho is not None:
+            achados.append(SinalSuspeita(POSSIVEL_INJECAO, campo, trecho))
+    return achados
+
+
 def sinais_de_memoria_suspeita(doc: dict | None) -> tuple[SinalSuspeita, ...]:
     """Sinais de um documento de `knowledge_nodes`. Nunca lança: campo ausente
     ou de tipo inesperado vira ausência de sinal (ou `SEM_PROVENIENCIA`),
@@ -115,13 +152,16 @@ def sinais_de_memoria_suspeita(doc: dict | None) -> tuple[SinalSuspeita, ...]:
     if not isinstance(doc, dict) or not doc:
         return ()
 
+    sinais: list[SinalSuspeita] = []
     if memoria_status_de_leitura(doc) == STATUS_SUPERADA:
         sucessor = doc.get("superada_por")
         if not (isinstance(sucessor, str) and sucessor.strip()):
-            return (SinalSuspeita(SUPERADA_SEM_SUCESSOR, "superada_por", "ausente"),)
-        return ()
+            sinais.append(SinalSuspeita(SUPERADA_SEM_SUCESSOR, "superada_por", "ausente"))
+        # Só a injeção é varrida em fato superado: `main._build_memory_context`
+        # ainda injeta texto sem filtrar `memoria_status`.
+        sinais.extend(_sinais_de_injecao(doc))
+        return tuple(sinais)
 
-    sinais: list[SinalSuspeita] = []
     origem = origem_fato_de_leitura(doc)
     tipo = doc.get("tipo")
     tipo = tipo if isinstance(tipo, str) else ""
@@ -133,11 +173,7 @@ def sinais_de_memoria_suspeita(doc: dict | None) -> tuple[SinalSuspeita, ...]:
     elif origem == TELEMETRIA_USO and tipo in _TIPOS_MEMORIA:
         sinais.append(SinalSuspeita(TELEMETRIA_COMO_FATO, "tipo", f"{origem}/{tipo}"))
 
-    for campo in _CAMPOS_TEXTO:
-        texto = doc.get(campo)
-        if isinstance(texto, str) and any(p.search(texto) for p in _PADROES_INJECAO):
-            sinais.append(SinalSuspeita(POSSIVEL_INJECAO, campo, _trecho(texto)))
-
+    sinais.extend(_sinais_de_injecao(doc))
     return tuple(sinais)
 
 
@@ -152,6 +188,8 @@ def relatorio_memoria_suspeita(
             doc_id, doc = item
         except (TypeError, ValueError):
             continue  # item torto: o relatório não falha por um documento
+        if not isinstance(doc_id, str):
+            continue
         sinais = sinais_de_memoria_suspeita(doc)
         if sinais:
             achados.append(MemoriaSuspeita(doc_id=str(doc_id), sinais=sinais))
