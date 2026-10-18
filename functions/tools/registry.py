@@ -54,6 +54,7 @@ _CATALOG: dict[str, str] = {
     "consultar_elevacoes_sugeridas": "Lista as elevacoes sugeridas que esperam decisao, com o material que ja existe e o objetivo servido",
     "decidir_elevacao": "Aceita, adia ou descarta para sempre uma elevacao sugerida",
     "consultar_promocoes_autonomia_sugeridas": "Lista sugestões de promoção de autonomia por tipo de rascunho WhatsApp que esperam decisão",
+    "consultar_memoria_suspeita": "Relatorio somente leitura de memoria suspeita (sem proveniencia, inferencia como regra, injecao) para revisao humana; nao altera nada",
     "decidir_promocao_autonomia": "Aplica a decisão do usuário (aceitar, adiar, nunca) sobre a promoção de autonomia de um tipo de rascunho WhatsApp",
     "revogar_promocao_autonomia": "Revoga a promoção de autonomia de um tipo já promovido, voltando a exigir aprovação prévia no Telegram",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",

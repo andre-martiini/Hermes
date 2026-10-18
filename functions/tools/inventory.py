@@ -460,6 +460,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "consultar_promocoes_autonomia_sugeridas": ToolInventoryEntry(
         "autonomia_politica", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
     ),
+    "consultar_memoria_suspeita": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — relatório para revisão humana; nada é apagado nem rebaixado",
+        dados_sensiveis_categoria="trechos de memória do usuário (knowledge_nodes) usados como evidência",
+        nota="P06 sub-entrega 7/N. Varre até 5000 documentos por chamada; só lê.",
+    ),
     "decidir_promocao_autonomia": ToolInventoryEntry(
         "autonomia_politica", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.COORDENACAO_LIMITADA,
         "nenhum — a promoção passa a valer imediatamente; revogar_promocao_autonomia é o único caminho de volta",
