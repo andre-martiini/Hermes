@@ -37,8 +37,12 @@ from firebase_admin import firestore, get_app, initialize_app
 from firebase_functions import firestore_fn, https_fn, options
 from firebase_functions.firestore_fn import Change, DocumentSnapshot, Event
 
+from autonomy.temporal import STATUS_SUPERADA, memoria_status_de_leitura
+
 import telegram_callbacks_confirmacoes
 import telegram_callbacks_contatos
+import telegram_callbacks_objetivo
+import telegram_callbacks_resposta
 import telegram_callbacks_custos
 import telegram_callbacks_perfil
 import telegram_callbacks_saude
@@ -173,6 +177,8 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         telegram_callbacks_confirmacoes,
         telegram_callbacks_contatos,
         telegram_callbacks_sessao,
+        telegram_callbacks_objetivo,
+        telegram_callbacks_resposta,
     ):
         if _mod.handle(
             db, token, query_id, chat_id, data, message, session,
@@ -549,6 +555,12 @@ def _process_telegram_message(db, data: dict):
             mem_lines = []
             for m_doc in memory_docs:
                 m = m_doc.to_dict() or {}
+                # P06 passo 4 (autonomy/temporal.py): um fato SUPERADO
+                # (histórico deixado por uma substituição de conflito) não é
+                # mais a verdade atual -- não deve ser injetado no system
+                # prompt como "MEMÓRIA GLOBAL ATIVA".
+                if memoria_status_de_leitura(m) == STATUS_SUPERADA:
+                    continue
                 # `_save_memory_node` (main.py, escritor compartilhado por MCP, web
                 # e -- desde a P06 sub-entrega 2/N -- também pelo motor Telegram
                 # legado) grava o fato em `texto_memoria`/`tipo`, nunca em
