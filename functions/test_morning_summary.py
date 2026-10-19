@@ -12,6 +12,8 @@ Uso: functions/venv/Scripts/python.exe functions/test_morning_summary.py
 """
 import sys
 import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, '.')
@@ -30,6 +32,8 @@ from morning_summary import (
     _coletar_ultima_tentativa_elevacao,
     _ultima_medida,
     _mudanca_impacta_resumo,
+    _resumo_ja_cobre,
+    atualizar_resumo_matinal_por_acao,
     _shift,
 )
 
@@ -52,6 +56,106 @@ class TestAtualizacaoEmTempoReal(unittest.TestCase):
     def test_criacao_e_remocao_renovam_resumo(self):
         self.assertTrue(_mudanca_impacta_resumo({}, {"titulo": "Nova ação"}))
         self.assertTrue(_mudanca_impacta_resumo({"titulo": "Ação"}, {}))
+
+
+class _DocResumo:
+    def __init__(self, dados=None, erro=None):
+        self._dados, self._erro = dados, erro
+        self.gravado = None
+
+    def get(self):
+        if self._erro:
+            raise self._erro
+        return _FakeDoc("hoje", self._dados)
+
+    def set(self, dados, merge=None):
+        self.gravado = (dados, merge)
+
+
+class _DbResumo:
+    def __init__(self, doc):
+        self.doc = doc
+
+    def collection(self, nome):
+        assert nome == "resumo_matinal"
+        return self
+
+    def document(self, _id):
+        return self.doc
+
+
+class TestColapsoDeRajadas(unittest.TestCase):
+    ESCRITA = "2026-10-19T15:00:00+00:00"
+
+    def _cobre(self, dados, momento=ESCRITA, erro=None):
+        return _resumo_ja_cobre(_DbResumo(_DocResumo(dados, erro)), HOJE, momento)
+
+    def test_reconstrucao_iniciada_depois_da_escrita_cobre(self):
+        self.assertTrue(self._cobre({"iniciado_em": "2026-10-19T15:00:05+00:00"}))
+
+    def test_reconstrucao_iniciada_no_mesmo_instante_cobre(self):
+        self.assertTrue(self._cobre({"iniciado_em": self.ESCRITA}))
+
+    def test_reconstrucao_iniciada_antes_da_escrita_nao_cobre(self):
+        self.assertFalse(self._cobre({"iniciado_em": "2026-10-19T14:59:59+00:00"}))
+
+    def test_aceita_datetime_do_evento(self):
+        momento = datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc)
+        self.assertTrue(self._cobre({"iniciado_em": "2026-10-19T15:00:01Z"}, momento=momento))
+        self.assertFalse(self._cobre({"iniciado_em": "2026-10-19T14:00:00Z"}, momento=momento))
+
+    def test_datetime_sem_fuso_vale_como_utc(self):
+        momento = datetime(2026, 10, 19, 15, 0, 0)
+        self.assertTrue(self._cobre({"iniciado_em": "2026-10-19T15:00:01Z"}, momento=momento))
+
+    def test_na_duvida_reconstroi(self):
+        self.assertFalse(self._cobre(None))
+        self.assertFalse(self._cobre({"gerado_em": "2026-10-19T16:00:00+00:00"}))
+        self.assertFalse(self._cobre({"iniciado_em": "lixo"}))
+        self.assertFalse(self._cobre({"iniciado_em": "2026-10-19T16:00:00+00:00"}, momento="lixo"))
+        self.assertFalse(self._cobre({}, erro=RuntimeError("falhou")))
+
+
+class TestGatilhoPorAcao(unittest.TestCase):
+    def _evento(self, antes, depois, momento="2026-10-19T15:00:00+00:00"):
+        def snap(d):
+            return SimpleNamespace(exists=d is not None, to_dict=lambda: dict(d or {}))
+        return SimpleNamespace(
+            data=SimpleNamespace(before=snap(antes), after=snap(depois)),
+            time=momento, params={"taskId": "t1"},
+        )
+
+    def _rodar(self, evento, dados_resumo):
+        doc = _DocResumo(dados_resumo)
+        fake_main = SimpleNamespace(get_db=lambda: _DbResumo(doc))
+        resumo = {"data": HOJE, "gerado_em": "x"}
+        with patch.dict(sys.modules, {"main": fake_main}), patch(
+            "morning_summary._hoje_sp", return_value=HOJE
+        ), patch("morning_summary.build_morning_summary", return_value=resumo) as build:
+            atualizar_resumo_matinal_por_acao.__wrapped__(evento)
+        return doc, build
+
+    def test_reconstroi_e_grava_inicio(self):
+        doc, build = self._rodar(self._evento({"status": "a fazer"}, {"status": "concluído"}),
+                                 {"iniciado_em": "2026-10-19T14:00:00+00:00"})
+        build.assert_called_once()
+        dados, merge = doc.gravado
+        self.assertEqual(dados["data"], HOJE)
+        self.assertIn("iniciado_em", dados)
+        self.assertIn("iniciado_em", merge)
+        self.assertGreater(dados["iniciado_em"], "2026-10-19T15:00:00+00:00")
+
+    def test_pula_quando_ja_coberto(self):
+        doc, build = self._rodar(self._evento({"status": "a fazer"}, {"status": "concluído"}),
+                                 {"iniciado_em": "2026-10-19T15:00:03+00:00"})
+        build.assert_not_called()
+        self.assertIsNone(doc.gravado)
+
+    def test_escrita_tecnica_nem_le_o_resumo(self):
+        doc, build = self._rodar(self._evento({"titulo": "A", "contexto_agente": 1},
+                                              {"titulo": "A", "contexto_agente": 2}), None)
+        build.assert_not_called()
+        self.assertIsNone(doc.gravado)
 
 
 # --------------------------------------------------------------------------- #
