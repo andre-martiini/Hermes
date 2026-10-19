@@ -98,6 +98,8 @@ class FakeColecao(FakeConsulta):
         super().__init__(self)
 
     def document(self, doc_id):
+        if "/" in str(doc_id):  # como o Firestore: id com barra vira outro caminho e é recusado
+            raise ValueError("id de documento com barra")
         return FakeDoc(self._db, f"{self.path}/{doc_id}")
 
     def _filhos(self):

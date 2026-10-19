@@ -166,6 +166,18 @@ def _consultar_promocoes_autonomia_sugeridas(ctx: ToolContext, args: dict):
     return promocao_autonomia.listar_promocoes_pendentes(ctx.db, limite=int(args.get("limite") or 20))
 
 
+def _listar_transcricoes_ao_vivo(ctx: ToolContext, args: dict):
+    from tools import transcricao_ao_vivo_tools
+
+    return transcricao_ao_vivo_tools.listar(ctx, args)
+
+
+def _ler_transcricao_ao_vivo(ctx: ToolContext, args: dict):
+    from tools import transcricao_ao_vivo_tools
+
+    return transcricao_ao_vivo_tools.ler(ctx, args)
+
+
 def _consultar_memoria_suspeita(ctx: ToolContext, args: dict):
     from tools.consultar_memoria_suspeita import consultar
 
@@ -3098,6 +3110,8 @@ _HANDLERS: dict = {
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,
     "consultar_memoria_suspeita": _consultar_memoria_suspeita,
+    "listar_transcricoes_ao_vivo": _listar_transcricoes_ao_vivo,
+    "ler_transcricao_ao_vivo": _ler_transcricao_ao_vivo,
     "decidir_promocao_autonomia": _decidir_promocao_autonomia,
     "revogar_promocao_autonomia": _revogar_promocao_autonomia,
     "consultar_historico_acoes": _consultar_historico_acoes,

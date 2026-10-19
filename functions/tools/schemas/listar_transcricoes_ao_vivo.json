@@ -1,0 +1,18 @@
+{
+  "name": "listar_transcricoes_ao_vivo",
+  "description": "Lista as transcrições ao vivo do Gaspar (reuniões ou webinários que o André está gravando na ferramenta Reuniões em Tempo Real), a mais recente primeiro: sessao_id, título, estado (ao_vivo ou encerrada), início, ultimo_seq, segundos desde o último trecho e sem_sinal. Use quando o André pedir para acompanhar, resumir ou comentar a reunião ou o vídeo que está passando agora, para achar a sessão sozinho; depois leia com ler_transcricao_ao_vivo. Só leitura, sem IA.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "apenas_ativas": {
+        "type": "boolean",
+        "description": "Padrão true: só as sessões ao vivo com sinal nos últimos 30 minutos. false: as mais recentes de qualquer estado, inclusive encerradas."
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Máximo de sessões (1 a 30; padrão 10)."
+      }
+    },
+    "required": []
+  }
+}

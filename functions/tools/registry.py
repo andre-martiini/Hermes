@@ -198,6 +198,8 @@ _CATALOG: dict[str, str] = {
     "liveideas_consultar": "Estado de um pedido do Live Ideas (gerando, pronto ou falhou), com custo, texto, link e propostas de ajuste; anexa na acao uma vez so",
     "liveideas_listar": "Lista reunioes e processos do Live Ideas, mais recentes primeiro, com busca pelo titulo",
     "liveideas_ler": "Le uma reuniao ou processo do Live Ideas: titulo, texto do diagrama e link",
+    "listar_transcricoes_ao_vivo": "Lista as transcricoes ao vivo do Gaspar (reuniao ou webinario sendo gravado agora) para achar a sessao",
+    "ler_transcricao_ao_vivo": "Le a transcricao ao vivo em trechos, com cursor apos_seq/proximo_seq, sem repetir; somente leitura",
     "liveideas_ajustar": "Pede uma mudanca num diagrama do Live Ideas; a proposta sai por liveideas_consultar e so muda com liveideas_aplicar",
     "liveideas_aplicar": "Aplica uma proposta de ajuste aprovada num diagrama do Live Ideas",
     "liveideas_descartar": "Descarta uma proposta de ajuste do Live Ideas sem mudar o diagrama",
@@ -346,6 +348,8 @@ _VOICE_EXCLUDED: set[str] = {
     "ler_documento_na_integra",
     # Relatorio longo de revisao humana (ate 200 trechos de memoria nao confiavel): nao e canal de voz.
     "consultar_memoria_suspeita",
+    # Texto longo de transcricao (ate 50.000 caracteres por chamada): nao e canal de voz.
+    "ler_transcricao_ao_vivo",
     # Escrita de dinheiro por voz nao: um numero mal transcrito ("mil e
     # quinhentos") grava valor errado num registro que acumula e que o servico
     # nao sabe estornar. Consultar por voz continua liberado.
