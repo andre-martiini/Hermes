@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/firebase';
 import { collection, addDoc, getDocs, query, orderBy, limit, doc, setDoc, getDoc } from 'firebase/firestore';
+import { SincronizadorTranscricao, type ChamarTranscricao } from '../utils/transcricaoAoVivo';
 
 export interface TranscriptionEntry {
   id: string;
@@ -47,6 +48,8 @@ const DEEPGRAM_CONFIG_DOC = 'integracoes';
 const GROUP_WINDOW_MS = 7000;
 const SHORT_FRAGMENT_WORDS = 6;
 const MAX_GROUPED_WORDS = 64;
+// Envio da transcrição ao Gaspar durante a reunião (o Claude lê pelo conector).
+const TRANSCRICAO_AO_VIVO_INTERVALO_MS = 10000;
 
 type DisplayMediaTrackSettings = MediaTrackSettings & {
   displaySurface?: 'application' | 'browser' | 'monitor' | 'window';
@@ -188,6 +191,11 @@ export function useMeetingRecordingEngine(
   // de iniciar — capturado aqui para o motor não precisar depender de estado da
   // view, que pode estar desmontada quando a gravação termina.
   const recordingMetaRef = useRef<RecordingMeta>({ eventoId: null, eventoTitulo: null, bancoId: null });
+  // Transcrição ao vivo: o sincronizador da gravação atual, o da última (para
+  // vincular a reunião salva) e o relógio de envio.
+  const sincronizadorRef = useRef<SincronizadorTranscricao | null>(null);
+  const ultimoSincronizadorRef = useRef<SincronizadorTranscricao | null>(null);
+  const sincronizadorIntervaloRef = useRef<number | null>(null);
 
   useEffect(() => {
     transcriptsRef.current = transcripts;
@@ -522,6 +530,7 @@ export function useMeetingRecordingEngine(
         driveWebViewLink: driveLinkByMeetingIdRef.current[meetingId] || null,
         data_criacao: new Date().toISOString(),
       });
+      ultimoSincronizadorRef.current?.vincular(titulo, docRef.id);
       setMeetingHistory(prev => prev.map(entry =>
         entry.id === meetingId ? {
           ...entry,
@@ -554,6 +563,15 @@ export function useMeetingRecordingEngine(
       if (micStreamRef.current) micStreamRef.current.getTracks().forEach(t => t.stop());
       if (systemStreamRef.current) systemStreamRef.current.getTracks().forEach(t => t.stop());
       stopSystemAudioMonitor();
+
+      if (sincronizadorIntervaloRef.current !== null) {
+        window.clearInterval(sincronizadorIntervaloRef.current);
+        sincronizadorIntervaloRef.current = null;
+      }
+      if (sincronizadorRef.current) {
+        void sincronizadorRef.current.encerrar();
+        sincronizadorRef.current = null;
+      }
 
       micRecorderRef.current = null;
       systemRecorderRef.current = null;
@@ -638,6 +656,25 @@ export function useMeetingRecordingEngine(
       systemStreamRef.current = systemStream;
       if (systemStream) startSystemAudioMonitor(systemStream);
 
+      // Transcrição ao vivo: trechos vão ao Gaspar a cada ~10 s para o Claude ler.
+      const chamarTranscricao = httpsCallable(functions, 'transcricaoAoVivo');
+      const chamar: ChamarTranscricao = async dados => (await chamarTranscricao(dados)).data as { status?: string; ultimo_seq?: number };
+      const tituloInicial = recordingMetaRef.current.eventoTitulo
+        || `Reunião ${startedNow.toLocaleDateString('pt-BR')} ${startedNow.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      const sincronizador = new SincronizadorTranscricao(chamar, {
+        titulo: tituloInicial,
+        terceirosPresentes: Boolean(consent?.terceirosPresentes),
+      });
+      sincronizadorRef.current = sincronizador;
+      ultimoSincronizadorRef.current = sincronizador;
+      if (sincronizadorIntervaloRef.current !== null) window.clearInterval(sincronizadorIntervaloRef.current);
+      sincronizadorIntervaloRef.current = window.setInterval(() => { void sincronizador.tick(); }, TRANSCRICAO_AO_VIVO_INTERVALO_MS);
+      void sincronizador.tick();
+      const enviarAoVivo = (falante: 'Você' | 'Reunião', texto: string, duracao: unknown) => {
+        const tFim = (Date.now() - startedNow.getTime()) / 1000;
+        sincronizador.adicionar(falante, collapseConsecutiveWordRepeats(texto), tFim, typeof duracao === 'number' ? duracao : 0);
+      };
+
       const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=pt-BR';
       const protocols = ['token', deepgramKey];
       const micWs = new WebSocket(wsUrl, protocols);
@@ -663,6 +700,7 @@ export function useMeetingRecordingEngine(
         if (hasFinalFlag && !isFinal) return;
         if (typeof transcript !== 'string' || !transcript.trim()) return;
         appendTranscriptEntry('Você', transcript, new Date());
+        enviarAoVivo('Você', transcript, received?.duration);
       };
 
       micWs.onerror = event => {
@@ -703,6 +741,7 @@ export function useMeetingRecordingEngine(
           if (typeof transcript !== 'string' || !transcript.trim()) return;
           systemAudioActivityDetectedRef.current = true;
           appendTranscriptEntry('Reunião', transcript, new Date());
+          enviarAoVivo('Reunião', transcript, received?.duration);
         };
 
         systemWs.onerror = event => {

@@ -73,6 +73,7 @@ Ativação (Calendar/Drive): depois do deploy, gravar a URL pública de cada end
 |---|---|---|
 | `transcreverAudio` / `transcrever_audio` | Callable | Transcreve áudio via Google Speech-to-Text |
 | `on_long_transcription_uploaded` | Storage finalize | Processa transcrição longa enviada ao Storage |
+| `transcricaoAoVivo` (`transcricao_ao_vivo.py`) | Callable (só o dono) | Recebe da ferramenta Reuniões em Tempo Real a transcrição durante a reunião: `iniciar`, `anexar` (lote de trechos a cada ~10 s, ou sinal de vida sem texto), `encerrar` e `vincular` (título e doc de `reunioes` no fim). Numera os trechos numa transação, só acrescenta e reconhece o lote reenviado. Sem IA. Ver `docs/transcricao-ao-vivo.md` |
 
 ### Apresentações e conteúdo
 | Função | Trigger | O que faz |
