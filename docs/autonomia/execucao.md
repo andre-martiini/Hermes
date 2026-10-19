@@ -648,3 +648,22 @@ revisao_adversarial:
   - "Rodada 2 (agente sem contexto): validade só-data expirava no início do dia (agora fim do dia), entidades None/str malformadas (agora ignoradas), lacunas de teste (campos resumo/fato, ordem superada x telemetria, ids de malformados) corrigidas. Sem outro achado."
 pendencias:
   - "Passo 6 (obter_contexto_operacional/consultar_memoria_contextual consumindo recuperar + cursor_contexto), passo 9 (modelo por pessoa); busca vetorial real continua fora do módulo."
+
+---
+pacote: "P06 sub-entrega 11/N -- passo 6 (parte de leitura), tool MCP SOMENTE LEITURA consultar_memoria_contextual (functions/tools/consultar_memoria_contextual.py) sobre autonomy.recuperacao.recuperar. Varre knowledge_nodes paginado (até 5000), mantém só os top-`limite` globais, devolve fatos com origem_fato, motivos, validade, trecho (400 chars, dado não confiável) e legado_sem_proveniencia, mais descartados_por_razao e lacunas (varredura truncada / nenhum fato). Registrada em registry/inventory/schema, fora do canal de voz. Sem busca vetorial, sem cursor e sem obter_contexto_operacional (precisam de índice vetorial e de segredo de assinatura)."
+estado: validado
+inicio: "2026-10-19T19:50:00Z"
+fim: "2026-10-19T20:35:00Z"
+decisoes:
+  - id: p06-sub11-sem-cursor-nem-vetorial
+    motivo: "O cursor exige segredo de assinatura (origem ainda indefinida) e a similaridade vetorial exige o índice; a tool entra só com busca exata+lexical+entidade+autoridade, aditiva e reversível."
+  - id: p06-sub11-triagem
+    motivo: "Única PR aberta (#474, Dashboard/resumo do dia, avulsa do André, atualizada há <60 min) não é desta linha: não tocada."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4346 OK (registro da sub-entrega 10/N, head de main); test_consultar_memoria_contextual 19 OK (novo arquivo); DEPOIS 4365 OK (263s) no head final."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): real corrigido -- campo `id` no corpo do doc sobrescrevia o id do snapshot (KeyError derrubava a consulta inteira ou doc sumia como malformado); args não-dict agora vira erro de entrada; 7 testes novos (merge intercalado entre páginas, descartados somados, fronteira de truncamento, erro na 2ª página, embedding fora da saída, datetime)."
+  - "Rodada 2 (agente sem contexto) sobre a correção: nada achado de real; só imprecisão de documentação do schema (corrigida)."
+pendencias:
+  - "Passo 6 restante (obter_contexto_operacional, contexto incremental com cursor assinado -- decidir origem do segredo -- e similaridade vetorial real), passo 9 (modelo por pessoa)."

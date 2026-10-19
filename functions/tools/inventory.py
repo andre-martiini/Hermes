@@ -467,6 +467,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         dados_sensiveis_categoria="trechos de memória do usuário (knowledge_nodes) usados como evidência",
         nota="P06 sub-entrega 7/N. Varre até 5000 documentos por chamada; só lê.",
     ),
+    "consultar_memoria_contextual": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — só lê; nada é apagado, rebaixado ou superado",
+        dados_sensiveis_categoria="trechos de memória do usuário (knowledge_nodes) devolvidos como contexto",
+        nota="P06 sub-entrega 11/N. Varre até 5000 documentos por chamada sobre autonomy.recuperacao.recuperar; "
+        "sem busca vetorial nem cursor (passo 7 ligado em sub-entrega futura).",
+    ),
     "decidir_promocao_autonomia": ToolInventoryEntry(
         "autonomia_politica", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.COORDENACAO_LIMITADA,
         "nenhum — a promoção passa a valer imediatamente; revogar_promocao_autonomia é o único caminho de volta",
