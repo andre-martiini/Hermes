@@ -629,3 +629,24 @@ revisao_adversarial:
   - "Codex (PR #467): P2 real -- a tool entraria no canal de voz (is_voice_enabled); adicionada a _VOICE_EXCLUDED com teste."
 pendencias:
   - "Passo 9 (modelo por pessoa); passos 5-8 (recuperação, obter_contexto_operacional/consultar_memoria_contextual, cursor, mapa de POPs)."
+
+---
+pacote: "P06 sub-entrega 8/N -- passo 8, mapa de POPs (parte pura): functions/autonomy/pops_mapa.py. montar_mapa_pops(pops, ids_carregados) devolve todos os POPs com instrução marcando carregado/alcançável (sempre ativo ou com gatilho útil), os sem instrução e os ignorados. Sem I/O, sem wiring em main.py (o carregamento atual -- sempre ativos + 3 por gatilho -- não muda)."
+estado: validado
+inicio: "2026-10-19T10:50:00Z"
+fim: "2026-10-19T11:20:00Z"
+decisoes:
+  - id: p06-sub8-so-logica-pura
+    motivo: "Mesmo padrão incremental de context.py/memoria_suspeita.py. Ligar o mapa a obter_contexto_operacional (passo 6) e decidir se o teto de 3 POPs por gatilho muda ficam para sub-entrega seguinte, com decisão de produto."
+  - id: p06-sub8-semantica-do-matcher
+    motivo: "Mapa espelha main._match_pop_directives: id comparado cru, sempre_ativo só com True literal, gatilho contado como str(); id repetido vale a primeira ocorrência (demais em ignorados)."
+  - id: p06-sub8-triagem
+    motivo: "Nenhuma PR aberta no início do disparo; nada a mesclar/fechar."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4249 OK (207s); test_pops_mapa 14 OK (novo arquivo); DEPOIS 4258 OK (+9 testes de test_pops_mapa; 4255 OK antes da rodada 3 de correções)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): id com espaço divergia do matcher, n_gatilhos divergia (str()), POP inalcançável não sinalizado, testes fracos contra mutações -- corrigidos (campo alcancavel, 6 testes novos)."
+  - "Rodadas 2 e 3: gatilho só de pontuação (normalização do matcher), POP sem gatilho; restaram só bordas de id duplicado (impossível no Firestore) -- política única documentada (primeira ocorrência, demais ignoradas). Sem bug no caso normal."
+pendencias:
+  - "Passos 5-7 (recuperação, obter_contexto_operacional/consultar_memoria_contextual, cursor) e passo 9 (modelo por pessoa); ligar o mapa ao contexto."
