@@ -1505,6 +1505,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         dados_sensiveis_categoria="conteúdo de reuniões (resumo, decisões e ações de participantes); "
         "a transcrição não vem",
     ),
+    "listar_transcricoes_ao_vivo": ToolInventoryEntry(
+        "reunioes_transcricao", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        nota="Lê transcricoes_ao_vivo (gravada pela callable transcricaoAoVivo). Só metadados: título, estado, "
+        "seq e tempos.",
+    ),
+    "ler_transcricao_ao_vivo": ToolInventoryEntry(
+        "reunioes_transcricao", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        dados_sensiveis_categoria="fala transcrita de reuniões, inclusive de terceiros",
+        nota="Trechos imutáveis com seq contínuo: a mesma chamada devolve os mesmos trechos. Até 50.000 "
+        "caracteres por chamada; sem IA.",
+    ),
     "liveideas_ajustar": ToolInventoryEntry(
         "liveideas", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "liveideas_consultar traz a proposta; o diagrama só muda com liveideas_aplicar",

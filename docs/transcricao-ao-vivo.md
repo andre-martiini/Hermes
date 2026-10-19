@@ -17,6 +17,17 @@ Objetivo: o Claude, pelo conector MCP do Gaspar, lê a transcrição de uma reun
 - Atraso esperado entre a fala e a gravação: resultado final do Deepgram (1–3 s) + até 10 s do ciclo + a chamada (< 1 s quente) ≈ **até ~15 s**.
 - Modelo dos documentos: `docs/okf/arquitetura/schema-firestore.md` (`transcricoes_ao_vivo`).
 
+## PR 2 — tools de leitura (MCP)
+
+Código em `functions/tools/transcricao_ao_vivo_tools.py`; somente leitura, sem IA, mesma autenticação das outras tools.
+
+- `listar_transcricoes_ao_vivo(apenas_ativas=true, limite=10)`: `sessao_id`, `titulo`, `estado`, `iniciada_em` (horário de Brasília), `ultimo_seq`, `segundos_desde_ultimo_trecho`, `sem_sinal` (ao vivo sem lote nem sinal de vida há mais de 2 min), `total_caracteres`, `terceiros_presentes`, `reuniao_id`. Ativas = `ao_vivo` com sinal nos últimos 30 min (a aba fechada no meio sai da lista sozinha).
+- `ler_transcricao_ao_vivo(sessao_id="mais_recente_ativa", apos_seq, ultimos_minutos, max_caracteres=12000)`: os trechos com `seq > apos_seq`, inteiros, até o teto (1.000–50.000; o primeiro trecho sempre vem). Devolve `proximo_seq` (passe como `apos_seq` na próxima), `ultimo_seq`, `truncado`, `estado`, `atraso_segundos` (desde o último trecho gravado), `sem_sinal` e uma `orientacao` dizendo quando chamar de novo. `ultimos_minutos` só vale sem `apos_seq`. Os trechos não mudam depois de gravados, então a mesma chamada devolve sempre o mesmo texto.
+- Instrução do servidor MCP (`mcp_server.py`) e descrições das tools explicam o cursor; `ler_transcricao_ao_vivo` fica fora do canal de voz.
+- Custo de uma leitura: 1 leitura da sessão + 1 por trecho devolvido (com `ultimos_minutos`, mais 1).
+
+Uso típico pelo Claude: `listar_transcricoes_ao_vivo` → `ler_transcricao_ao_vivo(sessao_id)` → a cada ~30 s `ler_transcricao_ao_vivo(sessao_id, apos_seq=<proximo_seq>)` até `estado = encerrada`.
+
 ## Limites conhecidos
 
 - Aba fechada no meio da reunião: a sessão fica `ao_vivo` sem sinal de vida. Quem lê usa o tempo desde a última atualização para perceber.
