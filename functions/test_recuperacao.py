@@ -97,7 +97,9 @@ class RecuperacaoTest(unittest.TestCase):
     def test_similaridade_invalida_ignorada(self):
         r = self.rec([doc("a", "x")], similaridades={"a": True})
         self.assertEqual(ids(r), [])
-        r = self.rec([doc("a", "x")], similaridades={"a": 5})
+        for ruim in (5, -0.1, 1.01, float("inf")):
+            self.assertEqual(ids(self.rec([doc("a", "x")], similaridades={"a": ruim})), [])
+        r = self.rec([doc("a", "x")], similaridades={"a": 1})
         self.assertEqual(r.recuperados[0].motivos, ("vetorial",))
 
     def test_limite_corta_so_recuperados_e_determinismo(self):
@@ -150,7 +152,7 @@ class RecuperacaoTest(unittest.TestCase):
         self.assertEqual(razoes(r), {"x": "superada"})
 
     def test_parciais_e_clamp(self):
-        r = self.rec([doc("a", "alfa")], consulta="alfa beta", similaridades={"a": 5})
+        r = self.rec([doc("a", "alfa")], consulta="alfa beta", similaridades={"a": 1})
         self.assertAlmostEqual(r.recuperados[0].pontuacao, (2.0 * 0.5 + 2.0) * 0.2)
         r = self.rec([doc("a", "Maria")], entidades=["Maria", "João"])
         self.assertAlmostEqual(r.recuperados[0].pontuacao, 0.5 * 0.2)

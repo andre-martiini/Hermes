@@ -140,7 +140,7 @@ def _similaridade_valida(valor) -> float | None:
         return None
     if not math.isfinite(valor):
         return None
-    return min(max(float(valor), 0.0), 1.0)
+    return float(valor) if 0.0 <= valor <= 1.0 else None
 
 
 def recuperar(

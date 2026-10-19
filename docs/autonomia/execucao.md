@@ -644,6 +644,7 @@ testes:
     - "functions/ completo ANTES 4330 OK (201s); test_recuperacao 16 OK (novo arquivo); DEPOIS 4346 OK (196s) no head final."
 revisao_adversarial:
   - "Rodada 1 (agente sem contexto): reais corrigidos -- casamento por substring sem fronteira de palavra (ana/Mariana), validade com date/'z'/naive, similaridades não-dict, documentos malformados sumindo sem registro; testes fracos reforçados (pesos numéricos, desempate contra ordem alfabética, fronteira validade_inicio, clamp)."
+  - "Codex (PR #473): P2 real -- similaridade fora de 0..1 era clampada a relevância máxima; agora é ignorada (teste cobre 5, -0.1, 1.01, inf)."
   - "Rodada 2 (agente sem contexto): validade só-data expirava no início do dia (agora fim do dia), entidades None/str malformadas (agora ignoradas), lacunas de teste (campos resumo/fato, ordem superada x telemetria, ids de malformados) corrigidas. Sem outro achado."
 pendencias:
   - "Passo 6 (obter_contexto_operacional/consultar_memoria_contextual consumindo recuperar + cursor_contexto), passo 9 (modelo por pessoa); busca vetorial real continua fora do módulo."
