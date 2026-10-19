@@ -650,3 +650,21 @@ revisao_adversarial:
   - "Rodadas 2 e 3: gatilho só de pontuação (normalização do matcher), POP sem gatilho; restaram só bordas de id duplicado (impossível no Firestore) -- política única documentada (primeira ocorrência, demais ignoradas). Sem bug no caso normal."
 pendencias:
   - "Passos 5-7 (recuperação, obter_contexto_operacional/consultar_memoria_contextual, cursor) e passo 9 (modelo por pessoa); ligar o mapa ao contexto."
+
+---
+pacote: "P06 sub-entrega 9/N -- passo 7 (parte pura), cursor de contexto incremental: functions/autonomy/cursor_contexto.py. emitir_cursor/validar_cursor produzem cursor opaco assinado (HMAC-SHA256) vinculado a owner_uid + escopo + marca monotônica; outro dono/escopo, outro segredo, adulteração, versão ou formato inválidos levantam CursorInvalido. Segredo por parâmetro, sem I/O, sem wiring em main.py nem tool nova."
+estado: validado
+inicio: "2026-10-19T13:50:00Z"
+fim: "2026-10-19T14:15:00Z"
+decisoes:
+  - id: p06-sub9-so-logica-pura
+    motivo: "Mesmo padrão incremental das sub-entregas 6-8; ligar o cursor a obter_contexto_operacional (passo 6) exige contrato P03 e decisão de onde vem o segredo."
+  - id: p06-sub9-triagem
+    motivo: "PR #469 (Transcrição ao vivo 1/3, avulsa do André, aberta há minutos, cria Cloud Function nova e pede 'não mesclar automaticamente') não é desta linha: não tocada."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4258 OK; test_cursor_contexto 15 OK (novo arquivo); DEPOIS 4273 OK (+15)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): sem bypass de vínculo/forja. Reais corrigidos: emitir aceitava cursor que validar recusaria (limite de 2048) -- agora ValueError; testes do limite e do ValueError do chamador adicionados."
+pendencias:
+  - "Passos 5-6 (recuperação, obter_contexto_operacional/consultar_memoria_contextual, que consumirão este cursor) e passo 9 (modelo por pessoa)."
