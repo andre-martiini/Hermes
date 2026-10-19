@@ -14804,6 +14804,7 @@ from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detecta
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 from visao_atividade import on_whatsapp_outbox_escrito  # noqa: F401 — fila de WhatsApp -> agent_runs
 from objetivos_whatsapp import on_whatsapp_message_objetivo, varrer_objetivos_whatsapp  # noqa: F401 — Modo Objetivo
+from transcricao_ao_vivo import transcricaoAoVivo  # noqa: F401 — trechos da reunião ao vivo para o Claude
 
 # Jobs agendados removidos em 26/09/2026 (sem uso; ver docs/okf/operacoes/custos.md):
 # ai_notification_planner_daily, detectar_subproduto_semanal,

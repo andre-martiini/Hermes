@@ -55,7 +55,11 @@ service cloud.firestore {
         'objetivos_whatsapp', 'objetivos_whatsapp_ativos', 'whatsapp_enviados_gaspar',
         // Fila interna da transcrição longa (Storage -> Firestore -> worker
         // de 4 GB); só o despachante on_long_transcription_uploaded grava.
-        'long_transcription_jobs'
+        'long_transcription_jobs',
+        // Transcrição ao vivo da ferramenta de reuniões: só a callable
+        // transcricaoAoVivo grava (seq em transação, só acrescenta) e só
+        // as tools MCP leem.
+        'transcricoes_ao_vivo'
       ];
     }
 

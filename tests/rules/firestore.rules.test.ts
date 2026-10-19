@@ -87,6 +87,7 @@ const COLECOES_DE_CONTROLE = [
   'telegram_sessions',
   'whitelist',
   'trava_confirmacao',
+  'transcricoes_ao_vivo',
 ];
 
 let testEnv: RulesTestEnvironment;
