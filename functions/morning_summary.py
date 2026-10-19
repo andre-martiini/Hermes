@@ -1371,6 +1371,37 @@ def gerar_resumo_matinal(event: scheduler_fn.ScheduledEvent = None) -> None:
     )
 
 
+def _como_datetime(valor) -> datetime | None:
+    if isinstance(valor, datetime):
+        return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _resumo_ja_cobre(db, hoje: str, momento_da_escrita) -> bool:
+    """Diz se o resumo de hoje já foi montado depois desta escrita em `tarefas`.
+
+    `iniciado_em` é a hora em que a reconstrução começou a ler: tudo o que foi
+    gravado antes disso já está nela. Uma rajada de edições (plano inteiro, virada
+    do dia, edição em lote) vira assim uma reconstrução só, em vez de uma por
+    escrita. Na dúvida (sem o campo, data ilegível, erro de leitura), reconstrói.
+    """
+    momento = _como_datetime(momento_da_escrita)
+    if momento is None:
+        return False
+    try:
+        snap = db.collection("resumo_matinal").document(hoje).get()
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao ler o resumo atual: {exc}")
+        return False
+    dados = (snap.to_dict() or {}) if snap.exists else {}
+    iniciado = _como_datetime(dados.get("iniciado_em"))
+    return iniciado is not None and iniciado >= momento
+
+
 def _mudanca_impacta_resumo(antes: dict, depois: dict) -> bool:
     """Diz se uma escrita em `tarefas` precisa renovar o retrato do dia."""
     if not antes or not depois:
@@ -1382,6 +1413,11 @@ def _mudanca_impacta_resumo(antes: dict, depois: dict) -> bool:
     document="tarefas/{taskId}",
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
+    # Uma reconstrução por vez: duas em paralelo podiam terminar fora de ordem e
+    # a mais antiga gravar por cima da mais nova. Os eventos que chegam enquanto
+    # uma roda esperam a vez e, na maioria, são pulados por `_resumo_ja_cobre`.
+    max_instances=1,
+    concurrency=1,
 )
 def atualizar_resumo_matinal_por_acao(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot | None]]) -> None:
     """Reflete no resumo de hoje alterações externas relevantes em ações."""
@@ -1394,8 +1430,12 @@ def atualizar_resumo_matinal_por_acao(event: firestore_fn.Event[firestore_fn.Cha
 
     from main import get_db
     db = get_db()
+    inicio = datetime.now(timezone.utc)
+    if _resumo_ja_cobre(db, _hoje_sp(), event.time):
+        print(f"[ResumoMatinal] Ação {event.params['taskId']} já coberta por reconstrução posterior.")
+        return
     resumo = build_morning_summary(db)
-    _persistir(db, resumo)
+    _persistir(db, {**resumo, "iniciado_em": inicio.isoformat()})
     print(f"[ResumoMatinal] Atualizado após alteração da ação {event.params['taskId']}.")
 
 

@@ -14791,7 +14791,7 @@ from daily_morning_briefing import briefing_matinal_acoes
 from investimentos_sync import sincronizar_investimentos_pos_decisao
 
 # Import morning summary (Resumo Matinal) — coletor prospectivo + regeneração sob demanda
-from morning_summary import gerar_resumo_matinal, gerarResumoMatinal
+from morning_summary import gerar_resumo_matinal, gerarResumoMatinal, atualizar_resumo_matinal_por_acao
 
 # Import monthly recurring actions job
 from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
