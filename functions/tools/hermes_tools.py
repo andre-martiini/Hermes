@@ -184,6 +184,12 @@ def _consultar_memoria_suspeita(ctx: ToolContext, args: dict):
     return consultar(ctx, args)
 
 
+def _consultar_memoria_contextual(ctx: ToolContext, args: dict):
+    from tools.consultar_memoria_contextual import consultar
+
+    return consultar(ctx, args)
+
+
 def _decidir_promocao_autonomia(ctx: ToolContext, args: dict):
     import promocao_autonomia
 
@@ -3110,6 +3116,7 @@ _HANDLERS: dict = {
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,
     "consultar_memoria_suspeita": _consultar_memoria_suspeita,
+    "consultar_memoria_contextual": _consultar_memoria_contextual,
     "listar_transcricoes_ao_vivo": _listar_transcricoes_ao_vivo,
     "ler_transcricao_ao_vivo": _ler_transcricao_ao_vivo,
     "decidir_promocao_autonomia": _decidir_promocao_autonomia,
