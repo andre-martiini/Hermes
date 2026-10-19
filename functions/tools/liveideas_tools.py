@@ -178,11 +178,75 @@ def listar(ctx, args: dict) -> dict:
     return erro or resp
 
 
+TRANSCRICAO_MAX_PADRAO = 12000
+TRANSCRICAO_MAX_MIN = 1000
+TRANSCRICAO_MAX_MAX = 50000
+_NOTEBOOK_SEM_TRANSCRICAO = ("o notebook do Live Ideas ainda não devolve a transcrição; atualize-o "
+                             "(atualizar-servidor.ps1) e peça de novo")
+
+
+def _inteiro(valor, padrao: int, minimo: int, maximo: int) -> int:
+    if valor is None or valor == "" or isinstance(valor, bool):
+        return padrao
+    try:
+        return max(minimo, min(int(valor), maximo))
+    except (TypeError, ValueError, OverflowError):
+        return padrao
+
+
+def _incluir_transcricao(valor) -> bool:
+    if isinstance(valor, str):
+        return valor.strip().lower() in ("true", "1", "sim", "yes")
+    return valor is True
+
+
+def _transcricao(bruta, apos: int, maximo: int) -> dict:
+    """Confere a transcrição do notebook e reaplica o teto aqui (o notebook antigo ou com defeito não estoura a conversa)."""
+    if not isinstance(bruta, dict):
+        return {"erro": _NOTEBOOK_SEM_TRANSCRICAO}
+    trechos, usados = [], 0
+    for t in bruta.get("trechos") or []:
+        if not isinstance(t, dict) or not isinstance(t.get("seq"), int) or t["seq"] <= apos:
+            continue
+        texto = str(t.get("texto") or "")
+        if trechos and usados + len(texto) > maximo:
+            break
+        trechos.append({"seq": t["seq"], "t": t.get("t") or "", "falante": t.get("falante") or "", "texto": texto})
+        usados += len(texto)
+    ultimo = bruta.get("ultimo_seq") if isinstance(bruta.get("ultimo_seq"), int) else apos
+    proximo = trechos[-1]["seq"] if trechos else apos
+    estado = bruta.get("estado") if bruta.get("estado") in ("ao_vivo", "encerrada") else "encerrada"
+    saida = {"trechos": trechos, "proximo_seq": proximo, "ultimo_seq": ultimo,
+             "truncado": proximo < ultimo, "estado": estado, "caracteres": usados}
+    if saida["truncado"]:
+        saida["orientacao"] = (f"há mais falas já gravadas: chame liveideas_ler de novo agora com incluir_transcricao=true "
+                               f"e apos_seq={proximo}")
+    elif estado == "ao_vivo":
+        saida["orientacao"] = (f"reunião ao vivo: para as falas novas, chame de novo em ~30 s com incluir_transcricao=true "
+                               f"e apos_seq={proximo}")
+    else:
+        saida["orientacao"] = "reunião encerrada: não virão falas novas"
+    return saida
+
+
 def ler(ctx, args: dict) -> dict:
-    resp, erro = _enviar(ctx, "ler", _alvo(args))
+    args = args or {}
+    corpo = _alvo(args)
+    incluir = _incluir_transcricao(args.get("incluir_transcricao"))
+    if incluir:
+        if "processo" in corpo:
+            return {"erro": "a transcrição só existe para reunião: informe reuniao_id"}
+        apos = _inteiro(args.get("apos_seq"), 0, 0, 10**9)
+        maximo = _inteiro(args.get("max_caracteres_transcricao"), TRANSCRICAO_MAX_PADRAO,
+                          TRANSCRICAO_MAX_MIN, TRANSCRICAO_MAX_MAX)
+        corpo["transcricao"] = {"apos": apos, "max": maximo}
+    resp, erro = _enviar(ctx, "ler", corpo)
     if erro:
         return erro
     resp.pop("bpmn", None)  # o XML é para o anexo, não para a conversa
+    bruta = resp.pop("transcricao", None)
+    if incluir:
+        resp["transcricao"] = _transcricao(bruta, apos, maximo)
     return resp
 
 

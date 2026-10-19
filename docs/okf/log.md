@@ -8,6 +8,8 @@ timestamp: 2026-08-01T00:00:00Z
 
 # Log
 
+- **2026-10-19** — `liveideas_ler` com `incluir_transcricao` (PR 3 de 3; `docs/transcricao-ao-vivo.md`): para reunião do Live Ideas, traz as falas de `transcricao.txt` do notebook depois do cursor `apos_seq` (seq = número da linha), com `proximo_seq`, `truncado` (teto padrão 12.000, reaplicado no Gaspar) e `estado` (`ao_vivo`/`encerrada`). Sem o parâmetro a resposta não muda. Depende do PR andre-martiini/live-ideas#1 e de atualizar o notebook.
+
 - **2026-10-19** — Tools MCP de leitura da transcrição ao vivo (PR 2 de 3; `docs/transcricao-ao-vivo.md`): `listar_transcricoes_ao_vivo` (acha a sessão: estado, último seq, segundos desde o último trecho, `sem_sinal`) e `ler_transcricao_ao_vivo` (trechos depois do cursor `apos_seq`, `proximo_seq`, `truncado` com teto de 12.000 caracteres por padrão, `ultimos_minutos`, `atraso_segundos`; funciona igual depois de encerrada). Código em `functions/tools/transcricao_ao_vivo_tools.py`; somente leitura, sem IA; a leitura fica fora do canal de voz.
 
 - **2026-10-19** — Transcrição ao vivo gravada aos poucos (PR 1 de 3; handoff em `docs/transcricao-ao-vivo.md`). A ferramenta Reuniões em Tempo Real só gravava a reunião inteira ao parar, então nada no servidor via a reunião em andamento. Agora `src/utils/transcricaoAoVivo.ts` manda os resultados finais do Deepgram a cada 10 s à nova callable `transcricaoAoVivo` (`functions/transcricao_ao_vivo.py`), que acrescenta trechos numerados em `transcricoes_ao_vivo/{sessao}/trechos/{seq}` numa transação (seq contínuo, só acrescenta, lote reenviado não duplica), marca a sessão `encerrada` ao parar e guarda o título e o id da reunião salva. Coleção fechada ao cliente nas regras. Sem IA; atraso esperado até ~15 s.
