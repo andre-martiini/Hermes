@@ -1503,7 +1503,9 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico=_REDE_LIVEIDEAS,
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de reuniões (resumo, decisões e ações de participantes); "
-        "a transcrição não vem",
+        "com incluir_transcricao, as falas transcritas, inclusive de terceiros",
+        nota="A transcrição só vem com incluir_transcricao (reunião), por cursor apos_seq e com teto de "
+        "50.000 caracteres reaplicado no Gaspar.",
     ),
     "listar_transcricoes_ao_vivo": ToolInventoryEntry(
         "reunioes_transcricao", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",

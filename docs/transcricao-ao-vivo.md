@@ -28,6 +28,12 @@ Código em `functions/tools/transcricao_ao_vivo_tools.py`; somente leitura, sem 
 
 Uso típico pelo Claude: `listar_transcricoes_ao_vivo` → `ler_transcricao_ao_vivo(sessao_id)` → a cada ~30 s `ler_transcricao_ao_vivo(sessao_id, apos_seq=<proximo_seq>)` até `estado = encerrada`.
 
+## PR 3 — `incluir_transcricao` no `liveideas_ler` (Live Ideas)
+
+- Gaspar (`functions/tools/liveideas_tools.py`): `liveideas_ler(reuniao_id, incluir_transcricao=true, apos_seq=0, max_caracteres_transcricao=12000)` pede ao notebook `transcricao: {apos, max}` e devolve `transcricao: {trechos: [{seq, t, falante, texto}], proximo_seq, ultimo_seq, truncado, estado, orientacao}`. O teto (1.000–50.000) é reaplicado no Gaspar. Sem o parâmetro (padrão false) nada muda. Com processo, recusa sem chamar o notebook. Notebook ainda não atualizado: `transcricao.erro` pede o `atualizar-servidor.ps1`.
+- Notebook (repositório `live-ideas`, PR andre-martiini/live-ideas#1): rota interna `/api/leitura/transcricao` lê `transcricao.txt` depois do cursor; `seq` = número da linha (o L<n> das evidências; linha em branco não vem, então pode haver salto); `estado` = `ao_vivo` se a reunião é a ativa e está em andamento. Cada fala entra no arquivo assim que o provedor (AssemblyAI/Soniox) fecha a frase, a cada ~6–10 s.
+- Para valer: mesclar os dois PRs e rodar `atualizar-servidor.ps1` no notebook.
+
 ## Limites conhecidos
 
 - Aba fechada no meio da reunião: a sessão fica `ao_vivo` sem sinal de vida. Quem lê usa o tempo desde a última atualização para perceber.
