@@ -663,7 +663,7 @@ decisoes:
     motivo: "Nenhuma PR aberta no início do disparo; nada a mesclar/fechar."
 testes:
   resultados:
-    - "functions/ completo ANTES 4390 OK (217s, head de main); test_modelo_pessoa_guarda 20 OK (novo arquivo) + test_modelo_pessoa 23 OK; DEPOIS 4406 OK (219s) no head final."
+    - "functions/ completo ANTES 4390 OK (217s, head de main); test_modelo_pessoa_guarda 16 OK (novo arquivo, +16 no total) + test_modelo_pessoa sem regressão; DEPOIS 4406 OK (219s) no head final."
 revisao_adversarial:
   - "Rodada 1 (agente sem contexto): reais corrigidos -- flexões/vocabulário, caractere invisível Cf, falsos positivos (partido, raça, acesso a, autorização), tipos não-string."
   - "Rodada 2: reais corrigidos -- falsos positivos de vot*, vício, dívida, sindicato, processo criminal, igreja/pastor; verbos de permissão; vocabulário extra; homóglifos cirílicos/gregos."
