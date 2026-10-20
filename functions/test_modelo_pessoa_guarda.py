@@ -59,7 +59,8 @@ class TestCategoriasProibidas(unittest.TestCase):
                       "vício de forma no edital", "dívida ativa da instituição", "sindicato dos servidores reunião",
                       "pastoral", "igreja matriz endereço", "cadastro de gestante", "deficiência no serviço",
                       "negro de fumo", "pode receber o material", "pode decidir depois", "processo criminal do edital",
-                      "caneta azul e preta", "Joao e Negro Ltda", "tinta e negra", "pode acessar o link", "Rodovia Trans-Amazônica", "consulta ao Serasa para pesquisa de preços",
+                      "caneta azul e preta", "Joao e Negro Ltda", "a tinta é negra", "o toner é negro", "senhor negro Ltda", "o diretor pode aprovar o contrato de licitação",
+                      "o fiscal pode acessar o sistema financeiro do Ifes", "autorizado a assinar o contrato pela reitoria", "pode acessar o link", "Rodovia Trans-Amazônica", "consulta ao Serasa para pesquisa de preços",
                       "a porta e de esquerda", "o relatório é do PL 2338", "durante a covid o contrato foi suspenso",
                       "o servidor esta internado no sistema", "estou crente que vai dar certo", "o setor tem acesso ao SIPAC",
                       "tem poderes para representar", "cadeira de rodas para o campus", "o processo esta preso na CLC"):
