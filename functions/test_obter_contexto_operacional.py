@@ -59,6 +59,74 @@ def _patches(fila=FILA, runs=RUNS):
             mock.patch("agent_runs.listar_recentes", return_value=runs))
 
 
+class CursorIncrementalTest(unittest.TestCase):
+    SEG = "segredo-de-teste"
+
+    def rodar(self, args=None, uid="u1", segredo=SEG, fila=FILA, runs=RUNS):
+        ctx = SimpleNamespace(db=_Db([]), user_uid=uid)
+        env = {oco.ENV_SEGREDO_CURSOR: segredo} if segredo else {}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch("atencao.coletar_fila_atencao", return_value=fila), \
+                mock.patch("agent_runs.listar_recentes", return_value=runs):
+            if not segredo:
+                import os
+                os.environ.pop(oco.ENV_SEGREDO_CURSOR, None)
+            return oco.obter(ctx, args or {})
+
+    def test_sem_segredo_nao_emite_cursor(self):
+        r = self.rodar(segredo=None)
+        self.assertNotIn("cursor", r)
+        self.assertNotIn("mudancas", r)
+
+    def test_sem_segredo_com_cursor_avisa(self):
+        r = self.rodar({"desde_cursor": "x"}, segredo=None)
+        self.assertTrue(any(l.startswith("cursor:") for l in r["lacunas"]))
+
+    def test_sem_dono_nao_emite(self):
+        self.assertNotIn("cursor", self.rodar(uid=None))
+
+    def test_emite_cursor_valido_e_mudancas_so_do_novo(self):
+        fila = {"total": 2, "itens": [
+            {"id": "velho", "criado_em": "2020-01-01T00:00:00+00:00", "atualizado_em": "2020-01-02T00:00:00+00:00"},
+            {"id": "novo", "criado_em": "2999-01-01T00:00:00+00:00"}]}
+        runs = {"runs": [{"id": "rv", "criado_em": "2020-01-01T00:00:00Z", "finalizado_em": "2020-01-01T00:01:00Z"},
+                         {"id": "rn", "criado_em": "2999-01-01T00:00:00Z"}]}
+        primeiro = self.rodar(fila=fila, runs=runs)
+        self.assertIn("cursor", primeiro)
+        self.assertNotIn("mudancas", primeiro)
+        r = self.rodar({"desde_cursor": primeiro["cursor"]}, fila=fila, runs=runs)
+        self.assertEqual([i["id"] for i in r["mudancas"]["pendencias"]], ["novo"])
+        self.assertEqual([i["id"] for i in r["mudancas"]["ultimos_resultados"]], ["rn"])
+        self.assertEqual(len(r["pendencias"]["itens"]), 2)  # estado completo segue presente
+
+    def test_carimbo_ilegivel_conta_como_mudanca(self):
+        fila = {"total": 1, "itens": [{"id": "sem_data"}]}
+        c = self.rodar(fila=fila)["cursor"]
+        r = self.rodar({"desde_cursor": c}, fila=fila)
+        self.assertEqual([i["id"] for i in r["mudancas"]["pendencias"]], ["sem_data"])
+
+    def test_cursor_de_outro_dono_e_ignorado_com_lacuna(self):
+        c = self.rodar(uid="u1")["cursor"]
+        r = self.rodar({"desde_cursor": c}, uid="u2")
+        self.assertNotIn("mudancas", r)
+        self.assertTrue(any("inválido" in l for l in r["lacunas"]))
+        self.assertEqual(len(r["pendencias"]["itens"]), 2)
+
+    def test_cursor_adulterado_ou_nao_string_e_ignorado(self):
+        for ruim in ("v1.a.b", 123, {"x": 1}, ["a"]):
+            r = self.rodar({"desde_cursor": ruim})
+            self.assertNotIn("mudancas", r)
+            self.assertTrue(any("inválido" in l for l in r["lacunas"]))
+
+    def test_fonte_falha_nao_avanca_cursor(self):
+        ctx = SimpleNamespace(db=_Db([]), user_uid="u1")
+        with mock.patch.dict("os.environ", {oco.ENV_SEGREDO_CURSOR: self.SEG}), \
+                mock.patch("atencao.coletar_fila_atencao", side_effect=RuntimeError("x")), \
+                mock.patch("agent_runs.listar_recentes", return_value=RUNS):
+            r = oco.obter(ctx, {})
+        self.assertNotIn("cursor", r)
+
+
 class ObterContextoOperacionalTest(unittest.TestCase):
     def rodar(self, ctx, args=None, **kw):
         a, b = _patches(**kw)
