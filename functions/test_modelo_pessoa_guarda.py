@@ -38,10 +38,11 @@ class TestCategoriasProibidas(unittest.TestCase):
 
     def test_flexoes_e_vocabulario(self):
         for texto in ("pessoas negras", "os judeus", "homossexuais", "lésbicas", "deprimido",
-                      "está doente", "poderá aprovar", "podem acessar", "diabetes", "TDAH",
-                      "licença médica", "surdez", "esquerdista", "vota no PT", "filiado ao sindicato",
-                      "devedor", "dívidas", "tem acesso", "possui acesso", "budista", "pastor da igreja",
-                      "bolsonarismo", "transexual", "gays"):
+                      "está doente", "poderá liberar pagamentos", "podem assinar transferências", "diabetes", "TDAH",
+                      "licença médica", "surdez", "esquerdista", "vota no PT", "filiado ao sindicato", "sindicalista",
+                      "devedor", "está devendo", "tem acesso", "possui acesso", "budista", "testemunha de Jeová",
+                      "bolsonarismo", "transexual", "gays", "é do PT", "é de esquerda", "é crente", "tem covid",
+                      "foi preso", "possui acessos", "pode liberar pagamentos", "é de confiança", "gаy"):
             self.assertTrue(categorias_proibidas(texto), texto)
 
     def test_caractere_invisivel(self):
@@ -53,7 +54,10 @@ class TestCategoriasProibidas(unittest.TestCase):
                       "acesso a planilha enviado", "autorizou a enviar relatório",
                       "pedido de autorização para viagem", "cobrar o antecedentes",
                       "tratamento cordial e formal", "atualizar processo SIPAC",
-                      "terapia ocupacional da turma"):
+                      "terapia ocupacional da turma", "voto em separado", "votou no conselho",
+                      "vício de forma no edital", "dívida ativa da instituição", "sindicato dos servidores reunião",
+                      "pastoral", "igreja matriz endereço", "cadastro de gestante", "deficiência no serviço",
+                      "negro de fumo", "pode receber o material", "pode decidir depois", "processo criminal do edital"):
             self.assertEqual(categorias_proibidas(texto), [], texto)
 
     def test_tipos_invalidos_descartados(self):
