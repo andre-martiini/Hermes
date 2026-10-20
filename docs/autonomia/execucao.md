@@ -632,3 +632,26 @@ revisao_adversarial:
   - "Rodada 3: reais corrigidos -- falsos positivos de 'e preta/pardo', trans solto, Serasa/SPC, 'e de esquerda', PL, covid, internado, crente, tem acesso, cadeira de rodas, esta preso (todos removidos/estreitados, só reduz descartes). Codex (PR #477): P1 real (modelos já gravados escapavam da guarda pelo early-return do hash; agora também sanados na leitura de buscar_contato) + 2 P2 (acesso e etnia, padrões ampliados). Rodada 4 (agente sem contexto): falsos positivos novos (pode aprovar contrato, a tinta é negra, senhor negro Ltda) corrigidos exigindo sujeito pessoal (ele/ela/contato/pessoa ou início do texto) e removendo o objeto contrato de autorizado-a; sem regressão em _buscar_contato."
 pendencias:
   - "Passo 7 (cursor assinado + contexto incremental; origem do segredo indefinida), similaridade vetorial real."
+
+---
+
+```yaml
+pacote: "P06 sub-entrega 14/N -- passo 7, cursor incremental ligado a obter_contexto_operacional (functions/tools/obter_contexto_operacional.py + schema). Segredo vem do ambiente (CONTEXT_CURSOR_SECRET) e o dono de ctx.user_uid; sem um dos dois, o contexto sai completo sem cursor (lacuna se o cliente enviou desde_cursor). Com cursor ativo a resposta traz `cursor` (autonomy.cursor_contexto, escopo contexto_operacional) e, com desde_cursor válido, `mudancas` (pendências/resultados novos ou alterados), calculadas sobre leitura ampla (100 pendências / 50 runs) enquanto a exibição segue limite_contexto. Cursor só avança se a leitura não atingiu o teto e o total é válido; senão devolve o recebido + lacuna. Marca com folga de 10s e comparação >=."
+estado: validado
+inicio: "2026-10-20T19:50:00Z"
+fim: "2026-10-20T21:00:00Z"
+decisoes:
+  - id: p06-sub14-segredo-por-ambiente
+    motivo: "Origem do segredo era a pendência aberta; default seguro e reversível: variável de ambiente CONTEXT_CURSOR_SECRET. Sem ela o recurso fica desligado (flag de desligamento natural), nada muda para os clientes atuais."
+  - id: p06-sub14-triagem
+    motivo: "Nenhuma PR aberta no início do disparo. execucao.md arquivado (blocos P06 sub 8 e 9 -> execucao-archive-p06sub8-sub9.md)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4407 OK (202s, head de main); test_obter_contexto_operacional 34 OK; DEPOIS 4425 OK (195s) no head final."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): reais corrigidos -- cursor avançava com listas truncadas, borda > sem folga de relógio, carimbo ilegível ignorado quando outro era legível, ValueError na emissão."
+  - "Rodada 2: reais corrigidos -- len==limite tratado como corte; falha só de regras bloqueava cursor."
+  - "Rodada 3: real corrigido -- truncamento pelo limite exibido tornava o cursor inútil; mudancas agora sobre leitura ampla; total ausente tratado como truncado. Rodada 4: não achou nada."
+pendencias:
+  - "Configurar CONTEXT_CURSOR_SECRET no ambiente das Functions para ligar o incremental (André); similaridade vetorial real (precisa do índice vetorial)."
+```
