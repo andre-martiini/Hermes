@@ -42,7 +42,8 @@ class TestCategoriasProibidas(unittest.TestCase):
                       "licença médica", "surdez", "esquerdista", "vota no PT", "filiado ao sindicato", "sindicalista",
                       "devedor", "está devendo", "budista", "testemunha de Jeová",
                       "bolsonarismo", "transexual", "gays", "vota no PT", "é crente de verdade", "tem covid",
-                      "pode liberar pagamentos", "gаy", "pessoa trans", "foi preso", "tem permissão para aprovar pagamento", "nível de acesso total"):
+                      "pode liberar pagamentos", "gаy", "pessoa trans", "foi preso", "pode aprovar pagamentos", "pode acessar a folha de pagamento", "autorizado a assinar pagamentos",
+                      "é negro", "homem negro", "é pardo", "tem permissão para aprovar pagamento", "nível de acesso total"):
             self.assertTrue(categorias_proibidas(texto), texto)
 
     def test_caractere_invisivel(self):
@@ -58,7 +59,7 @@ class TestCategoriasProibidas(unittest.TestCase):
                       "vício de forma no edital", "dívida ativa da instituição", "sindicato dos servidores reunião",
                       "pastoral", "igreja matriz endereço", "cadastro de gestante", "deficiência no serviço",
                       "negro de fumo", "pode receber o material", "pode decidir depois", "processo criminal do edital",
-                      "caneta azul e preta", "Joao e Negro Ltda", "Rodovia Trans-Amazônica", "consulta ao Serasa para pesquisa de preços",
+                      "caneta azul e preta", "Joao e Negro Ltda", "tinta e negra", "pode acessar o link", "Rodovia Trans-Amazônica", "consulta ao Serasa para pesquisa de preços",
                       "a porta e de esquerda", "o relatório é do PL 2338", "durante a covid o contrato foi suspenso",
                       "o servidor esta internado no sistema", "estou crente que vai dar certo", "o setor tem acesso ao SIPAC",
                       "tem poderes para representar", "cadeira de rodas para o campus", "o processo esta preso na CLC"):
@@ -135,3 +136,21 @@ class TestIntegracaoParse(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLeituraBuscarContato(unittest.TestCase):
+    def test_modelo_armazenado_sensivel_e_saneado_na_leitura(self):
+        from unittest.mock import MagicMock
+        from tools.hermes_tools import _buscar_contato, ToolContext
+        doc = MagicMock()
+        doc.id = "p1"
+        doc.to_dict.return_value = {
+            "nome": "Ana", "whatsapp_chat_id": "c",
+            "modelo_interacao": {"registro": "formal; é evangélica", "tempo_resposta_tipico": "~2h", "acoes_recentes": []},
+        }
+        db = MagicMock()
+        db.collection.return_value.stream.return_value = [doc]
+        res = _buscar_contato(ToolContext(_db=db, user_uid="u", task_id="t"), {"termo": "ana"})
+        modelo = res["candidatos"][0]["modelo_interacao"]
+        self.assertIsNone(modelo["registro"])
+        self.assertEqual(modelo["tempo_resposta_tipico"], "~2h")

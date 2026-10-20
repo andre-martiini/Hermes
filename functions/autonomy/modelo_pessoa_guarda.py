@@ -61,13 +61,15 @@ _CATEGORIAS: dict[str, tuple[str, ...]] = {
         r"bissexuais", r"transgenero\w*", r"transexual\w*", r"transsexual\w*", r"transexuais", r"(?:pessoa|homem|mulher|e) trans", r"travesti\w*", r"nao binari\w*", r"homoafetiv\w*",
         r"orientacao sexual", r"lgbt\w*",
     ),
-    "origem_etnica": (r"racial", r"etnia\w*", r"etnico\w*", r"pessoas? negr[oa]s?", r"quilombola\w*", r"indigena\w*"),
+    "origem_etnica": (r"racial", r"etnia\w*", r"etnico\w*", r"(?:pessoas?|homem|homens|mulher|mulheres|rapaz(?:es)?|moca\w*|senhor\w*) (?:negr|pard)[oa]s?", r"quilombola\w*", r"indigena\w*"),
     "sindical": (r"sindicalizad\w*", r"sindicalista\w*", r"filiad[oa] ao sindicato", r"grevista\w*", r"filiacao sindical"),
     "financeiro_judicial": (
         r"endividad\w*", r"esta devendo", r"nome sujo", r"nome no (?:spc|serasa)", r"devedor\w*", r"inadimplen\w*", r"falido\w*",
         r"falencia", r"ficha criminal", r"antecedentes criminais", r"foi preso", r"e reu",
     ),
     "acesso_por_perfil": (
+        r"pode(?:m|ra|rao|ria)? (?:aprovar|acessar|liberar|assinar|autorizar) (?:o |a |os |as |um |uma )?(?:pagamento|folha|transferencia|contrato|sistema financeiro)\w*",
+        r"autorizad[oa] a (?:aprovar|acessar|liberar|assinar|decidir) (?:o |a |os |as |um |uma )?(?:pagamento|folha|transferencia|contrato)\w*",
         r"tem permissao",
         r"acessos? (?:total|irrestrito)\w*", r"tem autorizacao para (?:aprovar|acessar|decidir|liberar)",
         r"pode(?:m|ra|rao|ria)? (?:autorizar|liberar|assinar) (?:pagamento|transferencia)\w*",
@@ -97,12 +99,20 @@ def _normalizar(texto: str) -> str:
     return limpo.lower().translate(_HOMOGLIFOS)
 
 
+_PADRAO_ETNIA_COM_ACENTO = re.compile(r"(?<!\w)\u00e9 (?:negr|pard)[oa]s?(?!\w)")
+
+
 def categorias_proibidas(texto) -> list[str]:
     """Categorias proibidas detectadas em `texto` (vazio se limpo ou não-string)."""
     if not isinstance(texto, str) or not texto.strip():
         return []
     norm = _normalizar(texto)
-    return [cat for cat, padrao in _PADROES.items() if padrao.search(norm)]
+    cats = [cat for cat, padrao in _PADROES.items() if padrao.search(norm)]
+    if "origem_etnica" not in cats and _PADRAO_ETNIA_COM_ACENTO.search(
+        unicodedata.normalize("NFC", texto).lower()
+    ):
+        cats.append("origem_etnica")
+    return cats
 
 
 def sanear_modelo_interacao(modelo):
