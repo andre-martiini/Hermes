@@ -138,18 +138,50 @@ class CursorIncrementalTest(unittest.TestCase):
         import time
         self.assertLessEqual(marca, time.time() * 1000 - oco.MARGEM_CURSOR_MS + 5)
 
-    def test_pendencias_cortadas_pelo_limite_nao_emitem_cursor(self):
-        r = self.rodar(fila={"total": 5, "itens": FILA["itens"]})
+    def test_pendencias_acima_do_teto_de_leitura_nao_emitem_cursor(self):
+        r = self.rodar(fila={"total": 500, "itens": FILA["itens"]})
         self.assertNotIn("cursor", r)
         self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
 
-    def test_runs_no_limite_nao_avancam_cursor_recebido(self):
+    def test_mais_itens_que_o_limite_exibido_ainda_emite_cursor_e_mudancas_completas(self):
+        runs = {"runs": [{"id": f"r{i}", "criado_em": "2020-01-01T00:00:00Z"} for i in range(30)]
+                + [{"id": "novo", "criado_em": "2999-01-01T00:00:00Z"}]}
+        r = self.rodar(runs=runs)
+        self.assertIn("cursor", r)
+        self.assertEqual(len(r["ultimos_resultados"]), 10)  # exibição segue o limite
+        r2 = self.rodar({"desde_cursor": r["cursor"]}, runs=runs)
+        self.assertEqual([x["id"] for x in r2["mudancas"]["ultimos_resultados"]], ["novo"])  # fora dos 10 exibidos
+
+    def test_pendencia_alterada_alem_do_limite_exibido_aparece_em_mudancas(self):
+        itens = [{"id": f"p{i}", "criado_em": "2020-01-01T00:00:00Z", "atualizado_em": "2020-01-01T00:00:00Z"} for i in range(14)]
+        itens.append({"id": "alterada", "criado_em": "2020-01-01T00:00:00Z", "atualizado_em": "2999-01-01T00:00:00Z"})
+        fila = {"total": 15, "itens": itens}
+        c = self.rodar(fila=fila)["cursor"]
+        r = self.rodar({"desde_cursor": c}, fila=fila)
+        self.assertEqual([i["id"] for i in r["mudancas"]["pendencias"]], ["alterada"])
+        self.assertEqual(len(r["pendencias"]["itens"]), 10)
+
+    def test_regras_falhando_nao_bloqueia_cursor(self):
+        ctx = SimpleNamespace(db=mock.Mock(), user_uid="u1")
+        ctx.db.collection.side_effect = OSError("down")
+        with mock.patch.dict("os.environ", {oco.ENV_SEGREDO_CURSOR: self.SEG}), \
+                mock.patch("atencao.coletar_fila_atencao", return_value=FILA2), \
+                mock.patch("agent_runs.listar_recentes", return_value=RUNS):
+            r = oco.obter(ctx, {})
+        self.assertEqual(r["fontes"]["regras"][:6], "falhou")
+        self.assertIn("cursor", r)
+
+    def test_runs_no_teto_de_leitura_nao_avancam_cursor_recebido(self):
         c = self.rodar()["cursor"]
-        runs = {"runs": [{"id": f"r{i}", "criado_em": "2999-01-01T00:00:00Z"} for i in range(10)]}
+        runs = {"runs": [{"id": f"r{i}", "criado_em": "2999-01-01T00:00:00Z"} for i in range(oco.LEITURA_RESULTADOS)]}
         r = self.rodar({"desde_cursor": c}, runs=runs)
         self.assertEqual(r["cursor"], c)
-        self.assertEqual(len(r["mudancas"]["ultimos_resultados"]), 10)
+        self.assertEqual(len(r["mudancas"]["ultimos_resultados"]), oco.LEITURA_RESULTADOS)
         self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
+
+    def test_total_ausente_nao_prova_ausencia_de_corte(self):
+        r = self.rodar(fila={"itens": FILA["itens"]})
+        self.assertNotIn("cursor", r)
 
     def test_owner_longo_demais_nao_derruba(self):
         r = self.rodar(uid="u" * 3000)
