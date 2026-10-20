@@ -219,12 +219,16 @@ def obter(ctx, args: dict) -> dict:
     extra: dict = {}
     if cursor_ativo:
         fontes_ok = fontes.get("pendencias") == "ok" and fontes.get("ultimos_resultados") == "ok"
-        # leitura além do teto das fontes (ou total desconhecido): itens novos podem ter ficado de fora, a marca não avança
-        truncado = (
-            not total_valido
-            or pendencias["total_aberto"] > len(todos_pend)
-            or len(todos_runs) >= leitura_runs
-        )
+        # Só importa truncamento quando há marca para comparar: a primeira chamada fixa "a partir de agora".
+        # Pendências vêm por prioridade (qualquer uma pode ser a nova); runs vêm por criado_em desc, então
+        # o corte só esconde mudança se a execução mais antiga lida ainda é posterior à marca.
+        truncado = False
+        if marca_valida is not None:
+            truncado = (
+                not total_valido
+                or pendencias["total_aberto"] > len(todos_pend)
+                or (len(todos_runs) >= leitura_runs and _mudou_apos(marca_valida, todos_runs[-1].get("criado_em")))
+            )
         if marca_valida is not None:
             if fontes_ok:
                 extra["mudancas"] = _mudancas(marca_valida, todos_pend, todos_runs)
