@@ -59,10 +59,13 @@ def _patches(fila=FILA, runs=RUNS):
             mock.patch("agent_runs.listar_recentes", return_value=runs))
 
 
+FILA2 = {"total": 2, "itens": FILA["itens"]}
+
+
 class CursorIncrementalTest(unittest.TestCase):
     SEG = "segredo-de-teste"
 
-    def rodar(self, args=None, uid="u1", segredo=SEG, fila=FILA, runs=RUNS):
+    def rodar(self, args=None, uid="u1", segredo=SEG, fila=FILA2, runs=RUNS):
         ctx = SimpleNamespace(db=_Db([]), user_uid=uid)
         env = {oco.ENV_SEGREDO_CURSOR: segredo} if segredo else {}
         with mock.patch.dict("os.environ", env, clear=False), \
@@ -117,6 +120,41 @@ class CursorIncrementalTest(unittest.TestCase):
             r = self.rodar({"desde_cursor": ruim})
             self.assertNotIn("mudancas", r)
             self.assertTrue(any("inválido" in l for l in r["lacunas"]))
+
+    def test_carimbo_preenchido_ilegivel_conta_como_mudanca_mesmo_com_outro_legivel(self):
+        fila = {"total": 1, "itens": [{"id": "x", "criado_em": "2020-01-01T00:00:00+00:00", "atualizado_em": "lixo"}]}
+        c = self.rodar(fila=fila)["cursor"]
+        r = self.rodar({"desde_cursor": c}, fila=fila)
+        self.assertEqual([i["id"] for i in r["mudancas"]["pendencias"]], ["x"])
+
+    def test_borda_igual_a_marca_conta_como_mudanca(self):
+        self.assertTrue(oco._mudou_apos(1000, "1970-01-01T00:00:01+00:00"))
+        self.assertFalse(oco._mudou_apos(1001, "1970-01-01T00:00:01+00:00"))
+
+    def test_marca_tem_folga_de_relogio(self):
+        from autonomy.cursor_contexto import validar_cursor
+        c = self.rodar()["cursor"]
+        marca = validar_cursor(self.SEG, c, "u1", oco.ESCOPO_CURSOR)
+        import time
+        self.assertLessEqual(marca, time.time() * 1000 - oco.MARGEM_CURSOR_MS + 5)
+
+    def test_pendencias_cortadas_pelo_limite_nao_emitem_cursor(self):
+        r = self.rodar(fila={"total": 5, "itens": FILA["itens"]})
+        self.assertNotIn("cursor", r)
+        self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
+
+    def test_runs_no_limite_nao_avancam_cursor_recebido(self):
+        c = self.rodar()["cursor"]
+        runs = {"runs": [{"id": f"r{i}", "criado_em": "2999-01-01T00:00:00Z"} for i in range(10)]}
+        r = self.rodar({"desde_cursor": c}, runs=runs)
+        self.assertEqual(r["cursor"], c)
+        self.assertEqual(len(r["mudancas"]["ultimos_resultados"]), 10)
+        self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
+
+    def test_owner_longo_demais_nao_derruba(self):
+        r = self.rodar(uid="u" * 3000)
+        self.assertNotIn("cursor", r)
+        self.assertTrue(any("não foi possível emitir" in l for l in r["lacunas"]))
 
     def test_fonte_falha_nao_avanca_cursor(self):
         ctx = SimpleNamespace(db=_Db([]), user_uid="u1")
