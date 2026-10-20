@@ -56,6 +56,7 @@ _CATALOG: dict[str, str] = {
     "consultar_promocoes_autonomia_sugeridas": "Lista sugestões de promoção de autonomia por tipo de rascunho WhatsApp que esperam decisão",
     "consultar_memoria_suspeita": "Relatorio somente leitura de memoria suspeita (sem proveniencia, inferencia como regra, injecao) para revisao humana; nao altera nada",
     "consultar_memoria_contextual": "Busca somente leitura de fatos da memoria pertinentes a uma consulta/entidades, ponderados por validade e autoridade da fonte, com origem e lacunas; nao altera nada",
+    "obter_contexto_operacional": "Contexto operacional somente leitura: pendencias abertas, ultimos resultados de rotinas do agente e regras (POPs) ativas, com fontes e lacunas; nao altera nada",
     "decidir_promocao_autonomia": "Aplica a decisão do usuário (aceitar, adiar, nunca) sobre a promoção de autonomia de um tipo de rascunho WhatsApp",
     "revogar_promocao_autonomia": "Revoga a promoção de autonomia de um tipo já promovido, voltando a exigir aprovação prévia no Telegram",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
@@ -351,6 +352,8 @@ _VOICE_EXCLUDED: set[str] = {
     "consultar_memoria_suspeita",
     # Trechos de memoria nao confiavel (ate 50 fatos x 400 caracteres): nao e canal de voz.
     "consultar_memoria_contextual",
+    # Fila, execucoes e POPs com texto livre de terceiros (ate 20 itens x 400 caracteres por secao, mais as instrucoes inteiras dos POPs sempre ativos): nao e canal de voz.
+    "obter_contexto_operacional",
     # Texto longo de transcricao (ate 50.000 caracteres por chamada): nao e canal de voz.
     "ler_transcricao_ao_vivo",
     # Escrita de dinheiro por voz nao: um numero mal transcrito ("mil e

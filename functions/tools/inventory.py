@@ -474,6 +474,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="P06 sub-entrega 11/N. Varre até 5000 documentos por chamada sobre autonomy.recuperacao.recuperar; "
         "sem busca vetorial nem cursor (passo 7 ligado em sub-entrega futura).",
     ),
+    "obter_contexto_operacional": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — só lê fila de atenção, agent_runs e pops_diretrizes",
+        dados_sensiveis_categoria="resumos de pendências, resultados de rotinas e instruções de POPs, texto livre",
+        nota="P06 sub-entrega 12/N. Cada fonte é lida isolada (falha vira lacuna); sem cursor incremental "
+        "(passo 7 ligado quando houver segredo de assinatura).",
+    ),
     "decidir_promocao_autonomia": ToolInventoryEntry(
         "autonomia_politica", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.COORDENACAO_LIMITADA,
         "nenhum — a promoção passa a valer imediatamente; revogar_promocao_autonomia é o único caminho de volta",
