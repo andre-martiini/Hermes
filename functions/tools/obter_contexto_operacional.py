@@ -13,8 +13,8 @@ ambiente e o chamador tiver `user_uid`, a resposta traz um `cursor` assinado
 em `desde_cursor`, `mudancas` lista pendências/resultados novos ou alterados desde
 então. Sem segredo, sem dono ou com cursor inválido/de outro dono o contexto
 completo é devolvido normalmente, com uma lacuna dizendo por quê (nunca erro,
-nunca mudança omitida em silêncio). O cursor não detecta itens resolvidos ou
-removidos: o estado atual completo segue em `pendencias`.
+nunca mudança omitida em silêncio). Limites: não detecta itens resolvidos ou
+removidos, nem execuções antigas (fora das 50 mais recentes por criação) alteradas depois do cursor -- isso vira lacuna: o estado atual completo segue em `pendencias`.
 """
 
 from __future__ import annotations
@@ -242,6 +242,11 @@ def obter(ctx, args: dict) -> dict:
                 extra["cursor"] = emitir_cursor(segredo, dono, ESCOPO_CURSOR, max(agora_ms, 0))
             except ValueError:
                 lacunas.append("cursor: não foi possível emitir (identificador longo demais)")
+        if marca_valida is not None and fontes_ok and len(todos_runs) >= leitura_runs and not truncado:
+            lacunas.append(
+                f"mudancas: só vê as {leitura_runs} execuções mais recentes por criação; uma execução antiga "
+                "finalizada ou alterada depois do cursor pode não aparecer"
+            )
         if truncado and fontes_ok:
             lacunas.append("cursor: há mais itens que o teto de leitura das fontes; mudancas pode estar incompleta e o cursor não avançou")
 

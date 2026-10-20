@@ -155,6 +155,7 @@ class CursorIncrementalTest(unittest.TestCase):
         self.assertEqual(r["mudancas"]["ultimos_resultados"], [])
         self.assertNotEqual(r["cursor"], c)
         self.assertFalse(any("incompleta" in l for l in r["lacunas"]))
+        self.assertTrue(any("execuções mais recentes" in l for l in r["lacunas"]))
 
     def test_mais_itens_que_o_limite_exibido_ainda_emite_cursor_e_mudancas_completas(self):
         runs = {"runs": [{"id": f"r{i}", "criado_em": "2020-01-01T00:00:00Z"} for i in range(30)]
