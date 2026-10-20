@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from firebase_admin import firestore
 
 from autonomy import policy as autonomy_policy
+from autonomy.modelo_pessoa_guarda import sanear_modelo_interacao
 from autonomy.contracts import (
     ClasseEfeito,
     EstadoAutonomia,
@@ -422,7 +423,8 @@ def _buscar_contato(ctx: ToolContext, args: dict):
                 "telefone": data.get("telefone", ""),
                 "whatsapp_chat_id": data.get("whatsapp_chat_id", ""),
                 "tags": data.get("tags", []),
-                "modelo_interacao": data.get("modelo_interacao"),
+                # P06 passo 9: modelos gravados antes da guarda também passam por ela.
+                "modelo_interacao": sanear_modelo_interacao(data.get("modelo_interacao"))[0],
                 "score": score,
             })
 
