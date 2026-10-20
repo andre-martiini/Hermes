@@ -16540,7 +16540,8 @@ Estrutura JSON obrigatória:
 REGRAS INEGOCIÁVEIS:
 1. NUNCA INVENTE OU SUPONHA. Se as mensagens não demonstrarem claramente um padrão de tom/formalidade do André com essa pessoa, retorne "registro": null. Se não houver dados suficientes de tempo de resposta da pessoa (ex: poucas mensagens ou nenhuma troca bidirecional), retorne "tempo_resposta_tipico": null. Jamais use generalizações vazias ou vagas como "cordial", "comum" ou "tempo normal".
 2. "acoes_recentes" deve listar estritamente as ações citadas nas interações ou mensagens (com título e id se disponíveis). Se não houver nenhuma ação vinculada, retorne [].
-3. Responda ESTRITAMENTE com o objeto JSON válido, sem texto explicativo antes ou depois.
+3. Descreva apenas tom, tempo de resposta e ações observados. NUNCA infira saúde, religião, política, orientação sexual, origem étnica, deficiência, situação financeira ou judicial, nem sugira permissões ou nível de acesso da pessoa.
+4. Responda ESTRITAMENTE com o objeto JSON válido, sem texto explicativo antes ou depois.
 """
 
 
@@ -16594,12 +16595,17 @@ def parse_resposta_modelo_pessoa(raw_response: str) -> dict | None:
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    return {
+    # P06 passo 9: descarta traço sensível / acesso por perfil inferido pelo LLM.
+    from autonomy.modelo_pessoa_guarda import sanear_modelo_interacao
+    modelo, descartes = sanear_modelo_interacao({
         "registro": registro,
         "tempo_resposta_tipico": tempo_resposta,
         "acoes_recentes": acoes_recentes,
         "atualizado_em": now_iso,
-    }
+    })
+    if descartes:
+        print(f"[MODELO PESSOA] Descartes por guarda de traço sensível: {descartes}")
+    return modelo
 
 
 def processar_modelo_pessoa(db, pessoa_id: str, pessoa_data: dict, client=None) -> bool:

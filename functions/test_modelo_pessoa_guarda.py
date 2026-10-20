@@ -1,0 +1,103 @@
+"""Testes da guarda do modelo por pessoa (P06 passo 9)."""
+
+import copy
+import json
+import unittest
+
+from autonomy.modelo_pessoa_guarda import categorias_proibidas, sanear_modelo_interacao
+from main import parse_resposta_modelo_pessoa, construir_prompt_modelo_pessoa
+
+
+class TestCategoriasProibidas(unittest.TestCase):
+    def test_texto_limpo(self):
+        self.assertEqual(categorias_proibidas("formal, trata por Dr."), [])
+        self.assertEqual(categorias_proibidas("costuma responder em ~2h no dia útil"), [])
+
+    def test_nao_string_ou_vazio(self):
+        for v in (None, 3, "", "   ", ["saúde"], {"a": 1}):
+            self.assertEqual(categorias_proibidas(v), [])
+
+    def test_categorias(self):
+        casos = {
+            "saude": "está em tratamento médico por depressão",
+            "religiao": "é evangélica e não responde aos domingos",
+            "politica": "é bolsonarista",
+            "orientacao_sexual": "é homossexual",
+            "origem_etnica": "pessoa negra",
+            "deficiencia": "é cadeirante",
+            "sindical": "é sindicalizado",
+            "financeiro_judicial": "está endividado",
+            "acesso_por_perfil": "tem permissão para aprovar pagamentos",
+        }
+        for cat, texto in casos.items():
+            self.assertIn(cat, categorias_proibidas(texto), texto)
+
+    def test_acento_e_caixa(self):
+        self.assertIn("saude", categorias_proibidas("DEPRESSÃO"))
+        self.assertIn("religiao", categorias_proibidas("Católica"))
+
+    def test_fronteira_de_palavra(self):
+        self.assertEqual(categorias_proibidas("sempre diz que o gaysers"), [])
+        self.assertEqual(categorias_proibidas("hivernal"), [])
+
+
+class TestSanearModelo(unittest.TestCase):
+    def test_limpo_intacto(self):
+        m = {"registro": "informal", "tempo_resposta_tipico": "~2h",
+             "acoes_recentes": ["Enviar relatório (a1)"], "atualizado_em": "x"}
+        s, d = sanear_modelo_interacao(m)
+        self.assertEqual(s, m)
+        self.assertEqual(d, [])
+
+    def test_descarta_campos_e_itens(self):
+        m = {"registro": "formal, mas é católico praticante",
+             "tempo_resposta_tipico": "~2h",
+             "acoes_recentes": ["Consulta de tratamento médico (a1)", "Enviar relatório (a2)"],
+             "atualizado_em": "x"}
+        orig = copy.deepcopy(m)
+        s, d = sanear_modelo_interacao(m)
+        self.assertEqual(m, orig)  # não muta
+        self.assertIsNone(s["registro"])
+        self.assertEqual(s["tempo_resposta_tipico"], "~2h")
+        self.assertEqual(s["acoes_recentes"], ["Enviar relatório (a2)"])
+        self.assertEqual(s["atualizado_em"], "x")
+        self.assertIn({"campo": "registro", "categorias": ["religiao"]}, d)
+        self.assertIn({"campo": "acoes_recentes", "indice": 0, "categorias": ["saude"]}, d)
+
+    def test_entrada_nao_dict(self):
+        for v in (None, "x", [1]):
+            s, d = sanear_modelo_interacao(v)
+            self.assertIs(s, v)
+            self.assertEqual(d, [])
+
+    def test_acoes_nao_lista_preservada(self):
+        s, d = sanear_modelo_interacao({"acoes_recentes": "texto"})
+        self.assertEqual(s["acoes_recentes"], "texto")
+
+
+class TestIntegracaoParse(unittest.TestCase):
+    def test_parse_descarta_sensivel(self):
+        raw = json.dumps({
+            "registro": "informal; pessoa com depressão",
+            "tempo_resposta_tipico": "responde em ~1h",
+            "acoes_recentes": ["Pagar boleto (b1)"],
+        })
+        r = parse_resposta_modelo_pessoa(raw)
+        self.assertIsNone(r["registro"])
+        self.assertEqual(r["tempo_resposta_tipico"], "responde em ~1h")
+        self.assertEqual(r["acoes_recentes"], ["Pagar boleto (b1)"])
+        self.assertIn("atualizado_em", r)
+
+    def test_parse_limpo_igual_ao_anterior(self):
+        r = parse_resposta_modelo_pessoa(json.dumps({"registro": "formal", "tempo_resposta_tipico": None, "acoes_recentes": []}))
+        self.assertEqual(r["registro"], "formal")
+        self.assertIsNone(r["tempo_resposta_tipico"])
+
+    def test_prompt_proibe_inferencia_sensivel(self):
+        p = construir_prompt_modelo_pessoa("Ana", "texto")
+        self.assertIn("NUNCA infira saúde, religião", p)
+        self.assertIn("nível de acesso", p)
+
+
+if __name__ == "__main__":
+    unittest.main()
