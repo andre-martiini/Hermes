@@ -138,10 +138,24 @@ class CursorIncrementalTest(unittest.TestCase):
         import time
         self.assertLessEqual(marca, time.time() * 1000 - oco.MARGEM_CURSOR_MS + 5)
 
-    def test_pendencias_acima_do_teto_de_leitura_nao_emitem_cursor(self):
-        r = self.rodar(fila={"total": 500, "itens": FILA["itens"]})
-        self.assertNotIn("cursor", r)
+    def test_pendencias_acima_do_teto_de_leitura_nao_avancam_cursor_recebido(self):
+        c = self.rodar()["cursor"]
+        r = self.rodar({"desde_cursor": c}, fila={"total": 500, "itens": FILA["itens"]})
+        self.assertEqual(r["cursor"], c)
         self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
+
+    def test_primeira_chamada_emite_cursor_mesmo_com_muitas_pendencias(self):
+        self.assertIn("cursor", self.rodar(fila={"total": 500, "itens": FILA["itens"]}))
+
+    def test_runs_no_teto_mas_todos_anteriores_a_marca_avancam_cursor(self):
+        runs = {"runs": [{"id": f"r{i}", "criado_em": "2020-01-01T00:00:00Z", "finalizado_em": "2020-01-01T00:01:00Z"}
+                         for i in range(oco.LEITURA_RESULTADOS)]}
+        c = self.rodar(runs=runs)["cursor"]
+        r = self.rodar({"desde_cursor": c}, runs=runs)
+        self.assertEqual(r["mudancas"]["ultimos_resultados"], [])
+        self.assertNotEqual(r["cursor"], c)
+        self.assertFalse(any("incompleta" in l for l in r["lacunas"]))
+        self.assertTrue(any("execuções mais recentes" in l for l in r["lacunas"]))
 
     def test_mais_itens_que_o_limite_exibido_ainda_emite_cursor_e_mudancas_completas(self):
         runs = {"runs": [{"id": f"r{i}", "criado_em": "2020-01-01T00:00:00Z"} for i in range(30)]
@@ -180,8 +194,9 @@ class CursorIncrementalTest(unittest.TestCase):
         self.assertTrue(any("incompleta" in l for l in r["lacunas"]))
 
     def test_total_ausente_nao_prova_ausencia_de_corte(self):
-        r = self.rodar(fila={"itens": FILA["itens"]})
-        self.assertNotIn("cursor", r)
+        c = self.rodar()["cursor"]
+        r = self.rodar({"desde_cursor": c}, fila={"itens": FILA["itens"]})
+        self.assertEqual(r["cursor"], c)
 
     def test_owner_longo_demais_nao_derruba(self):
         r = self.rodar(uid="u" * 3000)

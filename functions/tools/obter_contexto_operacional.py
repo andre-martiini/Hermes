@@ -13,8 +13,8 @@ ambiente e o chamador tiver `user_uid`, a resposta traz um `cursor` assinado
 em `desde_cursor`, `mudancas` lista pendências/resultados novos ou alterados desde
 então. Sem segredo, sem dono ou com cursor inválido/de outro dono o contexto
 completo é devolvido normalmente, com uma lacuna dizendo por quê (nunca erro,
-nunca mudança omitida em silêncio). O cursor não detecta itens resolvidos ou
-removidos: o estado atual completo segue em `pendencias`.
+nunca mudança omitida em silêncio). Limites: não detecta itens resolvidos ou
+removidos, nem execuções antigas (fora das 50 mais recentes por criação) alteradas depois do cursor -- isso vira lacuna: o estado atual completo segue em `pendencias`.
 """
 
 from __future__ import annotations
@@ -219,12 +219,16 @@ def obter(ctx, args: dict) -> dict:
     extra: dict = {}
     if cursor_ativo:
         fontes_ok = fontes.get("pendencias") == "ok" and fontes.get("ultimos_resultados") == "ok"
-        # leitura além do teto das fontes (ou total desconhecido): itens novos podem ter ficado de fora, a marca não avança
-        truncado = (
-            not total_valido
-            or pendencias["total_aberto"] > len(todos_pend)
-            or len(todos_runs) >= leitura_runs
-        )
+        # Só importa truncamento quando há marca para comparar: a primeira chamada fixa "a partir de agora".
+        # Pendências vêm por prioridade (qualquer uma pode ser a nova); runs vêm por criado_em desc, então
+        # o corte só esconde mudança se a execução mais antiga lida ainda é posterior à marca.
+        truncado = False
+        if marca_valida is not None:
+            truncado = (
+                not total_valido
+                or pendencias["total_aberto"] > len(todos_pend)
+                or (len(todos_runs) >= leitura_runs and _mudou_apos(marca_valida, todos_runs[-1].get("criado_em")))
+            )
         if marca_valida is not None:
             if fontes_ok:
                 extra["mudancas"] = _mudancas(marca_valida, todos_pend, todos_runs)
@@ -238,6 +242,11 @@ def obter(ctx, args: dict) -> dict:
                 extra["cursor"] = emitir_cursor(segredo, dono, ESCOPO_CURSOR, max(agora_ms, 0))
             except ValueError:
                 lacunas.append("cursor: não foi possível emitir (identificador longo demais)")
+        if marca_valida is not None and fontes_ok and len(todos_runs) >= leitura_runs and not truncado:
+            lacunas.append(
+                f"mudancas: só vê as {leitura_runs} execuções mais recentes por criação; uma execução antiga "
+                "finalizada ou alterada depois do cursor pode não aparecer"
+            )
         if truncado and fontes_ok:
             lacunas.append("cursor: há mais itens que o teto de leitura das fontes; mudancas pode estar incompleta e o cursor não avançou")
 
