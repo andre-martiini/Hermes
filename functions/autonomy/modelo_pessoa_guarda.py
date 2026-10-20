@@ -25,33 +25,44 @@ _CAMPOS_TEXTO = ("registro", "tempo_resposta_tipico")
 
 _CATEGORIAS: dict[str, tuple[str, ...]] = {
     "saude": (
-        r"doenc\w*", r"depress\w*", r"ansiedade", r"cancer", r"diagnostic\w*",
-        r"tratamento medic\w*", r"psiquiatr\w*", r"psicolog\w*", r"terapia",
-        r"gravidez", r"gravida", r"hiv", r"transtorno\w*", r"bipolar",
-        r"autis\w*", r"vicio\w*", r"dependente quimic\w*",
+        r"doenc\w*", r"doente\w*", r"deprim\w*", r"depress\w*", r"cancer",
+        r"oncologic\w*", r"quimioterapia", r"diagnosticad\w*",
+        r"diagnostico (?:de|medico)", r"tratamento (?:medico|psiquiatrico|oncologico)",
+        r"psiquiatr\w*", r"gravidez", r"gravida", r"gestante\w*", r"hiv",
+        r"transtorno\w*", r"crise de ansiedade", r"bipolar\w*", r"autis\w*",
+        r"tdah", r"diabet\w*", r"hipertens\w*", r"epilep\w*",
+        r"licenca medica", r"atestado medico", r"vicio\w*", r"dependente quimic\w*",
     ),
-    "deficiencia": (r"deficien\w*", r"cadeirante", r"surd[oa]", r"cego", r"cega"),
+    "deficiencia": (
+        r"deficien\w*", r"cadeirante\w*", r"surd[oa]s?", r"surdez", r"cego", r"cega",
+        r"cegueira", r"pcd",
+    ),
     "religiao": (
-        r"religi\w*", r"evangelic\w*", r"catolic\w*", r"espirita", r"ateu",
-        r"ateia", r"muculman\w*", r"judeu", r"judia", r"umbanda", r"candomble",
+        r"religi\w*", r"evangelic\w*", r"catolic\w*", r"cristao", r"crista\w*",
+        r"espirita\w*", r"ateu\w*", r"ateia\w*", r"mu[cç]?ulman\w*", r"muculman\w*",
+        r"islam\w*", r"judeu\w*", r"judia\w*", r"budis\w*", r"hindu\w*",
+        r"umbanda", r"candomble", r"pastor\w*", r"igreja",
     ),
     "politica": (
-        r"partido", r"petista", r"bolsonarista", r"esquerdista", r"direitista",
-        r"ideologia politica", r"voto em", r"eleitor\w*",
+        r"partido politico", r"filiad[oa] ao? partido", r"petista\w*", r"bolsonar\w*",
+        r"lulis\w*", r"esquerdista\w*", r"direitista\w*", r"ideologia politica",
+        r"vot(?:o|a|ou|a?ria)\s+(?:em|no|na)\b", r"eleitor\w*",
     ),
     "orientacao_sexual": (
-        r"homossexual\w*", r"gay", r"lesbica", r"bissexual\w*", r"transgenero",
+        r"homossexual\w*", r"homossexuais", r"gays?", r"lesbica\w*", r"bissexual\w*",
+        r"bissexuais", r"transgenero\w*", r"transexual\w*", r"transexuais", r"trans",
         r"orientacao sexual", r"lgbt\w*",
     ),
-    "origem_etnica": (r"raca", r"racial", r"etnia", r"negro", r"negra", r"indigena"),
-    "sindical": (r"sindicalizad\w*", r"filiad[oa] a sindicato", r"filiacao sindical"),
+    "origem_etnica": (r"racial", r"etnia\w*", r"etnico\w*", r"negr[oa]s?", r"indigena\w*"),
+    "sindical": (r"sindicalizad\w*", r"sindicato\w*", r"filiacao sindical"),
     "financeiro_judicial": (
-        r"endividad\w*", r"inadimplente", r"falido", r"falencia", r"processo criminal",
-        r"antecedentes", r"condenad\w*",
+        r"endividad\w*", r"divida\w*", r"devedor\w*", r"inadimplen\w*", r"falido\w*",
+        r"falencia", r"processo criminal", r"antecedentes criminais", r"condena\w*",
     ),
     "acesso_por_perfil": (
-        r"autoriz\w* (?:a|para)", r"pode (?:aprovar|acessar|decidir|receber)",
-        r"tem permissao", r"acesso (?:total|irrestrito|a)", r"confiavel para",
+        r"pode(?:m|ra|rao)? (?:aprovar|acessar|decidir|receber)", r"tem permissao",
+        r"tem acesso", r"possui acesso", r"acesso (?:total|irrestrito)",
+        r"autorizad[oa] a (?:aprovar|acessar|decidir)", r"confiavel para",
         r"pode ser confiad\w*", r"nivel de acesso",
     ),
 }
@@ -63,9 +74,12 @@ _PADROES = {
 
 
 def _normalizar(texto: str) -> str:
-    sem_acento = unicodedata.normalize("NFKD", texto)
-    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
-    return sem_acento.lower()
+    decomposto = unicodedata.normalize("NFKD", texto)
+    # Remove acentos (Mn) e caracteres de formato invisíveis (Cf: zero-width etc.).
+    limpo = "".join(
+        c for c in decomposto if unicodedata.category(c) not in ("Mn", "Cf")
+    )
+    return limpo.lower()
 
 
 def categorias_proibidas(texto) -> list[str]:
@@ -88,7 +102,12 @@ def sanear_modelo_interacao(modelo):
     saneado = dict(modelo)
     descartes: list[dict] = []
     for campo in _CAMPOS_TEXTO:
-        cats = categorias_proibidas(saneado.get(campo))
+        valor = saneado.get(campo)
+        if valor is not None and not isinstance(valor, str):
+            saneado[campo] = None
+            descartes.append({"campo": campo, "categorias": ["tipo_invalido"]})
+            continue
+        cats = categorias_proibidas(valor)
         if cats:
             saneado[campo] = None
             descartes.append({"campo": campo, "categorias": cats})
@@ -96,6 +115,9 @@ def sanear_modelo_interacao(modelo):
     if isinstance(acoes, list):
         mantidas = []
         for i, item in enumerate(acoes):
+            if not isinstance(item, str):
+                descartes.append({"campo": "acoes_recentes", "indice": i, "categorias": ["tipo_invalido"]})
+                continue
             cats = categorias_proibidas(item)
             if cats:
                 descartes.append({"campo": "acoes_recentes", "indice": i, "categorias": cats})

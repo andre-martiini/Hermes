@@ -36,6 +36,32 @@ class TestCategoriasProibidas(unittest.TestCase):
         self.assertIn("saude", categorias_proibidas("DEPRESSÃO"))
         self.assertIn("religiao", categorias_proibidas("Católica"))
 
+    def test_flexoes_e_vocabulario(self):
+        for texto in ("pessoas negras", "os judeus", "homossexuais", "lésbicas", "deprimido",
+                      "está doente", "poderá aprovar", "podem acessar", "diabetes", "TDAH",
+                      "licença médica", "surdez", "esquerdista", "vota no PT", "filiado ao sindicato",
+                      "devedor", "dívidas", "tem acesso", "possui acesso", "budista", "pastor da igreja",
+                      "bolsonarismo", "transexual", "gays"):
+            self.assertTrue(categorias_proibidas(texto), texto)
+
+    def test_caractere_invisivel(self):
+        self.assertIn("saude", categorias_proibidas("d\u200boença"))
+
+    def test_sem_falso_positivo_comum(self):
+        for texto in ("reunião do partido de pagamentos", "dúvida sobre a raça do cachorro",
+                      "enviou o diagnóstico do sistema", "relatório de psicologia",
+                      "acesso a planilha enviado", "autorizou a enviar relatório",
+                      "pedido de autorização para viagem", "cobrar o antecedentes",
+                      "tratamento cordial e formal", "atualizar processo SIPAC",
+                      "terapia ocupacional da turma"):
+            self.assertEqual(categorias_proibidas(texto), [], texto)
+
+    def test_tipos_invalidos_descartados(self):
+        s, d = sanear_modelo_interacao({"registro": {"t": "doença"}, "acoes_recentes": [{"t": "x"}, "a"]})
+        self.assertIsNone(s["registro"])
+        self.assertEqual(s["acoes_recentes"], ["a"])
+        self.assertEqual(len(d), 2)
+
     def test_fronteira_de_palavra(self):
         self.assertEqual(categorias_proibidas("sempre diz que o gaysers"), [])
         self.assertEqual(categorias_proibidas("hivernal"), [])
