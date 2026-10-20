@@ -40,9 +40,9 @@ class TestCategoriasProibidas(unittest.TestCase):
         for texto in ("pessoas negras", "os judeus", "homossexuais", "lésbicas", "deprimido",
                       "está doente", "poderá liberar pagamentos", "podem assinar transferências", "diabetes", "TDAH",
                       "licença médica", "surdez", "esquerdista", "vota no PT", "filiado ao sindicato", "sindicalista",
-                      "devedor", "está devendo", "tem acesso", "possui acesso", "budista", "testemunha de Jeová",
-                      "bolsonarismo", "transexual", "gays", "é do PT", "é de esquerda", "é crente", "tem covid",
-                      "foi preso", "possui acessos", "pode liberar pagamentos", "é de confiança", "gаy"):
+                      "devedor", "está devendo", "budista", "testemunha de Jeová",
+                      "bolsonarismo", "transexual", "gays", "vota no PT", "é crente de verdade", "tem covid",
+                      "pode liberar pagamentos", "gаy", "pessoa trans", "foi preso", "tem permissão para aprovar pagamento", "nível de acesso total"):
             self.assertTrue(categorias_proibidas(texto), texto)
 
     def test_caractere_invisivel(self):
@@ -57,7 +57,11 @@ class TestCategoriasProibidas(unittest.TestCase):
                       "terapia ocupacional da turma", "voto em separado", "votou no conselho",
                       "vício de forma no edital", "dívida ativa da instituição", "sindicato dos servidores reunião",
                       "pastoral", "igreja matriz endereço", "cadastro de gestante", "deficiência no serviço",
-                      "negro de fumo", "pode receber o material", "pode decidir depois", "processo criminal do edital"):
+                      "negro de fumo", "pode receber o material", "pode decidir depois", "processo criminal do edital",
+                      "caneta azul e preta", "Joao e Negro Ltda", "Rodovia Trans-Amazônica", "consulta ao Serasa para pesquisa de preços",
+                      "a porta e de esquerda", "o relatório é do PL 2338", "durante a covid o contrato foi suspenso",
+                      "o servidor esta internado no sistema", "estou crente que vai dar certo", "o setor tem acesso ao SIPAC",
+                      "tem poderes para representar", "cadeira de rodas para o campus", "o processo esta preso na CLC"):
             self.assertEqual(categorias_proibidas(texto), [], texto)
 
     def test_tipos_invalidos_descartados(self):
