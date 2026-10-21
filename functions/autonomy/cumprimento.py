@@ -42,6 +42,8 @@ _OBJETOS = (
     "pdf", "anexo", "lista", "modelo", "versao", "parecer", "tabela",
     "planejamento", "esboco",
 )
+_SO_ARQUIVO = frozenset({"arquivo", "foto", "print", "pdf", "anexo"})
+_MAX_MSG = 600
 _RE_OBJETO = re.compile(r"\b(" + "|".join(_OBJETOS) + r")s?\b")
 
 _ENTREGA = re.compile(
@@ -84,6 +86,9 @@ def avaliar_cumprimento(
     if _combinante_estranha(promessa) or _combinante_estranha(mensagem) or _combinante_estranha(nome_anexo):
         # Texto riscado/anulado por marcas combinantes: nunca firme.
         return Cumprimento(INCERTO, "marcas_combinantes", True)
+    if len(str(mensagem or "")) > _MAX_MSG:
+        # Mensagem longa nunca é fórmula de entrega (e limita o custo).
+        return Cumprimento(NAO_CUMPRE, "mensagem_longa", False)
     prom = _normalizar(promessa)
     msg = _normalizar(mensagem)
     anexo = re.sub(r"[_.\-]+", " ", _normalizar(nome_anexo))
@@ -123,6 +128,12 @@ def avaliar_cumprimento(
     if _promessa_qualificada(prom):
         return Cumprimento(INCERTO, "promessa_qualificada", True)
     if _formula_de_entrega(msg, objetos_prometidos):
+        if not tem_midia and (
+            re.search(r"\banex(?:o|ei)\b", msg) or objetos_prometidos & _SO_ARQUIVO
+        ):
+            # Fala em anexo/arquivo mas não há mídia: upload falho ou
+            # chamador errado; nunca fecha.
+            return Cumprimento(INCERTO, "anexo_sem_midia", True)
         if tem_midia and not _anexo_confere(nome_anexo, objetos_prometidos):
             # Mídia exige que o NOME do anexo case com todos os objetos
             # prometidos; foto/arquivo sem nome conferível nunca fecha.

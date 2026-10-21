@@ -630,8 +630,9 @@ pendencias:
 
 ```yaml
 pacote: "P07 sub-entrega 2/N -- passo 6 (parte pura): functions/autonomy/cumprimento.py. avaliar_cumprimento(promessa, mensagem, tem_midia, nome_anexo) -> cumprido/parcial/nao_cumpre/incerto. Gramática fechada (lista branca) em promessa, mensagem e nome do anexo: só 'cumprido' firme (incerta=False) se a mensagem é inteira marca de entrega + exatamente os objetos prometidos, a promessa é verbo de envio + objetos singulares + prazo simples, e, com mídia, o nome do anexo é só os objetos + extensão. Negação, pergunta, hedge, nova promessa, parcial, objeto diferente/incompleto, mídia sozinha, texto longo sobre outro assunto e marcas combinantes estranhas nunca fecham. Sem I/O e sem wiring; mensagem_cumpre_promessa (A06) NÃO alterada."
-estado: em_execucao
+estado: validado
 inicio: "2026-10-21T16:48:00Z"
+fim: "2026-10-21T18:10:00Z"
 decisoes:
   - id: p07-sub2-precisao-sobre-revocacao
     motivo: "Mesma decisão da sub 1: lista negra de qualificadores não fecha (rodadas 1-4 acharam variações novas a cada vez); trocado por gramática fechada. Perde recall de propósito; incerto mantém o compromisso pendente."
@@ -641,12 +642,13 @@ decisoes:
     motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 17h; trabalho feito na branch designada claude/lucid-allen-nl4cc3."
 testes:
   resultados:
-    - "functions/ completo ANTES 4467 OK (head de main, conforme P07 sub 1); DEPOIS 4484 OK (224s); test_autonomy_cumprimento 17 OK (novo arquivo)."
+    - "functions/ completo ANTES 4467 OK (head de main, conforme P07 sub 1); DEPOIS 4485 OK (226s) + 4485 após rodada 6 (teste ampliado, sem novo teste); test_autonomy_cumprimento 18 OK (novo arquivo)."
 revisao_adversarial:
   - "Rodada 1 (agente sem contexto): entrega parcial por palavras não cobertas, qualificadores (em branco/errada/rascunho), destinatário/dono, dois objetos com só um entregue, objeto igual com conteúdo diferente, mídia sem conferir nome. Corrigido com lista branca na mensagem e nome do anexo."
   - "Rodada 2: nome do anexo com palavras extras e fórmula truncada ('segue o relatório e'). Corrigido (anexo = objetos + extensão; mensagem começa na marca e termina em objeto)."
   - "Rodada 3: objeto prometido fora do vocabulário, plural/número, qualificador na promessa, exclusão/alternativa, texto não latino. Corrigido com lista branca também na promessa."
   - "Rodada 4: promessa truncada, marcas combinantes (tachado), tokens soltos/repetidos e pontuação repetida. Corrigido com gramática fechada por regex fullmatch, rejeição de Mn estranhas e pontuação única final. Limitação aceita: plural na mensagem ('segue o relatórios') casa o objeto singular."
-  - "Rodada 5: pendente no momento deste registro (ver pendencias)."
+  - "Rodada 5: texto sem mídia fechava mesmo falando em anexo/objeto só-arquivo (foto, print, pdf, anexo) e mensagem sem limite de tamanho. Corrigido: sem tem_midia -> incerto; mensagem >600 chars -> nao_cumpre."
+  - "Rodada 6: 'arquivo' também é só-arquivo (corrigido). Aceito por design: planilha/documento/etc. como texto sem mídia ainda fecham; o consumidor futuro (sem wiring agora) deve exigir evidência de anexo; nenhuma outra burla achada."
 pendencias:
-  - "Resultado da rodada 5 e merge; P07 passos 2 (extração estruturada, sombra), 3, 5, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
+  - "P07 passos 2 (extração estruturada, sombra), 3, 5, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."

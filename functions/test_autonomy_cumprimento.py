@@ -13,8 +13,11 @@ class AvaliarCumprimentoTest(unittest.TestCase):
     P = "Te envio o relatório amanhã"
 
     def test_entrega_com_objeto_cumpre(self):
-        for m in ("Segue o relatório", "Enviei o relatório em anexo", "segue em anexo o relatório!"):
+        for m in ("Segue o relatório", "segue o relatório!"):
             self.assertTrue(fecha(avaliar_cumprimento(self.P, m)), m)
+        for m in ("Enviei o relatório em anexo", "segue em anexo o relatório!"):
+            self.assertFalse(fecha(avaliar_cumprimento(self.P, m)), m)
+            self.assertTrue(fecha(avaliar_cumprimento(self.P, m, True, "relatorio.pdf")), m)
 
     def test_anexo_com_nome_casando_cumpre(self):
         self.assertFalse(fecha(avaliar_cumprimento(self.P, "Segue", True, "Relatorio_final.pdf")))
@@ -130,8 +133,16 @@ class AvaliarCumprimentoTest(unittest.TestCase):
                   "segue o relatório e o relatório"):
             self.assertFalse(fecha(avaliar_cumprimento(P, m)), m)
         self.assertFalse(fecha(avaliar_cumprimento(P, "segue o relatório", True, "relatorio̶.pdf")))
-        for m in ("Segue o relatório", "enviei o relatório em anexo", "Segue em anexo o relatório!"):
+        for m in ("Segue o relatório", "enviei o relatório", "Segue o relatório!"):
             self.assertTrue(fecha(avaliar_cumprimento(P, m)), m)
+
+    def test_rodada5_anexo_sem_midia_nao_fecha(self):
+        for p, m in (("vou enviar a foto", "segue a foto"), ("vou enviar o pdf", "segue em anexo o pdf"),
+                     ("vou enviar o relatorio", "segue o relatorio em anexo"),
+                     ("vou enviar o anexo", "anexei o anexo"), ("vou enviar o arquivo", "segue o arquivo")):
+            self.assertFalse(fecha(avaliar_cumprimento(p, m, False, "")), m)
+        self.assertFalse(fecha(avaliar_cumprimento("vou enviar o relatorio", "segue o relatorio " + "x" * 700)))
+        self.assertTrue(fecha(avaliar_cumprimento("vou enviar o pdf", "segue o pdf", True, "pdf.pdf")))
 
 
 if __name__ == "__main__":
