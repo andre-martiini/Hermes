@@ -183,11 +183,16 @@ def _textos_pedidos(args) -> dict:
     return pedidos
 
 
+# Motivo do `falhou` quando a ferramenta não gravou nada. Para o modelo continua
+# sendo falha (não pode dizer que atualizou); para a contagem de escritas não é
+# erro, porque não houve escrita (`trava_confirmacao.registrar_escrita`).
+NADA_GRAVADO = "nenhuma etapa foi gravada: os valores enviados já eram os atuais."
+
+
 def editar_plano(db, args, resultado, nome="editar_plano_acao"):
     texto = _texto(resultado).strip()
     if texto.startswith("AVISO|") or texto.startswith("OK|Nenhuma etapa mudou"):
-        return _falhou(nome, f"tarefas/{_arg(args, 'task_id')}",
-                       "nenhuma etapa foi gravada: os valores enviados já eram os atuais.")
+        return _falhou(nome, f"tarefas/{_arg(args, 'task_id')}", NADA_GRAVADO)
     partes = _ok_pipe(resultado)
     if partes is None:
         return _erro_da_ferramenta(nome, resultado)
