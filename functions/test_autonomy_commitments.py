@@ -100,6 +100,14 @@ class ClassificarTest(unittest.TestCase):
         self.assertIsNone(c.extrair_prazo_expresso("Te envio hoje 22/10", h).data)
         self.assertEqual(c.extrair_prazo_expresso("Te envio até 25/10", h).data, date(2026, 10, 25))
 
+    def test_rodada6_ruido_e_dia_n(self):
+        h = date(2026, 10, 21)
+        for t in ("Te envio hoje?!", "Te envio hoje 🙄", "Te envio amanhã 😂", "Te envio hoje？"):
+            r = c.classificar_mensagem(t, h)
+            self.assertFalse(r.classe == c.PROMESSA and not r.incerta, t)
+        for t in ("Te envio hoje dia 22", "Te envio amanhã dia 23"):
+            self.assertIsNone(c.extrair_prazo_expresso(t, h).data, t)
+
     def test_texto_grande(self):
         r = c.classificar_mensagem("a " * 500000)
         self.assertEqual(r.classe, c.NAO_RELACIONADA)

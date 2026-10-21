@@ -153,6 +153,8 @@ def extrair_prazo_expresso(texto, hoje: date | None = None) -> Prazo | None:
     n = _normalizar(texto)
     if not n or _NEGACAO.search(n):
         return None  # "hoje não, amanhã" é ambíguo: não inventar prazo
+    if re.search(r"\bdia \d{1,2}\b(?!/)", n) and not re.search(r"\b(dia|ate|para|pra|em) \d{1,2}/", n):
+        return Prazo(PRAZO_EXPRESSO, "dia_n", None)  # "dia 22": mês/ano indefinidos
     termos = set(re.findall(r"\b(hoje|amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b", n))
     if re.search(r"\b(semana|proxim[ao]s?|passad[ao]s?|que vem|que tirei|(?<!depois )de (hoje|amanha))\b", n):
         # referência relativa composta ou ao objeto/evento, não ao prazo da entrega
@@ -204,7 +206,7 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
             # prazo vencido): sem data, nunca empurrada para o ano seguinte.
             return Prazo(PRAZO_EXPRESSO, m.group(0), data) if data >= hoje else None
         return None
-    m = re.search(r"\b(em|dentro de) \d{1,2} (hora|horas|dia|dias|minutos)\b|\bas (?:[01]?\d|2[0-3])(?:h|:[0-5]\d)\b", n)
+    m = re.search(r"\b(em|dentro de) \d{1,2} (hora|horas|dia|dias|minutos)\b|\bas (?:[01]?\d|2[0-3])(?:h|:[0-5]\d)\b(?!\d)", n)
     if m:
         return Prazo(PRAZO_EXPRESSO, m.group(0), None)
     return None
@@ -222,8 +224,8 @@ _NEUTRAS = frozenset(
 
 
 def _firme_estrito(n: str, trecho_promessa: str) -> bool:
-    """Lista branca de firmeza: promessa só é firme quando a cláusula da promessa tem no máximo 3
-    palavras de conteúdo (fora a frase de promessa e palavras neutras:
+    """Lista branca de firmeza: promessa só é firme quando a cláusula da promessa tem no máximo 1
+    palavra de conteúdo (fora a frase de promessa e palavras neutras:
     artigos, prazo, cortesia) e todas as outras cláusulas são neutras.
     Qualquer ressalva não prevista no léxico de hedge cai aqui como incerta."""
     conteudo = 0
@@ -241,7 +243,7 @@ def _firme_estrito(n: str, trecho_promessa: str) -> bool:
             conteudo = len(extras)
         elif extras:
             return False  # outra cláusula com conteúdo (ressalva, condição, 2º assunto)
-    return conteudo <= 3
+    return conteudo <= 1  # no máximo o objeto ("o relatório")
 
 
 def _primeira(padroes, n: str) -> str | None:
@@ -261,6 +263,10 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
         return Classificacao(NAO_RELACIONADA, "", False)
     prazo = extrair_prazo_expresso(texto, hoje)  # tolera `hoje` inválido
     ev_promessa = _primeira(_PROMESSA, n)
+    ruido = isinstance(texto, str) and (
+        any(ord(ch) > 0x2000 and unicodedata.category(ch) in ("So", "Sk", "Sm") for ch in texto)
+        or re.search(r"[?？¿]", texto)
+    )
     if not ev_promessa and not _primeira(_CANCEL, n) and (
         n.endswith("?") or _INTERROGATIVAS.search(n)
     ):
@@ -275,7 +281,7 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
         return Classificacao(INTENCAO_VAGA, ev, True, prazo)
     if ev_promessa and re.search(r"\bquando (voce|vc|ele|ela|eles|elas) \w+\b", n):
         return Classificacao(INTENCAO_VAGA, "quando <outro>", True, prazo)
-    if n.endswith("?") or (_INTERROGATIVAS.search(n) and not ev_promessa):
+    if re.search(r"[?？¿]", str(texto)) and ev_promessa or n.endswith("?") or (_INTERROGATIVAS.search(n) and not ev_promessa):
         # Promessa que pede confirmação ("te envio amanhã, ok?") continua
         # pergunta, mas nunca firme.
         return Classificacao(PERGUNTA, n[:80], bool(ev_promessa), None)
@@ -289,7 +295,7 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
         # data mencionada mas ilegível/inválida: não é firme.
         data_ilegivel = prazo is None and re.search(r"\b\d{1,2}/\d{1,2}\b", n)
         passado = re.search(r"\b(ontem|anteontem)\b", n)
-        incerta = bool(data_ilegivel or passado) or not _firme_estrito(n, ev_promessa)
+        incerta = bool(data_ilegivel or passado or ruido) or not _firme_estrito(n, ev_promessa)
         return Classificacao(PROMESSA, ev_promessa, incerta, prazo)
     return Classificacao(NAO_RELACIONADA, "", False)
 
