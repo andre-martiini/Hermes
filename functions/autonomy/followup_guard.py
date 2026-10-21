@@ -73,7 +73,9 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
     if not isinstance(contexto.get("rascunho_pendente"), bool):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
 
-    estado_atencao = contexto.get("estado_atencao")
+    if "estado_atencao" not in contexto:
+        return DecisaoFollowup(ADIAR, "contexto_invalido")
+    estado_atencao = contexto["estado_atencao"]
     if estado_atencao is not None and not isinstance(estado_atencao, str):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
     if estado_atencao in ESTADOS_ATENCAO_FECHADOS:
