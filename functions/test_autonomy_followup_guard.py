@@ -67,6 +67,12 @@ class RevalidarFollowupTest(unittest.TestCase):
             d = revalidar_followup(c, x)
             self.assertEqual((d.acao, d.motivo), (ADIAR, "contexto_invalido"), (c, x))
 
+    def test_texto_ausente_ou_invalido_adia(self):
+        c = comp()
+        del c["texto"]
+        self.assertEqual(revalidar_followup(c, ctx()).motivo, "contexto_invalido")
+        self.assertEqual(revalidar_followup(comp(texto=5), ctx()).motivo, "contexto_invalido")
+
     def test_estado_atencao_ausente_adia(self):
         x = ctx()
         del x["estado_atencao"]

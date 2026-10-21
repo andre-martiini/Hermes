@@ -68,7 +68,11 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
         return DecisaoFollowup(SUPRIMIR, "compromisso_encerrado")
     prometido_em = _dt(compromisso.get("prometido_em"))
     mensagens = contexto.get("mensagens")
-    if prometido_em is None or not isinstance(mensagens, list):
+    if (
+        prometido_em is None
+        or not isinstance(mensagens, list)
+        or not isinstance(compromisso.get("texto"), str)
+    ):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
     if not isinstance(contexto.get("rascunho_pendente"), bool):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
