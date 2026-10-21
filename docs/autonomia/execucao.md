@@ -553,45 +553,8 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 # (Em 2026-10-20 os blocos "P06 sub-entrega 6/N" e "7/N" foram movidos para docs/autonomia/execucao-archive-p06sub6-sub7.md, preventivamente: arquivo ativo ~50KB.)
 # (Em 2026-10-20 os blocos "P06 sub-entrega 8/N" e "9/N" foram movidos para docs/autonomia/execucao-archive-p06sub8-sub9.md, preventivamente: arquivo ativo >50KB.)
 # (Em 2026-10-21 os blocos "P06 sub-entrega 10/N" e "11/N" foram movidos para docs/autonomia/execucao-archive-p06sub10-sub11.md, preventivamente: arquivo ativo >50KB.)
-pacote: "P06 sub-entrega 12/N -- passo 6 (parte de leitura, 2/2), tool MCP SOMENTE LEITURA obter_contexto_operacional (functions/tools/obter_contexto_operacional.py): pendências abertas (atencao.coletar_fila_atencao), últimos resultados de rotinas (agent_runs.listar_recentes) e POPs (pops_diretrizes via autonomy.pops_mapa) -- sempre ativos com instrução inteira, os demais só título/n_gatilhos. Cada fonte é lida isolada: falha vira fontes[nome]='falhou (...)' + lacunas, sem derrubar as outras. Registrada em registry/inventory/schema, fora do canal de voz."
-estado: validado
-inicio: "2026-10-20T10:50:00Z"
-fim: "2026-10-20T11:20:00Z"
-decisoes:
-  - id: p06-sub12-sem-cursor
-    motivo: "Cursor incremental (passo 7) segue pendente: exige segredo de assinatura de origem indefinida; a tool é aditiva e reversível."
-  - id: p06-sub12-instrucao-inteira
-    motivo: "Achado da revisão: cortar a instrução de POP sempre ativo em 400 chars entregaria restrição crítica pela metade como se completa; instrução vai inteira (o sistema já a injeta inteira), demais textos cortados em 400."
-  - id: p06-sub12-triagem
-    motivo: "Nenhuma PR aberta no início do disparo; nada a mesclar/fechar. execucao.md arquivado (blocos P06 sub 6 e 7)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4365 OK (head de main, registro da sub 11/N); test_obter_contexto_operacional 13 OK (novo arquivo); DEPOIS 4390 OK (222s) no head final (test_obter_contexto_operacional 16 OK)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): reais corrigidos -- instrução de POP truncada sem lacuna, finalizado_em preenchido com criado_em em execução em andamento, valores não-string passando sem limite; testes de POP malformado, sempre_ativo truthy e limite reforçados."
-  - "Rodadas 2 e 3 (agentes sem contexto): reais corrigidos -- id de POP repetido (primeira ocorrência, como o mapa), id não hashável derrubando todas as regras, campos não-string sem limite, total inválido; sem outro achado nas correções. Rodada 4: não achou nada."
-pendencias:
-  - "Passo 7 (cursor assinado + contexto incremental), similaridade vetorial real, passo 9 (modelo por pessoa)."
-
----
-pacote: "P06 sub-entrega 13/N -- passo 9, guarda do modelo por pessoa: functions/autonomy/modelo_pessoa_guarda.py (puro). sanear_modelo_interacao descarta, campo a campo, texto do modelo_interacao (gerado por LLM) que infira traço sensível (saúde, religião, política, orientação sexual, etnia, deficiência, sindical, financeiro/judicial) ou acesso por perfil, devolvendo os descartes (campo/categoria, sem o texto). Ligado em main.parse_resposta_modelo_pessoa; regra 3 nova no prompt de geração. Nenhum código usa modelo_interacao para conceder acesso (só leitura em buscar_contato)."
-estado: validado
-inicio: "2026-10-20T13:50:00Z"
-fim: "2026-10-20T14:40:00Z"
-decisoes:
-  - id: p06-sub13-melhor-esforco
-    motivo: "Lista de termos é defesa em profundidade, não exaustiva; a barreira primária é o prompt. Termos ambíguos com uso administrativo comum (voto em colegiado, vício de forma, dívida ativa, sindicato, igreja/pastoral, 'tem acesso', trans solto, Serasa/SPC) ficam de fora de propósito para não apagar conteúdo legítimo."
-  - id: p06-sub13-triagem
-    motivo: "Nenhuma PR aberta no início do disparo; nada a mesclar/fechar."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4390 OK (217s, head de main); test_modelo_pessoa_guarda 17 OK (novo arquivo) + test_modelo_pessoa sem regressão; DEPOIS 4406 OK (219s) no head final."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): reais corrigidos -- flexões/vocabulário, caractere invisível Cf, falsos positivos (partido, raça, acesso a, autorização), tipos não-string."
-  - "Rodada 2: reais corrigidos -- falsos positivos de vot*, vício, dívida, sindicato, processo criminal, igreja/pastor; verbos de permissão; vocabulário extra; homóglifos cirílicos/gregos."
-  - "Rodada 3: reais corrigidos -- falsos positivos de 'e preta/pardo', trans solto, Serasa/SPC, 'e de esquerda', PL, covid, internado, crente, tem acesso, cadeira de rodas, esta preso (todos removidos/estreitados, só reduz descartes). Codex (PR #477): P1 real (modelos já gravados escapavam da guarda pelo early-return do hash; agora também sanados na leitura de buscar_contato) + 2 P2 (acesso e etnia, padrões ampliados). Rodada 4 (agente sem contexto): falsos positivos novos (pode aprovar contrato, a tinta é negra, senhor negro Ltda) corrigidos exigindo sujeito pessoal (ele/ela/contato/pessoa ou início do texto) e removendo o objeto contrato de autorizado-a; sem regressão em _buscar_contato."
-pendencias:
-  - "Passo 7 (cursor assinado + contexto incremental; origem do segredo indefinida), similaridade vetorial real."
+# (Em 2026-10-21 os blocos "P06 sub-entrega 12/N" e "13/N" foram movidos para docs/autonomia/execucao-archive-p06sub12-sub13.md, preventivamente: arquivo ativo >50KB.)
+```
 
 ---
 
@@ -662,3 +625,31 @@ pendencias:
   - "Decidido no disparo de 21/10 14h: módulo mesclado como seletor puro sem wiring; incerta=False = nenhum hedge detectado, a firmeza real virá da extração estruturada (LLM, sombra) + política."
   - "P07 passos 2 (extração estruturada com evidências, modo sombra), 3, 5, 6, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
 ```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 2/N -- passo 6 (parte pura): functions/autonomy/cumprimento.py. avaliar_cumprimento(promessa, mensagem, tem_midia, nome_anexo) -> cumprido/parcial/nao_cumpre/incerto. Gramática fechada (lista branca) em promessa, mensagem e nome do anexo: só 'cumprido' firme (incerta=False) se a mensagem é inteira marca de entrega + exatamente os objetos prometidos, a promessa é verbo de envio + objetos singulares + prazo simples, e, com mídia, o nome do anexo é só os objetos + extensão. Negação, pergunta, hedge, nova promessa, parcial, objeto diferente/incompleto, mídia sozinha, texto longo sobre outro assunto e marcas combinantes estranhas nunca fecham. Sem I/O e sem wiring; mensagem_cumpre_promessa (A06) NÃO alterada."
+estado: validado
+inicio: "2026-10-21T16:48:00Z"
+fim: "2026-10-21T18:10:00Z"
+decisoes:
+  - id: p07-sub2-precisao-sobre-revocacao
+    motivo: "Mesma decisão da sub 1: lista negra de qualificadores não fecha (rodadas 1-4 acharam variações novas a cada vez); trocado por gramática fechada. Perde recall de propósito; incerto mantém o compromisso pendente."
+  - id: p07-sub2-arquivo-execucao
+    motivo: "execucao.md arquivado (blocos P06 sub 12 e 13 -> execucao-archive-p06sub12-sub13.md)."
+  - id: p07-sub2-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 17h; trabalho feito na branch designada claude/lucid-allen-nl4cc3."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4467 OK (head de main, conforme P07 sub 1); DEPOIS 4486 OK (240s, head final); test_autonomy_cumprimento 19 OK (novo arquivo)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): entrega parcial por palavras não cobertas, qualificadores (em branco/errada/rascunho), destinatário/dono, dois objetos com só um entregue, objeto igual com conteúdo diferente, mídia sem conferir nome. Corrigido com lista branca na mensagem e nome do anexo."
+  - "Rodada 2: nome do anexo com palavras extras e fórmula truncada ('segue o relatório e'). Corrigido (anexo = objetos + extensão; mensagem começa na marca e termina em objeto)."
+  - "Rodada 3: objeto prometido fora do vocabulário, plural/número, qualificador na promessa, exclusão/alternativa, texto não latino. Corrigido com lista branca também na promessa."
+  - "Rodada 4: promessa truncada, marcas combinantes (tachado), tokens soltos/repetidos e pontuação repetida. Corrigido com gramática fechada por regex fullmatch, rejeição de Mn estranhas e pontuação única final. Limitação aceita: plural na mensagem ('segue o relatórios') casa o objeto singular."
+  - "Rodada 5: texto sem mídia fechava mesmo falando em anexo/objeto só-arquivo (foto, print, pdf, anexo) e mensagem sem limite de tamanho. Corrigido: sem tem_midia -> incerto; mensagem >600 chars -> nao_cumpre."
+  - "Rodada 6: 'arquivo' também é só-arquivo (corrigido). Aceito por design: planilha/documento/etc. como texto sem mídia ainda fecham; o consumidor futuro (sem wiring agora) deve exigir evidência de anexo; nenhuma outra burla achada."
+  - "Codex na PR #482 (P2 real, corrigido): marca combinante em pré-composto (U+1E69) escapava da checagem; agora confere original e NFD. Rodada 7: U+0340/0341/0344 viram acento permitido só no NFD; agora o original também é conferido. Rodada 8: não achou nada."
+pendencias:
+  - "P07 passos 2 (extração estruturada, sombra), 3, 5, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
