@@ -642,7 +642,7 @@ decisoes:
     motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 17h; trabalho feito na branch designada claude/lucid-allen-nl4cc3."
 testes:
   resultados:
-    - "functions/ completo ANTES 4467 OK (head de main, conforme P07 sub 1); DEPOIS 4485 OK (226s) + 4485 após rodada 6 (teste ampliado, sem novo teste); test_autonomy_cumprimento 18 OK (novo arquivo)."
+    - "functions/ completo ANTES 4467 OK (head de main, conforme P07 sub 1); DEPOIS 4486 OK (240s, head final); test_autonomy_cumprimento 19 OK (novo arquivo)."
 revisao_adversarial:
   - "Rodada 1 (agente sem contexto): entrega parcial por palavras não cobertas, qualificadores (em branco/errada/rascunho), destinatário/dono, dois objetos com só um entregue, objeto igual com conteúdo diferente, mídia sem conferir nome. Corrigido com lista branca na mensagem e nome do anexo."
   - "Rodada 2: nome do anexo com palavras extras e fórmula truncada ('segue o relatório e'). Corrigido (anexo = objetos + extensão; mensagem começa na marca e termina em objeto)."
@@ -650,5 +650,6 @@ revisao_adversarial:
   - "Rodada 4: promessa truncada, marcas combinantes (tachado), tokens soltos/repetidos e pontuação repetida. Corrigido com gramática fechada por regex fullmatch, rejeição de Mn estranhas e pontuação única final. Limitação aceita: plural na mensagem ('segue o relatórios') casa o objeto singular."
   - "Rodada 5: texto sem mídia fechava mesmo falando em anexo/objeto só-arquivo (foto, print, pdf, anexo) e mensagem sem limite de tamanho. Corrigido: sem tem_midia -> incerto; mensagem >600 chars -> nao_cumpre."
   - "Rodada 6: 'arquivo' também é só-arquivo (corrigido). Aceito por design: planilha/documento/etc. como texto sem mídia ainda fecham; o consumidor futuro (sem wiring agora) deve exigir evidência de anexo; nenhuma outra burla achada."
+  - "Codex na PR #482 (P2 real, corrigido): marca combinante em pré-composto (U+1E69) escapava da checagem; agora confere original e NFD. Rodada 7: U+0340/0341/0344 viram acento permitido só no NFD; agora o original também é conferido. Rodada 8: não achou nada."
 pendencias:
   - "P07 passos 2 (extração estruturada, sombra), 3, 5, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."

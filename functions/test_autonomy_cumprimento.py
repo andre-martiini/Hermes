@@ -144,6 +144,13 @@ class AvaliarCumprimentoTest(unittest.TestCase):
         self.assertFalse(fecha(avaliar_cumprimento("vou enviar o relatorio", "segue o relatorio " + "x" * 700)))
         self.assertTrue(fecha(avaliar_cumprimento("vou enviar o pdf", "segue o pdf", True, "pdf.pdf")))
 
+    def test_precomposto_com_marca_estranha_nao_fecha(self):
+        P = "Te mando o relatório amanhã"
+        self.assertFalse(fecha(avaliar_cumprimento(P, "\u1e69egue o relatório")))
+        for m in ("segue o relatório\u0344", "segue o relaẗ\u0341ório", "segue o relatório\u0340"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, m)), m)
+        self.assertTrue(fecha(avaliar_cumprimento(P, "segue o relatório")))
+
 
 if __name__ == "__main__":
     unittest.main()

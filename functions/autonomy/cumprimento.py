@@ -66,10 +66,17 @@ class Cumprimento:
 
 
 def _combinante_estranha(texto) -> bool:
-    """Marca combinante fora dos acentos do português (grave, agudo, circunflexo, til, trema, cedilha), p.ex. tachado."""
-    return isinstance(texto, str) and any(
-        unicodedata.category(c) in ("Mn", "Me") and c not in "\u0300\u0301\u0302\u0303\u0308\u0327"
-        for c in texto
+    """Marca combinante fora dos acentos do português (grave, agudo,
+    circunflexo, til, trema, cedilha), p.ex. tachado. Confere o texto original
+    E o NFD: pré-compostos (U+1E69) escondem a marca no original; marcas como
+    U+0340/0341/0344 viram acento permitido só depois do NFD."""
+    if not isinstance(texto, str):
+        return False
+    permitidas = "\u0300\u0301\u0302\u0303\u0308\u0327"
+    return any(
+        unicodedata.category(c) in ("Mn", "Me") and c not in permitidas
+        for forma in (texto, unicodedata.normalize("NFD", texto))
+        for c in forma
     )
 
 
