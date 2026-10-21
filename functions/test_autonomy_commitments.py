@@ -122,6 +122,35 @@ class ClassificarTest(unittest.TestCase):
             r = c.classificar_mensagem(t)
             self.assertFalse(r.classe == c.PROMESSA and not r.incerta, t)
 
+    def test_rodada7_cancelamento_conservador(self):
+        h = date(2026, 10, 21)
+        for t in ("Não cancela o pedido", "Não desisti, te envio amanhã", "Nunca cancelei nada",
+                  "Não desconsidere o pedido", "Não esquece isso"):
+            r = c.classificar_mensagem(t, h)
+            self.assertFalse(r.classe == c.CANCELAMENTO and not r.incerta, t)
+        for t in ("Não vou conseguir enviar hoje, mas amanhã envio", "Hoje não te envio, amanhã sim",
+                  "Não posso enviar agora, te envio amanhã", "Te envio o relatório amanhã. Reunião cancelada.",
+                  "Cancela o cartão", "Eu desisti de fazer dieta", "Não vou ver o jogo", "Não vou ir na festa"):
+            r = c.classificar_mensagem(t, h)
+            self.assertFalse(r.classe == c.CANCELAMENTO and not r.incerta, t)
+        for t in ("não consigo mandar agora", "não posso enviar hoje", "não vou enviar antes de quarta",
+                  "não vou enviar sem você", "não vou enviar enquanto não pagar", "esquece o anexo antigo que mando o novo",
+                  "desconsidere o anterior que envio outro", "ele não vai enviar nada", "a Maria não vai mandar",
+                  "não precisa mais ligar", "não vou enviar por email", "não vou enviar essa semana",
+                  "não vou entregar a tempo", "não consigo enviar o anexo", "não vai mandar nada",
+                  "não vou conseguir entregar isso", "não posso enviar", "esquece", "não precisa mais"):
+            r = c.classificar_mensagem(t, h)
+            self.assertFalse(r.classe == c.CANCELAMENTO and not r.incerta, t)
+        for t in ("Não vou mais enviar", "Não vou te enviar mais", "Esquece isso", "Desconsidere o pedido", "Pode deixar quieto"):
+            r = c.classificar_mensagem(t, h)
+            self.assertEqual((r.classe, r.incerta), (c.CANCELAMENTO, False), t)
+
+    def test_rodada7_prazo(self):
+        h = date(2026, 10, 21)
+        for t in ("Te envio o relatório pra 3/11 pessoas", "para 5/12 alunos", "a pizza em 12/12 fatias",
+                  "Te envio até 25/10 e 26/10"):
+            self.assertIsNone(getattr(c.extrair_prazo_expresso(t, h), "data", None), t)
+
     def test_texto_grande(self):
         r = c.classificar_mensagem("a " * 500000)
         self.assertEqual(r.classe, c.NAO_RELACIONADA)
@@ -171,7 +200,7 @@ class PrazoTest(unittest.TestCase):
         self.assertEqual(c.extrair_prazo_expresso("até sexta", self.hoje).data, date(2026, 10, 23))
 
     def test_mesmo_dia_da_semana_vai_para_proxima(self):
-        self.assertEqual(c.extrair_prazo_expresso("até quarta", self.hoje).data, date(2026, 10, 28))
+        self.assertIsNone(c.extrair_prazo_expresso("até quarta", self.hoje).data)
 
     def test_dd_mm_passado_vira_ano_seguinte_e_invalido_ignora(self):
         self.assertIsNone(c.extrair_prazo_expresso("dia 5/3", self.hoje))

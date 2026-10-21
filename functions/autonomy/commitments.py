@@ -95,6 +95,20 @@ _CANCEL = [re.compile(p) for p in (
     r"\bdeixa (pra la|quieto)\b", r"\bdesisti\b",
 )]
 
+_CANCEL_NEGADO = re.compile(
+    r"\b(nao|n|num|naum|nunca|jamais) (desisti|cancel\w+|desconsider\w+|esquec\w+|deixa\b)"
+)
+# Cancelamento firme = a mensagem INTEIRA é uma fórmula curta e inequívoca de
+# desistência (lista branca ancorada; qualquer prazo, condição, sujeito
+# terceiro, canal ou 2a cláusula faz a mensagem sair incerta).
+_CANCEL_FIRME = re.compile(
+    r"^(?:(?:nao|n|num|naum) (?:vou|posso|consigo) mais (?:te |lhe )*(?:enviar|mandar|entregar|encaminhar)"
+    r"|(?:nao|n|num|naum) (?:vou|posso|consigo) (?:te |lhe )*(?:enviar|mandar|entregar|encaminhar) mais"
+    r"|nunca (?:mais )?(?:te |lhe )(?:envio|mando|encaminho|entrego)"
+    r"|esquece (?:isso|tudo|o pedido)|desconsidere o pedido(?: anterior)?"
+    r"|pode deixar (?:quieto|pra la|de lado)|deixa (?:pra la|quieto))[.!]*$"
+)
+
 _PARCIAL = [re.compile(p) for p in (
     r"\bsegue (a )?(primeira|1a|1) parte\b", r"\bsegue parte\b",
     r"\bso (o|a|os|as) [a-z0-9 ]{1,30} por enquanto\b",
@@ -159,7 +173,7 @@ def extrair_prazo_expresso(texto, hoje: date | None = None) -> Prazo | None:
     if re.search(r"\b(semana|proxim[ao]s?|passad[ao]s?|que vem|que tirei|(?<!depois )de (hoje|amanha))\b", n):
         # referência relativa composta ou ao objeto/evento, não ao prazo da entrega
         return Prazo(PRAZO_EXPRESSO, "relativo", None) if termos else None
-    if len(termos) > 1 or (termos and re.search(r"\b\d{1,2}/\d{1,2}\b", n)):
+    if len(termos) > 1 or (termos and re.search(r"\b\d{1,2}/\d{1,2}\b", n)) or len(re.findall(r"\b\d{1,2}/\d{1,2}\b", n)) > 1:
         return Prazo(PRAZO_EXPRESSO, "multiplo", None)
     try:
         return _prazo(n, hoje)
@@ -187,10 +201,11 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
         alvo = _DIAS_SEMANA[m.group(3)]
         data = None
         if hoje is not None:
-            delta = (alvo - hoje.weekday()) % 7 or 7
-            data = hoje + timedelta(days=delta)
+            delta = (alvo - hoje.weekday()) % 7
+            # "até quarta" dito numa quarta pode ser hoje ou daqui a 7 dias: sem data.
+            data = hoje + timedelta(days=delta) if delta else None
         return Prazo(PRAZO_EXPRESSO, m.group(0), data)
-    m = re.search(r"(?<!\b(?:do|da|de|ao) )(?<!referente a )\b(dia|ate|para|pra|em) (\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])", n)
+    m = re.search(r"(?<!\b(?:do|da|de|ao) )(?<!referente a )\b(dia|ate|para|pra|em) (\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])(?!\s+[a-z]+s\b)", n)
     if m and hoje is not None:
         dia, mes = int(m.group(2)), int(m.group(3))
         if m.group(4):
@@ -281,7 +296,16 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
         # "Não te envio hoje?" é pergunta/proposta, nunca cancelamento firme.
         return Classificacao(PERGUNTA, n[:80], True, None)
     if ev:
-        return Classificacao(CANCELAMENTO, ev, False, None)
+        if _CANCEL_NEGADO.search(n):
+            # "Não desisti", "não cancela o pedido": negação do próprio gatilho.
+            return Classificacao(INTENCAO_VAGA, ev, True, prazo)
+        # Cancelamento só é firme quando o gatilho é inequívoco, a mensagem é
+        # só a fórmula (sem promessa/adiamento/prazo) ("não posso hoje, amanhã envio").
+        firme = (
+            _CANCEL_FIRME.search(n) is not None
+            and not ev_promessa
+        )
+        return Classificacao(CANCELAMENTO, ev, not firme, None)
     ev = _primeira(_VAGA, n)
     if ev:
         return Classificacao(INTENCAO_VAGA, ev, True, prazo)
