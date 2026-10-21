@@ -15,6 +15,7 @@ ou `NAO_CUMPRE`, e quem consome mantém o compromisso pendente.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from autonomy.commitments import (
@@ -62,6 +63,14 @@ class Cumprimento:
     incerta: bool
 
 
+def _combinante_estranha(texto) -> bool:
+    """Marca combinante fora dos acentos do português (grave, agudo, circunflexo, til, trema, cedilha), p.ex. tachado."""
+    return isinstance(texto, str) and any(
+        unicodedata.category(c) in ("Mn", "Me") and c not in "\u0300\u0301\u0302\u0303\u0308\u0327"
+        for c in texto
+    )
+
+
 def _objetos(n: str) -> set[str]:
     return {m.group(1) for m in _RE_OBJETO.finditer(n)}
 
@@ -72,6 +81,9 @@ def avaliar_cumprimento(
     """Avalia se `mensagem` (from_me, posterior à `promessa`) cumpre a promessa.
 
     Só `estado == CUMPRIDO and not incerta` pode encerrar compromisso."""
+    if _combinante_estranha(promessa) or _combinante_estranha(mensagem) or _combinante_estranha(nome_anexo):
+        # Texto riscado/anulado por marcas combinantes: nunca firme.
+        return Cumprimento(INCERTO, "marcas_combinantes", True)
     prom = _normalizar(promessa)
     msg = _normalizar(mensagem)
     anexo = re.sub(r"[_.\-]+", " ", _normalizar(nome_anexo))
@@ -108,8 +120,10 @@ def avaliar_cumprimento(
     # inteira uma fórmula de entrega + exatamente os objetos prometidos, sem
     # nenhuma palavra de conteúdo (qualificador, destinatário, data, resto).
     # Qualquer outra coisa com marca de entrega fica INCERTO.
+    if _promessa_qualificada(prom):
+        return Cumprimento(INCERTO, "promessa_qualificada", True)
     if _formula_de_entrega(msg, objetos_prometidos):
-        if tem_midia and not (objetos_prometidos <= _objetos(anexo)):
+        if tem_midia and not _anexo_confere(nome_anexo, objetos_prometidos):
             # Mídia exige que o NOME do anexo case com todos os objetos
             # prometidos; foto/arquivo sem nome conferível nunca fecha.
             return Cumprimento(INCERTO, "anexo_nao_confere", True)
@@ -119,24 +133,71 @@ def avaliar_cumprimento(
     return Cumprimento(INCERTO, "entrega_nao_inequivoca", True)
 
 
-_FORMULA = frozenset(
-    "segue seguem enviei mandei encaminhei anexei aqui esta estao ta ai em o a os as te pra para voce vc e".split()
+_RE_QUALIFICA = re.compile(
+    r"\b(?:" + "|".join(_OBJETOS) + r")s?\b (?:de|do|da|dos|das|final|para|pro|pra|ao|aos|\d)|\d{4}|\bate\b"
+)
+
+
+_OBJ = "(?:" + "|".join(_OBJETOS) + ")"
+_ART = r"(?:(?:o|a|os|as|um|uma) )?"
+_ITEM_P = _ART + _OBJ
+_PROMESSA_LIMPA = re.compile(
+    r"(?:vou (?:te )?(?:enviar|mandar|encaminhar|entregar|passar)|"
+    r"(?:te )?(?:envio|mando|encaminho|entrego))"
+    r" " + _ITEM_P + r"(?: e " + _ITEM_P + r")*"
+    r"(?: (?:hoje|amanha|ainda hoje|logo|depois))?"
+)
+
+
+def _promessa_qualificada(prom: str) -> bool:
+    """Lista branca (gramática fechada) também na promessa: só é "limpa" a
+    promessa que é inteira verbo de envio + objetos documentais no singular
+    + prazo simples. Qualquer outra palavra ou fim truncado (qualificador,
+    destinatário, condição, exclusão, alternativa, número, plural, negação,
+    objeto fora do vocabulário) a torna qualificada e a entrega só pode ser
+    INCERTO."""
+    n = re.sub(r"[,.!;:\-]+", " ", prom)
+    n = re.sub(r"\s+", " ", n).strip()
+    return _PROMESSA_LIMPA.fullmatch(n) is None
+
+
+def _anexo_confere(nome: str, prometidos: set[str]) -> bool:
+    """Nome do arquivo = só os objetos prometidos + uma extensão simples."""
+    n = _normalizar(nome)
+    m = re.fullmatch(r"([a-z0-9 _.\-]+?)\.(pdf|docx?|xlsx?|odt|ods|csv|txt|png|jpe?g)", n)
+    if not m:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", m.group(1))
+    achados = set()
+    tokens_obj = []
+    for t in tokens:
+        if t == "e":
+            continue
+        if t not in _OBJETOS:
+            return False
+        achados.add(t)
+        tokens_obj.append(t)
+    return len(tokens_obj) == len(achados) and achados == prometidos
+
+
+_FORMULA_MSG = re.compile(
+    r"(?:segue|seguem|enviei|mandei|encaminhei|anexei|aqui esta|aqui estao)"
+    r" (?P<itens>" + _ART + _OBJ + r"s?(?: e " + _ART + _OBJ + r"s?)*)"
 )
 
 
 def _formula_de_entrega(msg: str, prometidos: set[str]) -> bool:
-    """msg inteira = marca de entrega + (somente) todos os objetos prometidos."""
-    sem_anexo = re.sub(r"\bem anexo\b", " ", msg)
-    tokens = re.findall(r"[a-z0-9]+", sem_anexo)
-    if not tokens or not _ENTREGA.search(msg):
+    """msg inteira = marca de entrega + (somente) todos os objetos prometidos,
+    uma vez cada, em gramática fechada (sem tokens soltos nem repetidos)."""
+    # Pontuação só como um único "." ou "!" final (ou vírgula entre palavras).
+    if not re.fullmatch(r"[a-z0-9 ,]*[.!]?", msg) or ",," in msg:
         return False
-    achados: set[str] = set()
-    for t in tokens:
-        if t in _FORMULA:
-            continue
-        base = t[:-1] if t.endswith("s") else t
-        if base in _OBJETOS:
-            achados.add(base)
-            continue
+    n = re.sub(r"\bem anexo\b", " ", msg)
+    n = re.sub(r"[,.!;:\-()]+", " ", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    m = _FORMULA_MSG.fullmatch(n)
+    if not m:
         return False
-    return achados == prometidos
+    achados = [t[:-1] if t.endswith("s") and t[:-1] in _OBJETOS else t
+               for t in re.findall(r"[a-z0-9]+", m.group("itens")) if t.rstrip("s") in _OBJETOS or t in _OBJETOS]
+    return len(achados) == len(set(achados)) and set(achados) == prometidos

@@ -18,7 +18,8 @@ class AvaliarCumprimentoTest(unittest.TestCase):
 
     def test_anexo_com_nome_casando_cumpre(self):
         self.assertFalse(fecha(avaliar_cumprimento(self.P, "Segue", True, "Relatorio_final.pdf")))
-        self.assertTrue(fecha(avaliar_cumprimento(self.P, "Segue o relatório", True, "Relatorio_final.pdf")))
+        self.assertFalse(fecha(avaliar_cumprimento(self.P, "Segue o relatório", True, "Relatorio_final.pdf")))
+        self.assertTrue(fecha(avaliar_cumprimento(self.P, "Segue o relatório", True, "Relatorio.pdf")))
 
     def test_midia_sozinha_nao_fecha(self):
         r = avaliar_cumprimento(self.P, "", True)
@@ -87,6 +88,50 @@ class AvaliarCumprimentoTest(unittest.TestCase):
         self.assertFalse(fecha(avaliar_cumprimento(P, "", True, "planilha.xlsx")))
         self.assertFalse(fecha(avaliar_cumprimento(P, "segue a planilha", True, "")))
         self.assertTrue(fecha(avaliar_cumprimento(P, "segue a planilha", True, "planilha.xlsx")))
+
+    def test_rodada2_anexo_formula_truncada_e_promessa_qualificada(self):
+        P = "Vou te enviar o relatório amanhã"
+        for nome in ("relatorio_errado.pdf", "rascunho_relatorio.pdf", "relatorio 2019.pdf",
+                     "relatorio_e_planilha.pdf", "relatorio.pdf.exe"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, "segue o relatório", True, nome)), nome)
+        for m in ("segue o relatório e", "mandei o relatório e o", "enviei o relatório para",
+                  "segue o relatório em", "segue o relatório a o", "segue o relatório esta",
+                  "segue o relatório ai"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, m)), m)
+        for p in ("Vou enviar o relatório 2024", "Vou enviar o relatório final amanhã ao João",
+                  "Não vou enviar o relatório", "Cancela, não precisa enviar o relatório",
+                  "Vou enviar o relatório de março"):
+            self.assertFalse(fecha(avaliar_cumprimento(p, "segue o relatório")), p)
+        self.assertTrue(fecha(avaliar_cumprimento(P, "segue o relatório", True, "Relatorio.pdf")))
+
+    def test_rodada3_promessa_lista_branca_e_texto_nao_latino(self):
+        for p in ("Te mando o relatório e a nota fiscal", "Te mando o relatório e o boleto",
+                  "Te mando os 3 relatórios", "Te mando os relatórios", "Te mando o relatório mensal",
+                  "Te mando o novo relatório", "Te mando o relatório amanhã depois que o João aprovar",
+                  "Te mando o relatório sem a planilha", "Te mando o relatório ou a planilha",
+                  "Te mando o relatório em vez da planilha"):
+            self.assertFalse(fecha(avaliar_cumprimento(p, "segue o relatório e a planilha")), p)
+            self.assertFalse(fecha(avaliar_cumprimento(p, "segue o relatório")), p)
+        P = "Te mando o relatório amanhã"
+        for m in ("segue o relatório 请不要", "segue o relatório 😊"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, m)), m)
+        for nome in ("relatorio relatorio.pdf", "relatorios.pdf"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, "segue o relatório", True, nome)), nome)
+        self.assertTrue(fecha(avaliar_cumprimento(P, "Segue o relatório.")))
+
+    def test_rodada4_gramatica_fechada(self):
+        P = "Te mando o relatório amanhã"
+        for p in ("Vou te enviar o relatório e o", "Vou mandar o relatório e a",
+                  "Vou entregar o relatório amanhã e"):
+            self.assertFalse(fecha(avaliar_cumprimento(p, "segue o relatório")), p)
+        for m in ("s̶e̶g̶u̶e̶ o relatório", "segue o relatório̸", "segue o a relatório",
+                  "segue ai ai ai o relatório", "segue em o relatório", "segue a o relatório",
+                  "segue o relatório - - -", "segue o relatório ( )",
+                  "segue o relatório e o relatório"):
+            self.assertFalse(fecha(avaliar_cumprimento(P, m)), m)
+        self.assertFalse(fecha(avaliar_cumprimento(P, "segue o relatório", True, "relatorio̶.pdf")))
+        for m in ("Segue o relatório", "enviei o relatório em anexo", "Segue em anexo o relatório!"):
+            self.assertTrue(fecha(avaliar_cumprimento(P, m)), m)
 
 
 if __name__ == "__main__":
