@@ -40,9 +40,9 @@ def _dt(valor) -> datetime | None:
     try:
         if valor.utcoffset() is None:
             return None
+        return valor.astimezone(timezone.utc)
     except Exception:
         return None
-    return valor.astimezone(timezone.utc)
 
 
 def revalidar_followup(compromisso, contexto) -> DecisaoFollowup:
