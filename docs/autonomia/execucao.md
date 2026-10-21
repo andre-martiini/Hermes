@@ -630,9 +630,9 @@ decisoes:
     motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 17h."
 testes:
   resultados:
-    - "functions/ completo ANTES 4486 OK (head de main, conforme P07 sub 2); test_autonomy_followup_guard 15 OK (novo arquivo); DEPOIS 4501 OK (284s, head final)."
+    - "functions/ completo ANTES 4486 OK (head de main, conforme P07 sub 2); test_autonomy_followup_guard 18 OK (novo arquivo); DEPOIS 4504 OK (296s, head final)."
 revisao_adversarial:
-  - "Rodada 1: estado_atencao desconhecido, timestamp igual, tzinfo sem offset, falta de rede de segurança. Corrigido. Rodada 2: microssegundos e id vazio/da contraparte. Corrigido. Rodada 3: dobra de horário de verão (tzinfo compartilhado). Corrigido normalizando para UTC. Rodada 4: só ADIAR conservador em datetime extremo (OverflowError no astimezone); movido para dentro do try. Sem achado pendente."
+  - "Rodada 1: estado_atencao desconhecido, timestamp igual, tzinfo sem offset, falta de rede de segurança. Corrigido. Rodada 2: microssegundos e id vazio/da contraparte. Corrigido. Rodada 3: dobra de horário de verão (tzinfo compartilhado). Corrigido normalizando para UTC. Rodada 4: só ADIAR conservador em datetime extremo (OverflowError no astimezone); movido para dentro do try. Codex na PR #483 (P2 real, corrigido): estado_atencao ausente do contexto virava ENVIAR; agora a chave é obrigatória. Rodada 5: texto do compromisso obrigatório. Rodada 6: própria promessa só no mesmo instante; vencimento documentado como responsabilidade do chamador. Rodada 7: não achou nada."
 pendencias:
   - "P07 passos 2 (extração estruturada, sombra), 3, 5, 8; wiring em atencao_whatsapp somente com flag/sombra."
 ```
