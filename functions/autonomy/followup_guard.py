@@ -59,7 +59,9 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
     `timestamp`, `content`, `media` -- mensagens do chat, qualquer ordem),
     `rascunho_pendente` (bool) e `estado_atencao` (str ou None). Mensagens
     com timestamp >= `prometido_em` contam como posteriores (resolução de
-    segundos), exceto a própria promessa (`wa_message_id` == `mensagem_id`).
+    segundos), exceto a própria promessa (`wa_message_id` == `mensagem_id` no
+    mesmo instante). Vencimento (`vence_em` <= agora) NÃO é checado aqui: é
+    do chamador, e `prometido_em` deve ser o horário da mensagem da promessa.
     Retorna ENVIAR só quando nada impede; o resto é SUPRIMIR ou ADIAR."""
     if not isinstance(compromisso, dict) or not isinstance(contexto, dict):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
@@ -104,6 +106,7 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
             m["from_me"]
             and isinstance(wa_id, str) and wa_id != ""
             and wa_id == compromisso.get("mensagem_id")
+            and ts.replace(microsecond=0) == base
         )
         if ts.replace(microsecond=0) >= base and not propria:
             posteriores.append((ts, m))

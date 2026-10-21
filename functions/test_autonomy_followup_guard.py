@@ -67,6 +67,11 @@ class RevalidarFollowupTest(unittest.TestCase):
             d = revalidar_followup(c, x)
             self.assertEqual((d.acao, d.motivo), (ADIAR, "contexto_invalido"), (c, x))
 
+    def test_mesmo_id_em_outro_instante_nao_e_a_propria_promessa(self):
+        m = msg(True, 24, "outra")
+        m["wa_message_id"] = "m1"
+        self.assertEqual(revalidar_followup(comp(mensagem_id="m1"), ctx([m])).motivo, "intervencao_humana")
+
     def test_texto_ausente_ou_invalido_adia(self):
         c = comp()
         del c["texto"]
