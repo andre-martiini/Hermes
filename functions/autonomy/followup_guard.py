@@ -23,7 +23,9 @@ ADIAR = "adiar"
 SUPRIMIR = "suprimir"
 
 ESTADOS_COMPROMISSO_ATIVOS = ("aberta", "vencida")
-ESTADOS_ATENCAO_FECHADOS = ("resolvido", "descartado", "adiado")
+ESTADOS_ATENCAO_FECHADOS = ("resolvido", "descartado")
+ESTADOS_ATENCAO_EM_TRATAMENTO = ("delegado_ao_agente", "aguardando_andre")
+ESTADOS_ATENCAO_ABERTOS = (None, "aberto")
 
 
 @dataclass(frozen=True)
@@ -33,20 +35,36 @@ class DecisaoFollowup:
 
 
 def _dt(valor) -> datetime | None:
-    if not isinstance(valor, datetime) or valor.tzinfo is None:
+    if not isinstance(valor, datetime):
+        return None
+    try:
+        if valor.utcoffset() is None:
+            return None
+    except Exception:
         return None
     return valor
 
 
 def revalidar_followup(compromisso, contexto) -> DecisaoFollowup:
+    """Rede de segurança: qualquer exceção inesperada adia, nunca envia."""
+    try:
+        return _revalidar(compromisso, contexto)
+    except Exception:
+        return DecisaoFollowup(ADIAR, "erro_interno")
+
+
+def _revalidar(compromisso, contexto) -> DecisaoFollowup:
     """`compromisso`: dict com `texto`, `prometido_em` (datetime com fuso) e
     `estado`. `contexto`: dict com `mensagens` (lista de dicts com `from_me`,
     `timestamp`, `content`, `media` -- mensagens do chat, qualquer ordem),
-    `rascunho_pendente` (bool) e `estado_atencao` (str ou None).
+    `rascunho_pendente` (bool) e `estado_atencao` (str ou None). Mensagens
+    com timestamp >= `prometido_em` contam como posteriores (resolução de
+    segundos), exceto a própria promessa (`wa_message_id` == `mensagem_id`).
     Retorna ENVIAR só quando nada impede; o resto é SUPRIMIR ou ADIAR."""
     if not isinstance(compromisso, dict) or not isinstance(contexto, dict):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
-    if compromisso.get("estado") not in ESTADOS_COMPROMISSO_ATIVOS:
+    estado = compromisso.get("estado")
+    if not isinstance(estado, str) or estado not in ESTADOS_COMPROMISSO_ATIVOS:
         return DecisaoFollowup(SUPRIMIR, "compromisso_encerrado")
     prometido_em = _dt(compromisso.get("prometido_em"))
     mensagens = contexto.get("mensagens")
@@ -55,8 +73,15 @@ def revalidar_followup(compromisso, contexto) -> DecisaoFollowup:
     if not isinstance(contexto.get("rascunho_pendente"), bool):
         return DecisaoFollowup(ADIAR, "contexto_invalido")
 
-    if contexto.get("estado_atencao") in ESTADOS_ATENCAO_FECHADOS:
+    estado_atencao = contexto.get("estado_atencao")
+    if estado_atencao is not None and not isinstance(estado_atencao, str):
+        return DecisaoFollowup(ADIAR, "contexto_invalido")
+    if estado_atencao in ESTADOS_ATENCAO_FECHADOS:
         return DecisaoFollowup(SUPRIMIR, "dono_ja_tratou")
+    if estado_atencao in ESTADOS_ATENCAO_EM_TRATAMENTO:
+        return DecisaoFollowup(ADIAR, "atencao_em_tratamento")
+    if estado_atencao not in ESTADOS_ATENCAO_ABERTOS:
+        return DecisaoFollowup(ADIAR, "contexto_invalido")
     if contexto["rascunho_pendente"]:
         return DecisaoFollowup(SUPRIMIR, "rascunho_existente")
 
@@ -67,7 +92,11 @@ def revalidar_followup(compromisso, contexto) -> DecisaoFollowup:
         ts = _dt(m.get("timestamp"))
         if ts is None or not isinstance(m.get("from_me"), bool):
             return DecisaoFollowup(ADIAR, "contexto_invalido")
-        if ts > prometido_em:
+        propria = (
+            m.get("wa_message_id") is not None
+            and m.get("wa_message_id") == compromisso.get("mensagem_id")
+        )
+        if ts >= prometido_em and not propria:
             posteriores.append((ts, m))
     posteriores.sort(key=lambda par: par[0])
 

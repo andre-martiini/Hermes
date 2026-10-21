@@ -67,6 +67,33 @@ class RevalidarFollowupTest(unittest.TestCase):
             d = revalidar_followup(c, x)
             self.assertEqual((d.acao, d.motivo), (ADIAR, "contexto_invalido"), (c, x))
 
+    def test_estado_atencao_desconhecido_adia(self):
+        for e in ("Resolvido", "xyz", 5, ["x"]):
+            self.assertEqual(revalidar_followup(comp(), ctx(atencao=e)).acao, ADIAR, e)
+        for e in ("delegado_ao_agente", "aguardando_andre"):
+            self.assertEqual(revalidar_followup(comp(), ctx(atencao=e)).motivo, "atencao_em_tratamento")
+        self.assertEqual(revalidar_followup(comp(), ctx(atencao="aberto")).acao, ENVIAR)
+
+    def test_timestamp_igual_conta_exceto_propria_promessa(self):
+        self.assertEqual(revalidar_followup(comp(), ctx([msg(False, 0)])).acao, ADIAR)
+        self.assertEqual(revalidar_followup(comp(), ctx([msg(True, 0, "Segue o relatório")])).motivo, "ja_cumprido")
+        propria = msg(True, 0, "Te envio o relatório amanhã")
+        propria["wa_message_id"] = "m1"
+        self.assertEqual(revalidar_followup(comp(mensagem_id="m1"), ctx([propria])).acao, ENVIAR)
+
+    def test_tzinfo_sem_offset_e_tipos_estranhos_adiam(self):
+        from datetime import tzinfo
+
+        class Z(tzinfo):
+            def utcoffset(self, dt): return None
+            def dst(self, dt): return None
+            def tzname(self, dt): return "Z"
+
+        ruim = datetime(2026, 10, 21, tzinfo=Z())
+        self.assertEqual(revalidar_followup(comp(prometido_em=ruim), ctx()).acao, ADIAR)
+        self.assertEqual(revalidar_followup(comp(), ctx([{"from_me": True, "timestamp": ruim}])).acao, ADIAR)
+        self.assertEqual(revalidar_followup(comp(estado=["x"]), ctx()).acao, SUPRIMIR)
+
     def test_ordem_das_mensagens_irrelevante(self):
         a = [msg(True, 3, "Segue o relatório"), msg(False, 2)]
         self.assertEqual(revalidar_followup(comp(), ctx(a)).motivo, "ja_cumprido")
