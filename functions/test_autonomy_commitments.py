@@ -79,6 +79,27 @@ class ClassificarTest(unittest.TestCase):
                   "Te envio o A hoje e o B na sexta"):
             self.assertIsNone(c.extrair_prazo_expresso(t, h).data, t)
 
+    def test_firmeza_por_lista_branca(self):
+        h = date(2026, 10, 21)
+        for t in ("Aguardando o João, te envio amanhã", "Te envio amanhã, sem certeza",
+                  "Te envio amanhã, estou sem internet", "Te envio amanhã rs",
+                  "Te envio amanhã, pendente de aprovação", "Te envio amanhã, pode atrasar",
+                  "Acredito que te envio amanhã", "Te envio o relatório ontem",
+                  "Te envio hoje, 80% de chance", "Te envio amanhã, tô sem o arquivo"):
+            r = c.classificar_mensagem(t, h)
+            self.assertFalse(r.classe == c.PROMESSA and not r.incerta, t)
+        for t in ("Te envio o relatório amanhã", "Vou te mandar a planilha ainda hoje",
+                  "Pode deixar que eu envio", "Vou te mandar hoje", "Te envio amanhã, obrigado"):
+            r = c.classificar_mensagem(t, h)
+            self.assertEqual((r.classe, r.incerta), (c.PROMESSA, False), t)
+
+    def test_prazo_nao_vira_data_do_objeto(self):
+        h = date(2026, 10, 21)
+        self.assertIsNone(c.extrair_prazo_expresso("Te envio o relatório do dia 25/10", h))
+        self.assertIsNone(c.extrair_prazo_expresso("Te envio a ata na quarta", h))
+        self.assertIsNone(c.extrair_prazo_expresso("Te envio hoje 22/10", h).data)
+        self.assertEqual(c.extrair_prazo_expresso("Te envio até 25/10", h).data, date(2026, 10, 25))
+
     def test_texto_grande(self):
         r = c.classificar_mensagem("a " * 500000)
         self.assertEqual(r.classe, c.NAO_RELACIONADA)

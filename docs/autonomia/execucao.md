@@ -636,3 +636,26 @@ revisao_adversarial:
 pendencias:
   - "Ligar CONTEXT_CURSOR_SECRET (André); similaridade vetorial real."
 ```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 1/N -- passos 1, 2 e 4 (parte pura): functions/autonomy/commitments.py. Corpus sintético em português (promessa, intenção vaga, pergunta, cancelamento, entrega parcial, não relacionada + casos adversariais), classificar_mensagem (seleção barata, ordem de cautela: negação/condição/dúvida vencem promessa; pergunta com promessa nunca firme), firmeza por LISTA BRANCA (_firme_estrito) além do léxico de hedge, extrair_prazo_expresso (natureza 'expresso', data só quando inequívoca; sem data para prazo relativo/múltiplo/negado/data do objeto), chave_compromisso (vários por chat), avaliar() com precisão/revocação. Sem I/O e sem wiring: atencao_whatsapp.mensagem_cumpre_promessa (A06, fechamento por comprimento) NÃO foi alterado."
+estado: validado
+inicio: "2026-10-21T13:50:00Z"
+fim: "2026-10-21T15:30:00Z"
+decisoes:
+  - id: p07-sub1-precisao-sobre-revocacao
+    motivo: "Lexico de hedge é infinito (6 rodadas adversariais acharam variações novas a cada vez). Decisão estrutural: promessa só é firme (incerta=False) se passar uma lista branca estrita (cláusula curta, demais cláusulas neutras, sem palavra de conteúdo antes da frase de promessa); o resto vira incerta. Perde recall de propósito -- alinhado ao aceite do plano (incertos ficam pendentes, não são encerrados)."
+  - id: p07-sub1-so-selecao
+    motivo: "Esta sub-entrega é só seleção/vocabulário; extração estruturada com evidências (passo 2 LLM), avaliador de cumprimento e wiring ficam para as próximas. Consumidor deve checar classe==promessa E incerta==False."
+  - id: p07-sub1-triagem
+    motivo: "Nenhuma PR aberta no início do disparo. execucao.md arquivado (blocos P06 sub 10 e 11 -> execucao-archive-p06sub10-sub11.md)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4427 OK (head de main); test_autonomy_commitments 33 OK (novo arquivo); DEPOIS ver PR (suíte completa no head final)."
+revisao_adversarial:
+  - "Rodadas 1-5 (agentes sem contexto): reais corrigidos -- negação ampla/abreviada, condicionais e dúvidas, 'pode deixar' fora de contexto, pergunta com promessa, regressões de falso hedge, datas inventadas (dd/mm do objeto, 29/02, ano de 3 dígitos, data passada, prazos relativos/múltiplos), colisão de chave, hoje inválido. Rodada 5 mostrou que o design por lista negra não fecha; trocado por lista branca de firmeza. Rodada 6: ver PR."
+pendencias:
+  - "P07 passos 2 (extração estruturada com evidências, modo sombra), 3, 5, 6, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
+```

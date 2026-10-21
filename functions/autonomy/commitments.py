@@ -75,7 +75,7 @@ _VAGA = [re.compile(p) for p in (
     r"\bassim que\b", r"\bou\b", r"\bapos\b", r"\buma vez\b", r"\bexceto\b",
     r"\bsalvo\b", r"\bcontanto\b", r"\bsupondo\b", r"\bassumindo\b",
     r"\bdependendo\b", r"\b(imagino|creio|suponho|calculo|devo)\b", r"\beu acho\b",
-    r"\bkkk+\b", r"\bbrincadeira\b", r"\bhipotetic", r"\bem tese\b",
+    r"\b(kk+|rs+|ha(ha)+|he(he)+|risos|zoeira)\b", r"\bbrincadeira\b", r"\bhipotetic", r"\bem tese\b",
     r"\bem principio\b", r"\bgarantia\b", r"\bna medida\b", r"\bdeve dar\b",
     r"\bpelo visto\b", r"\bimagina\b", r"\b(ele|ela|eles|elas|disse|falou)\b",
     r"\bso que\b", r"\be eu\b", r"\bacho\b", r"\ba principio\b",
@@ -157,7 +157,7 @@ def extrair_prazo_expresso(texto, hoje: date | None = None) -> Prazo | None:
     if re.search(r"\b(semana|proxim[ao]s?|passad[ao]s?|que vem|que tirei|(?<!depois )de (hoje|amanha))\b", n):
         # referência relativa composta ou ao objeto/evento, não ao prazo da entrega
         return Prazo(PRAZO_EXPRESSO, "relativo", None) if termos else None
-    if len(termos) > 1:
+    if len(termos) > 1 or (termos and re.search(r"\b\d{1,2}/\d{1,2}\b", n)):
         return Prazo(PRAZO_EXPRESSO, "multiplo", None)
     try:
         return _prazo(n, hoje)
@@ -177,7 +177,7 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
     m = re.search(r"\b(ainda )?hoje\b", n)
     if m:
         return Prazo(PRAZO_EXPRESSO, m.group(0), hoje)
-    m = re.search(r"\b(ate|na|no|pra|para) (a |o )?(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b", n)
+    m = re.search(r"\b(ate) (a |o )?(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b", n)
     if m:
         alvo = _DIAS_SEMANA[m.group(3)]
         data = None
@@ -185,7 +185,7 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
             delta = (alvo - hoje.weekday()) % 7 or 7
             data = hoje + timedelta(days=delta)
         return Prazo(PRAZO_EXPRESSO, m.group(0), data)
-    m = re.search(r"\b(dia|ate|para|pra|em) (\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])", n)
+    m = re.search(r"(?<!\b(?:do|da|de|ao) )(?<!referente a )\b(dia|ate|para|pra|em) (\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])", n)
     if m and hoje is not None:
         dia, mes = int(m.group(2)), int(m.group(3))
         if m.group(4):
@@ -211,6 +211,37 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
 
 
 _NEGACAO = re.compile(r"\b(nao|n|num|naum|nunca|jamais|nem)\b")
+
+
+_NEUTRAS = frozenset(
+    "o a os as um uma de do da dos das em no na nos nas por para pra pro com e eu te lhe me ja ainda "
+    "logo hoje amanha ate depois agora mais tarde dia isso tudo ok obrigado obrigada valeu abraco "
+    "favor pode deixar blz beleza fica tranquilo tranquila segunda terca quarta quinta sexta sabado "
+    "domingo ta tudo certo combinado como".split()
+)
+
+
+def _firme_estrito(n: str, trecho_promessa: str) -> bool:
+    """Lista branca de firmeza: promessa só é firme quando a cláusula da promessa tem no máximo 3
+    palavras de conteúdo (fora a frase de promessa e palavras neutras:
+    artigos, prazo, cortesia) e todas as outras cláusulas são neutras.
+    Qualquer ressalva não prevista no léxico de hedge cai aqui como incerta."""
+    conteudo = 0
+    for c in re.split(r"[,;.!()/\-]+", n):
+        if not c.strip():
+            continue
+        palavras = [w for w in re.findall(r"[a-z0-9]+", c) if not w.isdigit()]
+        extras = [w for w in palavras if w not in _NEUTRAS]
+        if trecho_promessa in c:
+            extras = [w for w in re.findall(r"[a-z0-9]+", c.replace(trecho_promessa, " ", 1))
+                      if not w.isdigit() and w not in _NEUTRAS]
+            antes = c.split(trecho_promessa, 1)[0]
+            if any(w not in _NEUTRAS and not w.isdigit() for w in re.findall(r"[a-z0-9]+", antes)):
+                return False  # ressalva antes da promessa ("acredito que ...")
+            conteudo = len(extras)
+        elif extras:
+            return False  # outra cláusula com conteúdo (ressalva, condição, 2º assunto)
+    return conteudo <= 3
 
 
 def _primeira(padroes, n: str) -> str | None:
@@ -257,7 +288,9 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
     if ev_promessa:
         # data mencionada mas ilegível/inválida: não é firme.
         data_ilegivel = prazo is None and re.search(r"\b\d{1,2}/\d{1,2}\b", n)
-        return Classificacao(PROMESSA, ev_promessa, bool(data_ilegivel), prazo)
+        passado = re.search(r"\b(ontem|anteontem)\b", n)
+        incerta = bool(data_ilegivel or passado) or not _firme_estrito(n, ev_promessa)
+        return Classificacao(PROMESSA, ev_promessa, incerta, prazo)
     return Classificacao(NAO_RELACIONADA, "", False)
 
 
