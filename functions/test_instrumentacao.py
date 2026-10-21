@@ -130,6 +130,15 @@ class TestRegistrarEscrita(unittest.TestCase):
         kw = registrar.call_args.kwargs
         self.assertEqual((kw["status"], kw["erro"], kw["origem"]), ("erro", "a etapa não aparece", "telegram"))
 
+    def test_edicao_sem_mudanca_nao_vira_erro_de_rotina(self):
+        from verificadores_escrita import NADA_GRAVADO, editar_plano
+
+        res = editar_plano("db", {"task_id": "t1"}, "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais.")
+        self.assertEqual((res.estado, res.motivo), ("falhou", NADA_GRAVADO))  # o modelo segue avisado
+        with mock.patch.object(agent_runs, "registrar") as registrar:
+            tc.registrar_escrita("db", "mcp", res)
+        registrar.assert_not_called()
+
     def test_pendente_ou_fora_de_acoes_nao_registra(self):
         for res in (ResultadoOperacao("pendente", "x", "proposta"), self._res(alvo="knowledge_nodes/m1")):
             with self.subTest(alvo=res.alvo), mock.patch.object(agent_runs, "registrar") as registrar:
