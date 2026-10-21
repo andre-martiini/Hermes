@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from verificacao import ResultadoOperacao, montar_confirmacao
-from verificadores_escrita import PROPOSTAS, VERIFICADORES
+from verificadores_escrita import NADA_GRAVADO, PROPOSTAS, VERIFICADORES
 
 MODOS = ("registrar", "bloquear", "desligado")
 MODO_PADRAO = "registrar"
@@ -175,6 +175,10 @@ def registrar_escrita(db, canal: str, res: ResultadoOperacao) -> None:
     (rotina `escritas_<canal>`), ligado ao resultado pelo `run_id`. Nunca
     atrapalha a resposta: falha ao registrar só vai para o log."""
     if res.estado not in ("verificado", "falhou") or not str(res.alvo or "").startswith("tarefas"):
+        return
+    if res.estado == "falhou" and res.motivo == NADA_GRAVADO:
+        # Nada foi escrito: não é escrita nem erro, e contá-la inflava os erros
+        # das rotinas na Retro Semanal (4 de 4 na semana de 11 a 18/10).
         return
     import uuid
 

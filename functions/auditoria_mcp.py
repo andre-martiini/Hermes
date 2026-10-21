@@ -21,6 +21,9 @@ _EXTERNAS = {"ler_pagina_web", "pesquisar_internet"}
 _NAO_ENCONTRADO = re.compile(r"n[aã]o (?:foi )?encontrad|not[ _]found|inexistente|n[aã]o existe", re.I)
 _NAO_MONITORADO = re.compile(r"n[aã]o (?:est[aá] )?monitorad|allowlist", re.I)
 _CONFLITO = re.compile(r"modificad[oa] depois|conflito", re.I)
+# Pedido sobre algo que já mudou de estado (rascunho já descartado, por exemplo):
+# o Gaspar recusou certo; quem chamou é que estava com a informação velha.
+_JA_RESOLVIDO = re.compile(r"\bj[aá] (?:decidid|descartad|aprovad|enviad|cancelad)", re.I)
 _ARGUMENTOS = re.compile(
     r"obrigat[oó]ri|inv[aá]lid|invalid|informe |use um de|nenhum campo|nada para mudar|vazi[oa]|formato",
     re.I,
@@ -29,7 +32,8 @@ _POLITICA = re.compile(r"pol[ií]tica|bloquead", re.I)
 _NUMERO_LONGO = re.compile(r"\d{8,}")
 
 # erro_tipo -> é recusa esperada? (o resto é falha real)
-RECUSAS = {"nao_encontrado", "nao_monitorado", "conflito", "argumentos", "politica", "job_com_falha"}
+RECUSAS = {"nao_encontrado", "nao_monitorado", "conflito", "ja_resolvido", "argumentos", "politica",
+           "job_com_falha"}
 
 
 def em_producao() -> bool:
@@ -81,6 +85,8 @@ def _tipo_pela_mensagem(tool: str, msg: str) -> str:
         return "nao_monitorado"
     if _CONFLITO.search(msg):
         return "conflito"
+    if _JA_RESOLVIDO.search(msg):
+        return "ja_resolvido"
     if _ARGUMENTOS.search(msg):
         return "argumentos"
     if _POLITICA.search(msg):

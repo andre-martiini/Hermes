@@ -65,6 +65,17 @@ class TestClassificarErro(unittest.TestCase):
         c = self._c("atualizar_arquivo_drive", {"erro": "O arquivo foi modificado depois da sua leitura (...)"})
         self.assertEqual((c["erro_tipo"], c["recusa_esperada"]), ("conflito", True))
 
+    def test_pedido_sobre_algo_ja_resolvido_e_recusa(self):
+        c = self._c("descartar_rascunho_whatsapp", {"erro": "Rascunho já decidido (status atual: descartado)"})
+        self.assertEqual((c["erro_tipo"], c["recusa_esperada"]), ("ja_resolvido", True))
+        for msg in ("Envio ja cancelado.", "Rascunho já aprovado", "Mensagem já enviada"):
+            with self.subTest(msg=msg):
+                self.assertEqual(self._c("x", {"erro": msg})["erro_tipo"], "ja_resolvido")
+
+    def test_ja_sem_estado_resolvido_nao_vira_recusa(self):
+        self.assertEqual(self._c("x", {"erro": "Já tentei três vezes e deu boom"})["erro_tipo"], "resultado_tool")
+        self.assertEqual(self._c("x", {"erro": "nao foi enviada"})["erro_tipo"], "resultado_tool")
+
     def test_bloqueio_de_politica_e_recusa(self):
         c = self._c("video_renderizar", {"erro": "x", "bloqueio_politica": {"decision": "deny"}})
         self.assertEqual((c["erro_tipo"], c["recusa_esperada"]), ("politica", True))
