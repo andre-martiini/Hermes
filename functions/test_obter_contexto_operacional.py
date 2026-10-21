@@ -150,8 +150,13 @@ class CursorIncrementalTest(unittest.TestCase):
     def test_runs_no_teto_mas_todos_anteriores_a_marca_avancam_cursor(self):
         runs = {"runs": [{"id": f"r{i}", "criado_em": "2020-01-01T00:00:00Z", "finalizado_em": "2020-01-01T00:01:00Z"}
                          for i in range(oco.LEITURA_RESULTADOS)]}
-        c = self.rodar(runs=runs)["cursor"]
-        r = self.rodar({"desde_cursor": c}, runs=runs)
+        # relógio injetado e crescente: a marca é agora_ms - margem, e duas
+        # chamadas no mesmo milissegundo (CI rápido) davam cursores idênticos.
+        import itertools
+        passo = itertools.count(1_800_000_000)
+        with mock.patch("time.time", side_effect=lambda: float(next(passo))):
+            c = self.rodar(runs=runs)["cursor"]
+            r = self.rodar({"desde_cursor": c}, runs=runs)
         self.assertEqual(r["mudancas"]["ultimos_resultados"], [])
         self.assertNotEqual(r["cursor"], c)
         self.assertFalse(any("incompleta" in l for l in r["lacunas"]))
