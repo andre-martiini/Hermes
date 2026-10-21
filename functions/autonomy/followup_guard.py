@@ -85,6 +85,7 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
     if contexto["rascunho_pendente"]:
         return DecisaoFollowup(SUPRIMIR, "rascunho_existente")
 
+    base = prometido_em.replace(microsecond=0)
     posteriores = []
     for m in mensagens:
         if not isinstance(m, dict):
@@ -92,11 +93,13 @@ def _revalidar(compromisso, contexto) -> DecisaoFollowup:
         ts = _dt(m.get("timestamp"))
         if ts is None or not isinstance(m.get("from_me"), bool):
             return DecisaoFollowup(ADIAR, "contexto_invalido")
+        wa_id = m.get("wa_message_id")
         propria = (
-            m.get("wa_message_id") is not None
-            and m.get("wa_message_id") == compromisso.get("mensagem_id")
+            m["from_me"]
+            and isinstance(wa_id, str) and wa_id != ""
+            and wa_id == compromisso.get("mensagem_id")
         )
-        if ts >= prometido_em and not propria:
+        if ts.replace(microsecond=0) >= base and not propria:
             posteriores.append((ts, m))
     posteriores.sort(key=lambda par: par[0])
 

@@ -81,6 +81,14 @@ class RevalidarFollowupTest(unittest.TestCase):
         propria["wa_message_id"] = "m1"
         self.assertEqual(revalidar_followup(comp(mensagem_id="m1"), ctx([propria])).acao, ENVIAR)
 
+    def test_microssegundos_e_id_vazio_ou_da_contraparte(self):
+        c = comp(prometido_em=T0.replace(microsecond=700000))
+        self.assertEqual(revalidar_followup(c, ctx([msg(False, 0)])).motivo, "novo_dado_da_contraparte")
+        for from_me, wid, mid in ((False, "", ""), (False, "a", "a"), (True, "", "")):
+            m = msg(from_me, 0)
+            m["wa_message_id"] = wid
+            self.assertEqual(revalidar_followup(comp(mensagem_id=mid), ctx([m])).acao, ADIAR, (from_me, wid))
+
     def test_tzinfo_sem_offset_e_tipos_estranhos_adiam(self):
         from datetime import tzinfo
 
