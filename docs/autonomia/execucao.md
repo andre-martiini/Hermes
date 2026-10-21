@@ -552,47 +552,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 # (Em 2026-10-19 os blocos "P05 sub-entrega 19/N (conclusão)" e "P06 sub-entrega 5/N" foram movidos para docs/autonomia/execucao-archive-p05sub19-p06sub5.md, preventivamente: arquivo ativo ~50KB.)
 # (Em 2026-10-20 os blocos "P06 sub-entrega 6/N" e "7/N" foram movidos para docs/autonomia/execucao-archive-p06sub6-sub7.md, preventivamente: arquivo ativo ~50KB.)
 # (Em 2026-10-20 os blocos "P06 sub-entrega 8/N" e "9/N" foram movidos para docs/autonomia/execucao-archive-p06sub8-sub9.md, preventivamente: arquivo ativo >50KB.)
-pacote: "P06 sub-entrega 10/N -- passo 5 (parte pura), recuperação por relevância, validade e autoridade: functions/autonomy/recuperacao.py. recuperar(documentos, consulta, entidades, similaridades, agora, limite) ordena documentos de knowledge_nodes por (frase exata + lexical + entidade + vetorial informada) x peso de autoridade da origem_fato (declaração humana 1.0 > fonte externa 0.7 > resumo derivado 0.5 > inferência 0.3 > legacy_unknown 0.2, com aviso_legado). Descarta com razão: superada, telemetria_uso, validade expirada/futura, sem texto, sem relevância (autoridade nunca cria relevância). Sem I/O, sem wiring em main.py nem tool nova."
-estado: validado
-inicio: "2026-10-19T16:50:00Z"
-fim: "2026-10-19T17:30:00Z"
-decisoes:
-  - id: p06-sub10-so-logica-pura
-    motivo: "Mesmo padrão incremental das sub-entregas 5-9; consultar_memoria_contextual/obter_contexto_operacional (passo 6) exigem contrato P03 e decisão de onde vem a similaridade vetorial."
-  - id: p06-sub10-validade-so-data
-    motivo: "validade_fim só com data (string de 10 chars ou date) vale até o fim desse dia (inclusivo); validade_inicio só com data vale desde 00:00 UTC. Validade ilegível nunca descarta (fail-open documentado)."
-  - id: p06-sub10-triagem
-    motivo: "Nenhuma PR aberta no início do disparo; nada a mesclar/fechar. execucao.md arquivado em execucao-archive-p05sub19-p06sub5.md (estava em ~50KB)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4330 OK (201s); test_recuperacao 16 OK (novo arquivo); DEPOIS 4346 OK (196s) no head final."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): reais corrigidos -- casamento por substring sem fronteira de palavra (ana/Mariana), validade com date/'z'/naive, similaridades não-dict, documentos malformados sumindo sem registro; testes fracos reforçados (pesos numéricos, desempate contra ordem alfabética, fronteira validade_inicio, clamp)."
-  - "Codex (PR #473): P2 real -- similaridade fora de 0..1 era clampada a relevância máxima; agora é ignorada (teste cobre 5, -0.1, 1.01, inf)."
-  - "Rodada 2 (agente sem contexto): validade só-data expirava no início do dia (agora fim do dia), entidades None/str malformadas (agora ignoradas), lacunas de teste (campos resumo/fato, ordem superada x telemetria, ids de malformados) corrigidas. Sem outro achado."
-pendencias:
-  - "Passo 6 (obter_contexto_operacional/consultar_memoria_contextual consumindo recuperar + cursor_contexto), passo 9 (modelo por pessoa); busca vetorial real continua fora do módulo."
-
----
-pacote: "P06 sub-entrega 11/N -- passo 6 (parte de leitura), tool MCP SOMENTE LEITURA consultar_memoria_contextual (functions/tools/consultar_memoria_contextual.py) sobre autonomy.recuperacao.recuperar. Varre knowledge_nodes paginado (até 5000), mantém só os top-`limite` globais, devolve fatos com origem_fato, motivos, validade, trecho (400 chars, dado não confiável) e legado_sem_proveniencia, mais descartados_por_razao e lacunas (varredura truncada / nenhum fato). Registrada em registry/inventory/schema, fora do canal de voz. Sem busca vetorial, sem cursor e sem obter_contexto_operacional (precisam de índice vetorial e de segredo de assinatura)."
-estado: validado
-inicio: "2026-10-19T19:50:00Z"
-fim: "2026-10-19T20:35:00Z"
-decisoes:
-  - id: p06-sub11-sem-cursor-nem-vetorial
-    motivo: "O cursor exige segredo de assinatura (origem ainda indefinida) e a similaridade vetorial exige o índice; a tool entra só com busca exata+lexical+entidade+autoridade, aditiva e reversível."
-  - id: p06-sub11-triagem
-    motivo: "Única PR aberta (#474, Dashboard/resumo do dia, avulsa do André, atualizada há <60 min) não é desta linha: não tocada."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4346 OK (registro da sub-entrega 10/N, head de main); test_consultar_memoria_contextual 19 OK (novo arquivo); DEPOIS 4365 OK (263s) no head final."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): real corrigido -- campo `id` no corpo do doc sobrescrevia o id do snapshot (KeyError derrubava a consulta inteira ou doc sumia como malformado); args não-dict agora vira erro de entrada; 7 testes novos (merge intercalado entre páginas, descartados somados, fronteira de truncamento, erro na 2ª página, embedding fora da saída, datetime)."
-  - "Rodada 2 (agente sem contexto) sobre a correção: nada achado de real; só imprecisão de documentação do schema (corrigida)."
-pendencias:
-  - "Passo 6 restante (obter_contexto_operacional, contexto incremental com cursor assinado -- decidir origem do segredo -- e similaridade vetorial real), passo 9 (modelo por pessoa)."
-
----
+# (Em 2026-10-21 os blocos "P06 sub-entrega 10/N" e "11/N" foram movidos para docs/autonomia/execucao-archive-p06sub10-sub11.md, preventivamente: arquivo ativo >50KB.)
 pacote: "P06 sub-entrega 12/N -- passo 6 (parte de leitura, 2/2), tool MCP SOMENTE LEITURA obter_contexto_operacional (functions/tools/obter_contexto_operacional.py): pendências abertas (atencao.coletar_fila_atencao), últimos resultados de rotinas (agent_runs.listar_recentes) e POPs (pops_diretrizes via autonomy.pops_mapa) -- sempre ativos com instrução inteira, os demais só título/n_gatilhos. Cada fonte é lida isolada: falha vira fontes[nome]='falhou (...)' + lacunas, sem derrubar as outras. Registrada em registry/inventory/schema, fora do canal de voz."
 estado: validado
 inicio: "2026-10-20T10:50:00Z"
@@ -675,4 +635,30 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): real -- run antiga finalizada depois da marca fora da janela; tratado com lacuna + documentação (decisão acima). Demais pontos sem achado."
 pendencias:
   - "Ligar CONTEXT_CURSOR_SECRET (André); similaridade vetorial real."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 1/N -- passos 1, 2 e 4 (parte pura): functions/autonomy/commitments.py. Corpus sintético em português (promessa, intenção vaga, pergunta, cancelamento, entrega parcial, não relacionada + casos adversariais), classificar_mensagem (seleção barata, ordem de cautela: negação/condição/dúvida vencem promessa; pergunta com promessa nunca firme), firmeza por LISTA BRANCA (_firme_estrito) além do léxico de hedge, extrair_prazo_expresso (natureza 'expresso', data só quando inequívoca; sem data para prazo relativo/múltiplo/negado/data do objeto), chave_compromisso (vários por chat), avaliar() com precisão/revocação. Sem I/O e sem wiring: atencao_whatsapp.mensagem_cumpre_promessa (A06, fechamento por comprimento) NÃO foi alterado."
+estado: validado
+inicio: "2026-10-21T13:50:00Z"
+fim: "2026-10-21T14:30:00Z"
+decisoes:
+  - id: p07-sub1-precisao-sobre-revocacao
+    motivo: "Lexico de hedge é infinito (6 rodadas adversariais acharam variações novas a cada vez). Decisão estrutural: promessa só é firme (incerta=False) se passar uma lista branca estrita (cláusula curta, demais cláusulas neutras, sem palavra de conteúdo antes da frase de promessa); o resto vira incerta. Perde recall de propósito -- alinhado ao aceite do plano (incertos ficam pendentes, não são encerrados)."
+  - id: p07-sub1-so-selecao
+    motivo: "Esta sub-entrega é só seleção/vocabulário; extração estruturada com evidências (passo 2 LLM), avaliador de cumprimento e wiring ficam para as próximas. Consumidor deve checar classe==promessa E incerta==False."
+  - id: p07-sub1-merge-pr480
+    motivo: "PR #480 (aberta 11:22Z, sem execução paralela no disparo de 14h): main mesclado, rodadas 7-8, correções, suíte e merge pela regra de autoridade plena; módulo puro sem wiring, reversível."
+  - id: p07-sub1-triagem
+    motivo: "Nenhuma PR aberta no início do disparo. execucao.md arquivado (blocos P06 sub 10 e 11 -> execucao-archive-p06sub10-sub11.md)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4427 OK (head de main); test_autonomy_commitments 35 OK (novo arquivo); DEPOIS 4462 OK (243s) após correções do Codex; no disparo de 14h: com main mesclado 4465 OK; head final 4467 OK (238s), test_autonomy_commitments 37 OK."
+revisao_adversarial:
+  - "Rodadas 1-5 (agentes sem contexto): reais corrigidos -- negação ampla/abreviada, condicionais e dúvidas, 'pode deixar' fora de contexto, pergunta com promessa, regressões de falso hedge, datas inventadas (dd/mm do objeto, 29/02, ano de 3 dígitos, data passada, prazos relativos/múltiplos), colisão de chave, hoje inválido. Rodada 5 mostrou que o design por lista negra não fecha; trocado por lista branca de firmeza. Rodada 6: achou que a lista branca ainda aceita 1 palavra de conteúdo arbitrária ('Te envio hoje difícil'), entrega parcial/terceiro sem marcador e tom irônico; corrigidos: conteúdo <=1, pontuação/emoji/'?!' -> incerta, 'dia N' sem mês -> sem data, hora validada. Codex na PR #480 (3 P2 reais, corrigidos): prazo 'na/no <dia>' em frase curta (<=5 palavras), pergunta com negação não é cancelamento firme, um/uma aceitos só antes de objeto documental (rodada adversarial focada achou 'um beijo/um dia desses' na 1ª versão, corrigido). Rodadas 7-8 (disparo de 21/10 14h, agentes sem contexto): reais corrigidos -- cancelamento firme virava certeza em negação do gatilho ("não desisti"), adiamento ("não posso hoje, amanhã envio"), sujeito terceiro, objeto parcial/prazo ("a tempo", "o anexo") e verbos genéricos; agora CANCELAMENTO só é incerta=False se a mensagem INTEIRA casa uma fórmula curta ancorada de desistência (_CANCEL_FIRME: "não vou mais enviar", "esquece isso", "pode deixar quieto"...), senão incerta=True; prazo: mesmo dia da semana sem data, fração d/m + plural não é data, duas datas d/m = múltiplo. Limite estrutural remanescente (hedge por gíria de 1 palavra) NÃO fechável por regex; aceito por design (incerta=False = nenhum hedge detectado; módulo sem wiring). A lista branca de cancelamento foi estreitada até restar só fórmula sem referente variável."
+pendencias:
+  - "Decidido no disparo de 21/10 14h: módulo mesclado como seletor puro sem wiring; incerta=False = nenhum hedge detectado, a firmeza real virá da extração estruturada (LLM, sombra) + política."
+  - "P07 passos 2 (extração estruturada com evidências, modo sombra), 3, 5, 6, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
 ```
