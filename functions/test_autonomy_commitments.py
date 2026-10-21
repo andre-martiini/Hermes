@@ -108,6 +108,20 @@ class ClassificarTest(unittest.TestCase):
         for t in ("Te envio hoje dia 22", "Te envio amanhã dia 23"):
             self.assertIsNone(c.extrair_prazo_expresso(t, h).data, t)
 
+    def test_codex_pr480(self):
+        h = date(2026, 10, 21)
+        self.assertEqual(c.extrair_prazo_expresso("entrego na sexta", h).data, date(2026, 10, 23))
+        for t in ("Não te envio hoje?", "Não posso te mandar amanhã?"):
+            r = c.classificar_mensagem(t, h)
+            self.assertEqual((r.classe, r.incerta), (c.PERGUNTA, True), t)
+        for t in ("Te envio uma planilha amanhã", "Vou te mandar um relatório hoje"):
+            r = c.classificar_mensagem(t, h)
+            self.assertEqual(r.classe, c.PROMESSA, t)
+        for t in ("Te mando um abraço", "Te mando um beijo", "Vou te mandar um oi",
+                  "Te aviso um dia desses", "Te respondo um momento"):
+            r = c.classificar_mensagem(t)
+            self.assertFalse(r.classe == c.PROMESSA and not r.incerta, t)
+
     def test_texto_grande(self):
         r = c.classificar_mensagem("a " * 500000)
         self.assertEqual(r.classe, c.NAO_RELACIONADA)

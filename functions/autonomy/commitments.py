@@ -102,7 +102,7 @@ _PARCIAL = [re.compile(p) for p in (
     r"\b(entrega|versao|resultado) parcial\b",
 )]
 
-_COMPL = r"(?:o|a|os|as|isso|tudo|ainda|hoje|amanha|ate|logo|depois|mais tarde|ja|agora)\b(?! (?:que|abraco|seguinte|meu|minha)\b)"
+_COMPL = r"(?:o|a|os|as|(?:um|uma|uns|umas) (?:planilha|arquivo|documento|relatorio|email|e-mail|contrato|oficio|ata|minuta|proposta|orcamento|resumo|link|foto|print|pdf|anexo|lista|modelo|versao|parecer|tabela|planejamento|esboco)s?|isso|tudo|ainda|hoje|amanha|ate|logo|depois|mais tarde|ja|agora)\b(?! (?:que|abraco|seguinte|meu|minha)\b)"
 _PROMESSA = [re.compile(p) for p in (
     r"\bvou (te )?(enviar|mandar|encaminhar) " + _COMPL,
     r"\bvou te (retornar|responder|entregar|passar)\b " + _COMPL,
@@ -179,7 +179,10 @@ def _prazo(n: str, hoje: date | None) -> Prazo | None:
     m = re.search(r"\b(ainda )?hoje\b", n)
     if m:
         return Prazo(PRAZO_EXPRESSO, m.group(0), hoje)
-    m = re.search(r"\b(ate) (a |o )?(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b", n)
+    # "na/no <dia>" só em frase curta: em frase longa costuma ser a data do
+    # objeto ("a ata da reunião na quarta"), não o prazo da entrega.
+    prep = r"(ate|na|no)" if len(n.split()) <= 5 else r"(ate)"
+    m = re.search(r"\b" + prep + r" (a |o )?(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b", n)
     if m:
         alvo = _DIAS_SEMANA[m.group(3)]
         data = None
@@ -274,6 +277,9 @@ def classificar_mensagem(texto, hoje: date | None = None) -> Classificacao:
     if re.search(r"\bse (eu )?nao\b", n):
         return Classificacao(INTENCAO_VAGA, "se nao", True, prazo)
     ev = _primeira(_CANCEL, n)
+    if ev and re.search(r"[?？¿]", str(texto)):
+        # "Não te envio hoje?" é pergunta/proposta, nunca cancelamento firme.
+        return Classificacao(PERGUNTA, n[:80], True, None)
     if ev:
         return Classificacao(CANCELAMENTO, ev, False, None)
     ev = _primeira(_VAGA, n)
