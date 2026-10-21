@@ -14,7 +14,7 @@ intervenção apenas adia para o dono/avaliador revisar.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from autonomy.cumprimento import CUMPRIDO, avaliar_cumprimento
 
@@ -42,7 +42,7 @@ def _dt(valor) -> datetime | None:
             return None
     except Exception:
         return None
-    return valor
+    return valor.astimezone(timezone.utc)
 
 
 def revalidar_followup(compromisso, contexto) -> DecisaoFollowup:

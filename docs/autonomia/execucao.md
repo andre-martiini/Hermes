@@ -554,53 +554,11 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 # (Em 2026-10-20 os blocos "P06 sub-entrega 8/N" e "9/N" foram movidos para docs/autonomia/execucao-archive-p06sub8-sub9.md, preventivamente: arquivo ativo >50KB.)
 # (Em 2026-10-21 os blocos "P06 sub-entrega 10/N" e "11/N" foram movidos para docs/autonomia/execucao-archive-p06sub10-sub11.md, preventivamente: arquivo ativo >50KB.)
 # (Em 2026-10-21 os blocos "P06 sub-entrega 12/N" e "13/N" foram movidos para docs/autonomia/execucao-archive-p06sub12-sub13.md, preventivamente: arquivo ativo >50KB.)
+# (Em 2026-10-21 os blocos "P06 sub-entrega 14/N" e "14/N (correção pós-merge)" foram movidos para docs/autonomia/execucao-archive-p06sub14.md, preventivamente: arquivo ativo >50KB.)
 ```
 
 ---
 
-```yaml
-pacote: "P06 sub-entrega 14/N -- passo 7, cursor incremental ligado a obter_contexto_operacional (functions/tools/obter_contexto_operacional.py + schema). Segredo vem do ambiente (CONTEXT_CURSOR_SECRET) e o dono de ctx.user_uid; sem um dos dois, o contexto sai completo sem cursor (lacuna se o cliente enviou desde_cursor). Com cursor ativo a resposta traz `cursor` (autonomy.cursor_contexto, escopo contexto_operacional) e, com desde_cursor válido, `mudancas` (pendências/resultados novos ou alterados), calculadas sobre leitura ampla (100 pendências / 50 runs) enquanto a exibição segue limite_contexto. Cursor só avança se a leitura não atingiu o teto e o total é válido; senão devolve o recebido + lacuna. Marca com folga de 10s e comparação >=."
-estado: validado
-inicio: "2026-10-20T19:50:00Z"
-fim: "2026-10-20T21:00:00Z"
-decisoes:
-  - id: p06-sub14-segredo-por-ambiente
-    motivo: "Origem do segredo era a pendência aberta; default seguro e reversível: variável de ambiente CONTEXT_CURSOR_SECRET. Sem ela o recurso fica desligado (flag de desligamento natural), nada muda para os clientes atuais."
-  - id: p06-sub14-triagem
-    motivo: "Nenhuma PR aberta no início do disparo. execucao.md arquivado (blocos P06 sub 8 e 9 -> execucao-archive-p06sub8-sub9.md)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4407 OK (202s, head de main); test_obter_contexto_operacional 34 OK; DEPOIS 4425 OK (195s) no head final."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): reais corrigidos -- cursor avançava com listas truncadas, borda > sem folga de relógio, carimbo ilegível ignorado quando outro era legível, ValueError na emissão."
-  - "Rodada 2: reais corrigidos -- len==limite tratado como corte; falha só de regras bloqueava cursor."
-  - "Rodada 3: real corrigido -- truncamento pelo limite exibido tornava o cursor inútil; mudancas agora sobre leitura ampla; total ausente tratado como truncado. Rodada 4: não achou nada."
-pendencias:
-  - "Configurar CONTEXT_CURSOR_SECRET no ambiente das Functions para ligar o incremental (André); similaridade vetorial real (precisa do índice vetorial)."
-```
-
----
-
-```yaml
-pacote: "P06 sub-entrega 14/N (correção pós-merge) -- achado P2 do Codex na PR #478 (postado ~1 min antes do merge e não visto: a espera olhou reviews e checks, não review comments): com >=50 execuções em agent_runs o cursor nunca avançava. Agora o truncamento só conta com marca válida; runs só truncam se a mais antiga lida (criado_em desc) ainda é posterior à marca; primeira chamada sempre emite cursor. Limitação documentada e vira lacuna: execução antiga (fora das 50 mais recentes) alterada depois do cursor pode não aparecer em mudancas."
-estado: validado
-inicio: "2026-10-20T20:16:00Z"
-fim: "2026-10-20T20:50:00Z"
-decisoes:
-  - id: p06-sub14-fix-aceita-limitacao-runs-antigas
-    motivo: "Cobrir runs antigas finalizadas depois exigiria índice/query por finalizado_em; custo desproporcional agora. Preferido avançar o cursor com lacuna explícita a congelá-lo para sempre (inutiliza o recurso)."
-  - id: p06-processo-checar-review-comments
-    motivo: "Antes de mesclar, conferir também get_review_comments (não só reviews e check runs)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4425 OK (main com #478); test_obter_contexto_operacional 36 OK; DEPOIS 4427 OK (190s)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): real -- run antiga finalizada depois da marca fora da janela; tratado com lacuna + documentação (decisão acima). Demais pontos sem achado."
-pendencias:
-  - "Ligar CONTEXT_CURSOR_SECRET (André); similaridade vetorial real."
-```
-
----
 
 ```yaml
 pacote: "P07 sub-entrega 1/N -- passos 1, 2 e 4 (parte pura): functions/autonomy/commitments.py. Corpus sintético em português (promessa, intenção vaga, pergunta, cancelamento, entrega parcial, não relacionada + casos adversariais), classificar_mensagem (seleção barata, ordem de cautela: negação/condição/dúvida vencem promessa; pergunta com promessa nunca firme), firmeza por LISTA BRANCA (_firme_estrito) além do léxico de hedge, extrair_prazo_expresso (natureza 'expresso', data só quando inequívoca; sem data para prazo relativo/múltiplo/negado/data do objeto), chave_compromisso (vários por chat), avaliar() com precisão/revocação. Sem I/O e sem wiring: atencao_whatsapp.mensagem_cumpre_promessa (A06, fechamento por comprimento) NÃO foi alterado."
@@ -653,3 +611,28 @@ revisao_adversarial:
   - "Codex na PR #482 (P2 real, corrigido): marca combinante em pré-composto (U+1E69) escapava da checagem; agora confere original e NFD. Rodada 7: U+0340/0341/0344 viram acento permitido só no NFD; agora o original também é conferido. Rodada 8: não achou nada."
 pendencias:
   - "P07 passos 2 (extração estruturada, sombra), 3, 5, 7, 8; wiring em atencao_whatsapp somente com flag/sombra."
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 3/N -- passo 7 (parte pura): functions/autonomy/followup_guard.py. revalidar_followup(compromisso, contexto) -> ENVIAR/ADIAR/SUPRIMIR com motivo. Ordem: compromisso encerrado -> atenção já fechada pelo dono -> rascunho pendente -> mensagem posterior do dono (cumprimento firme via avaliar_cumprimento suprime; senão adia) -> mensagem posterior da contraparte (adia) -> ENVIAR. Contexto malformado, estado de atenção desconhecido, fuso inválido ou qualquer exceção -> ADIAR (nunca envia na dúvida). Sem I/O e sem wiring; fila antiga e A06 não alteradas."
+estado: validado
+inicio: "2026-10-21T19:45:00Z"
+fim: "2026-10-21T21:00:00Z"
+decisoes:
+  - id: p07-sub3-adiar-sobre-enviar
+    motivo: "Só ENVIAR dispara follow-up; qualquer dúvida adia. delegado_ao_agente/aguardando_andre adiam; estados desconhecidos adiam; 'adiado' deixou de ser tratado como fechado."
+  - id: p07-sub3-tempo
+    motivo: "Mensagens com timestamp >= prometido_em (truncado em segundos, normalizado em UTC) contam como posteriores, exceto a própria promessa (from_me, wa_message_id str não vazio == mensagem_id)."
+  - id: p07-sub3-arquivo-execucao
+    motivo: "execucao.md arquivado (blocos P06 sub 14 e correção -> execucao-archive-p06sub14.md)."
+  - id: p07-sub3-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 17h."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4486 OK (head de main, conforme P07 sub 2); test_autonomy_followup_guard 15 OK (novo arquivo); DEPOIS: ver PR."
+revisao_adversarial:
+  - "Rodada 1: estado_atencao desconhecido, timestamp igual, tzinfo sem offset, falta de rede de segurança. Corrigido. Rodada 2: microssegundos e id vazio/da contraparte. Corrigido. Rodada 3: dobra de horário de verão (tzinfo compartilhado). Corrigido normalizando para UTC."
+pendencias:
+  - "P07 passos 2 (extração estruturada, sombra), 3, 5, 8; wiring em atencao_whatsapp somente com flag/sombra."
+```

@@ -89,6 +89,13 @@ class RevalidarFollowupTest(unittest.TestCase):
             m["wa_message_id"] = wid
             self.assertEqual(revalidar_followup(comp(mensagem_id=mid), ctx([m])).acao, ADIAR, (from_me, wid))
 
+    def test_dobra_de_horario_de_verao(self):
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        c = comp(prometido_em=datetime(2026, 11, 1, 1, 45, tzinfo=ny))
+        m = {"from_me": False, "timestamp": datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny)}
+        self.assertEqual(revalidar_followup(c, ctx([m])).motivo, "novo_dado_da_contraparte")
+
     def test_tzinfo_sem_offset_e_tipos_estranhos_adiam(self):
         from datetime import tzinfo
 
