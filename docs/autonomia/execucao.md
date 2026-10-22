@@ -628,7 +628,7 @@ decisoes:
     motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 8h BRT."
 testes:
   resultados:
-    - "functions/ completo ANTES 4504 OK (head de main, conforme P07 sub 3); test_autonomy_atencao_compromisso 10 OK (novo arquivo); DEPOIS: ver contagem final na PR."
+    - "functions/ completo ANTES 4504 OK (head de main, conforme P07 sub 3); test_autonomy_atencao_compromisso 10 OK (novo arquivo); DEPOIS 4514 OK (219s, head final)."
 revisao_adversarial:
   - "Rodada 1: ADIAR repetido não renovava proxima_avaliacao, avaliação antiga sobrescrevia nova, validação fraca do existente, chave com '/', exceções fora de ValueError. Corrigido. Rodada 2: transição aberto->enviado recusada, OverflowError em agora, itens incoerentes aceitos. Corrigido. Rodada 3: marcar_enviado com agora anterior ao avaliado_em. Corrigido (max). Rodada 4: OverflowError em avaliado_em extremo. Corrigido em _validar. Rodada 5: não achou nada."
 pendencias:
