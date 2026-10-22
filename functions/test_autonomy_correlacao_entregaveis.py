@@ -29,7 +29,15 @@ class CorrelacaoTest(unittest.TestCase):
         for args in [(1, [ev]), ("a", "x"), ("a", [ev], "abc"), ("a", [("gmail", "m")]), ("a", [ev], [1])]:
             with self.assertRaises(ValueError):
                 ce.correlacionar(*args)
-        for e in [Evidencia("sms", "m"), Evidencia("gmail", " "), Evidencia("gmail", "m", ids=[1]),
+        class C(str):
+            __eq__ = lambda s, o: True
+            __hash__ = str.__hash__
+
+        for bad in (None, [1]):
+            with self.assertRaises(ValueError):
+                ce.vinculo_firme(bad)
+        for e in [Evidencia(C("zzz"), "m"), Evidencia("gmail", "a\nb"), Evidencia("gmail", " x "),
+                  Evidencia("sms", "m"), Evidencia("gmail", " "), Evidencia("gmail", "m", ids=[1]),
                   Evidencia("gmail", "m", "a̶b")]:
             with self.assertRaises(ValueError):
                 ce.correlacionar("a", [e])

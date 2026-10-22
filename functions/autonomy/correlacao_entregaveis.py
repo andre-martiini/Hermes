@@ -71,10 +71,10 @@ def correlacionar(promessa, evidencias, ids_compromisso=()) -> tuple[Vinculo, ..
     for ev in evidencias:
         if type(ev) is not Evidencia:
             raise ValueError("evidência deve ser Evidencia")
-        if ev.canal not in CANAIS:
+        if type(ev.canal) is not str or ev.canal not in CANAIS:
             raise ValueError("canal inválido")
         ref = _texto(ev.ref, "ref", 200)
-        if not ref.strip():
+        if not ref or ref != ref.strip() or not ref.isprintable():
             raise ValueError("ref inválido")
         nome = re.sub(r"[_.\-]+", " ", _normalizar(_texto(ev.nome, "nome")))
         if meus & _ids(ev.ids, "ids"):
@@ -85,5 +85,8 @@ def correlacionar(promessa, evidencias, ids_compromisso=()) -> tuple[Vinculo, ..
 
 
 def vinculo_firme(vinculos) -> bool:
-    """True só se houver ao menos um vínculo por ID e nenhum incerto o contradiz."""
+    """True se houver ao menos um vínculo por ID não incerto; vínculos
+    semânticos nunca contam (nem contradizem). ValueError para entrada ruim."""
+    if type(vinculos) not in (list, tuple) or any(type(v) is not Vinculo for v in vinculos):
+        raise ValueError("vinculos deve ser lista ou tupla de Vinculo")
     return any(v.tipo == VINCULO_ID and not v.incerta for v in vinculos)
