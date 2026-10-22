@@ -4,9 +4,9 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, extname, sep } from 'node:path'
-import { createSign } from 'node:crypto'
+import { createSign, createHash } from 'node:crypto'
 
 // Só a sessão do agente (iniciar.ps1) liga o canal: outra sessão aberta na pasta adiantaria o cursor e perderia eventos.
 if (process.env.GASPAR_EVENTOS !== '1') process.exit(0)
@@ -45,11 +45,12 @@ async function getAccessToken(): Promise<string> {
 
 // ---------- cursores ----------
 const CURSOR_FILE = join(STATE, 'cursor.json')
-type Cursor = { atencao: string; whatsapp: string; promessas: string; vistos: string[] }
-const cursor: Cursor = existsSync(CURSOR_FILE)
-  ? JSON.parse(readFileSync(CURSOR_FILE, 'utf8'))
-  : { atencao: new Date(Date.now() - 6 * 3600e3).toISOString(), whatsapp: new Date().toISOString(),
-      promessas: new Date().toISOString(), vistos: [] }
+// pendentes: eventos entregues e ainda não marcados como vistos; voltam para a sessão depois de um reinício.
+type Pendente = { meta: Record<string, string>; content: string }
+type Cursor = { atencao: string; whatsapp: string; promessas: string; vistos: string[]; pendentes: Record<string, Pendente> }
+const cursor: Cursor = { atencao: new Date(Date.now() - 6 * 3600e3).toISOString(), whatsapp: new Date().toISOString(),
+  promessas: new Date().toISOString(), vistos: [], pendentes: {},
+  ...(existsSync(CURSOR_FILE) ? JSON.parse(readFileSync(CURSOR_FILE, 'utf8')) : {}) }
 const saveCursor = () => writeFileSync(CURSOR_FILE, JSON.stringify(cursor, null, 2))
 
 // ---------- Firestore REST ----------
@@ -85,16 +86,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   inputSchema: { type: 'object', properties: { event_id: { type: 'string' } }, required: ['event_id'] } }, {
   name: 'agora', description: 'Data, dia da semana e hora atuais em Brasilia. Use em vez de shell.',
   inputSchema: { type: 'object', properties: {} } }, {
+  name: 'consumo_hoje', description: 'Tokens que esta sessao do agente gastou hoje (turnos, entrada, cache, saida, por modelo).',
+  inputSchema: { type: 'object', properties: {} } }, {
   name: 'transcrever_audio',
   description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
   inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   if (req.params.name === 'agora')
     return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
+  if (req.params.name === 'consumo_hoje')
+    return { content: [{ type: 'text', text: JSON.stringify(consumoHoje()) }] }
   if (req.params.name === 'transcrever_audio')
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
   const id = String((req.params.arguments as any).event_id)
+  delete cursor.pendentes[id]
   if (!cursor.vistos.includes(id)) cursor.vistos.push(id)
   cursor.vistos = cursor.vistos.slice(-500); saveCursor()
   return { content: [{ type: 'text', text: 'ok' }] }
@@ -125,11 +131,51 @@ async function transcrever(caminho: string): Promise<string> {
   return ((await t.json()) as { text: string }).text.trim()
 }
 
-async function emit(event_id: string, meta: Record<string, string>, content: string) {
-  if (cursor.vistos.includes(event_id)) return
-  await mcp.notification({ method: 'notifications/claude/channel',
-    params: { content, meta: { event_id, ...meta } } })
+// ---------- telemetria: soma o usage das transcricoes de hoje do perfil do agente ----------
+// O Claude Code grava uma linha por bloco de conteudo com o mesmo usage: deduplica por message.id.
+function consumoHoje() {
+  const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+  const base = join(process.env.CLAUDE_CONFIG_DIR ?? '', 'projects')
+  const vistos = new Set<string>(), por_modelo: Record<string, number> = {}
+  const t = { turnos: 0, entrada: 0, cache_lido: 0, cache_gravado: 0, saida: 0 }
+  for (const dir of existsSync(base) ? readdirSync(base).filter(d => d.endsWith('gaspar-agente')) : [])
+    for (const f of readdirSync(join(base, dir)).filter(f => f.endsWith('.jsonl'))) {
+      const p = join(base, dir, f)
+      if (statSync(p).mtime.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) !== hoje) continue
+      for (const l of readFileSync(p, 'utf8').split('\n')) {
+        if (!l.includes('"usage"')) continue
+        let d: any; try { d = JSON.parse(l) } catch { continue }
+        const m = d.message, u = m?.usage
+        if (d.type !== 'assistant' || !u || vistos.has(m.id)) continue
+        if (new Date(d.timestamp).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) !== hoje) continue
+        vistos.add(m.id); t.turnos++; por_modelo[m.model] = (por_modelo[m.model] ?? 0) + 1
+        t.entrada += u.input_tokens ?? 0; t.cache_lido += u.cache_read_input_tokens ?? 0
+        t.cache_gravado += u.cache_creation_input_tokens ?? 0; t.saida += u.output_tokens ?? 0
+      }
+    }
+  return { dia: hoje, ...t, por_modelo }
 }
+
+async function notificar(event_id: string, p: Pendente) {
+  await mcp.notification({ method: 'notifications/claude/channel',
+    params: { content: p.content, meta: { event_id, ...p.meta } } })
+}
+async function emit(event_id: string, meta: Record<string, string>, content: string) {
+  if (cursor.vistos.includes(event_id) || cursor.pendentes[event_id]) return
+  // Conteúdo de terceiro vai cortado: o texto inteiro, se preciso, sai por ler_mensagens_whatsapp.
+  const p = { meta, content: content.length > 1500 ? content.slice(0, 1500) + ' [...]' : content }
+  cursor.pendentes[event_id] = p
+  const ids = Object.keys(cursor.pendentes)
+  for (const velho of ids.slice(0, Math.max(0, ids.length - 200))) delete cursor.pendentes[velho]
+  saveCursor()
+  await notificar(event_id, p)
+}
+// Item de atenção muda de versão (ou fecha): a versão antiga pendente deixa de valer.
+function esquecerAtencao(item_id: string, manter = '') {
+  for (const k of Object.keys(cursor.pendentes))
+    if (k.startsWith(`atencao:${item_id}:`) && k !== manter) delete cursor.pendentes[k]
+}
+const versao = (...campos: unknown[]) => createHash('sha1').update(campos.map(String).join('|')).digest('hex').slice(0, 10)
 
 // ---------- ciclo ----------
 // ponytail: cursor "maior que" com limit 100; dois docs com o mesmo timestamp na borda de um lote cheio
@@ -139,8 +185,12 @@ async function tick() {
   for (const d of await runQuery('atencao', [gt('atualizado_em', cursor.atencao)], 'atualizado_em')) {
     const f = d.f
     cursor.atencao = str(f.atualizado_em)
-    if (str(f.estado) !== 'aberto') continue
-    await emit(`atencao:${d.id}:${str(f.atualizado_em)}`, {
+    if (str(f.estado) !== 'aberto') { esquecerAtencao(d.id); continue }
+    // O backend regrava atualizado_em a cada reavaliação (de hora em hora), mesmo sem mudança:
+    // a identidade do evento é o conteúdo, para o mesmo item não chegar de novo a cada hora.
+    const ev = `atencao:${d.id}:${versao(f.titulo?.stringValue, f.resumo?.stringValue, str(f.prioridade), str(f.prazo), str(f.pessoa), f.sugestao?.stringValue)}`
+    esquecerAtencao(d.id, ev)
+    await emit(ev, {
       tipo: 'atencao', item_id: d.id, prioridade: str(f.prioridade), origem: str(f.origem),
       tipo_item: str(f.tipo), acao_id: str(f.acao_id), pessoa: str(f.pessoa), prazo: str(f.prazo) },
       `${str(f.titulo)}\n${str(f.resumo)}\nSugestao do Gaspar: ${str(f.sugestao)}`)
@@ -167,6 +217,9 @@ async function tick() {
   }
   saveCursor()
 }
+
+// Reentrega o que ficou sem marcar_visto (a sessão anterior caiu ou encerrou antes de tratar).
+for (const [id, p] of Object.entries(cursor.pendentes)) await notificar(id, p)
 
 log(`iniciado; poll ${POLL_MS / 1000}s; cursores ${JSON.stringify({ a: cursor.atencao, w: cursor.whatsapp, p: cursor.promessas })}`)
 while (true) {

@@ -21,7 +21,8 @@
       "mcp__claude_ai_Google_Calendar",
       "mcp__gaspar-eventos__marcar_visto",
       "mcp__gaspar-eventos__transcrever_audio",
-      "mcp__gaspar-eventos__agora"
+      "mcp__gaspar-eventos__agora",
+      "mcp__gaspar-eventos__consumo_hoje"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",

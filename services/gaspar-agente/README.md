@@ -47,6 +47,13 @@ O `iniciar.ps1` liga o canal sozinho quando existe `firebase_service_account_key
 A variável `GASPAR_EVENTOS=1` impede que outra sessão aberta na pasta suba o canal e adiante o cursor.
 Na primeira subida com o canal, o Claude Code pede confirmação do `--dangerously-load-development-channels`.
 
+Entrega e telemetria (revisão externa de 22/10):
+- **Identidade do evento:** um item da fila de atenção é identificado pelo conteúdo (título, resumo, prioridade, prazo, pessoa, sugestão), não por `atualizado_em`. O backend regrava esse campo a cada reavaliação, de hora em hora, e o mesmo item chegava várias vezes por dia.
+- **Reentrega:** evento entregue e não marcado com `marcar_visto` fica em `state/cursor.json` (`pendentes`, até 200) e volta para a sessão no próximo início. Item que fecha ou muda de versão sai dos pendentes.
+- **Texto limitado:** conteúdo de WhatsApp vai cortado em 1.500 caracteres; o texto inteiro sai por `ler_mensagens_whatsapp`.
+- **`consumo_hoje`:** soma os tokens do dia a partir das transcrições do perfil do agente (deduplicadas por `message.id`). O pulso grava o resultado em `contadores` de `registrar_execucao_agente`.
+- **Modelo:** o agente roda no Sonnet 5.5 (`--model` no `iniciar.ps1`).
+
 Diferenças em relação ao plano:
 - **Fila de atenção:** consultada só por `atualizado_em`, com o `estado` filtrado no canal, porque não há índice composto `estado`+`atualizado_em`.
 - **Credencial:** a conta de serviço do worker do WhatsApp, não o login por senha do dono (a conta do André só entra com Google).
