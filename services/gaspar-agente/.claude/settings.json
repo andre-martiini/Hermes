@@ -15,13 +15,13 @@
       "Read(./**)",
       "Read(~/.claude/channels/telegram-gaspar/access.json)",
       "Skill",
-      "PowerShell(Get-Date*)",
       "mcp__plugin_telegram_telegram",
       "mcp__claude_ai_Sistema_Hermes",
       "mcp__claude_ai_Gmail",
       "mcp__claude_ai_Google_Calendar",
       "mcp__gaspar-eventos__marcar_visto",
-      "mcp__gaspar-eventos__transcrever_audio"
+      "mcp__gaspar-eventos__transcrever_audio",
+      "mcp__gaspar-eventos__agora"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",
@@ -78,10 +78,8 @@
       "WebFetch",
       "WebSearch",
       "Read(**/channels/**/.env)",
-      "Bash(*firebase_service_account_key*)",
-      "PowerShell(*firebase_service_account_key*)",
-      "Bash(*service_account*)",
-      "PowerShell(*service_account*)"
+      "Bash",
+      "PowerShell"
     ]
   },
   "enabledMcpjsonServers": [

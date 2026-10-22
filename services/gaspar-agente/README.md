@@ -34,7 +34,8 @@ Todos em PowerShell, dentro desta pasta.
 O token e o `access.json` ficam em `~/.claude/channels/telegram-gaspar` (via `TELEGRAM_STATE_DIR`), não na pasta padrão.
 Motivo: o Telegram entrega cada mensagem a um único `getUpdates`. Qualquer outra sessão aberta nesta pasta (VS Code, por exemplo) sobe o plugin
 e, se achasse o token, roubaria mensagens do agente. A limpeza de poller antigo do plugin usa `ps` e não funciona no Windows.
-Para reconfigurar token ou acesso, rode `/telegram:configure` e `/telegram:access` dentro da sessão aberta pelo `iniciar.ps1`.
+O agente não tem shell (Bash e PowerShell negados): para mudar token ou acesso, edite `.env` e `access.json` em `~/.claude/channels/telegram-gaspar`.
+A hora vem da tool `agora` do canal, porque a análise de comandos de PowerShell do Claude Code às vezes estoura 5 s e trava o agente pedindo permissão.
 
 ## Marco 2: canal gaspar-eventos
 `gaspar-eventos/server.ts` consulta o Firestore a cada 20 s e empurra para a sessão:
