@@ -39,7 +39,7 @@ Para reconfigurar token ou acesso, rode `/telegram:configure` e `/telegram:acces
 ## Marco 2: canal gaspar-eventos
 `gaspar-eventos/server.ts` consulta o Firestore a cada 20 s e empurra para a sessão:
 - itens abertos da fila de atenção;
-- WhatsApp recebido em conversa individual (grupos ficam de fora por enquanto);
+- WhatsApp recebido em conversa individual (grupos e Status ficam de fora);
 - promessas vencidas.
 
 O `iniciar.ps1` liga o canal sozinho quando existe `firebase_service_account_key.json` na raiz do repositório; aí o pulso cai para 15 min.
