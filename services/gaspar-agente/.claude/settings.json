@@ -1,7 +1,6 @@
 {
   "enabledPlugins": {
     "telegram@claude-plugins-official": true,
-    "fakechat@claude-plugins-official": true,
     "superpowers@superpowers-marketplace": false,
     "i-have-adhd@i-have-adhd": false,
     "impeccable@impeccable": false,

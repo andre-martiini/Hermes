@@ -5,6 +5,14 @@ $env:TELEGRAM_STATE_DIR = "$env:USERPROFILE\.claude\channels\telegram-gaspar"
 # Sem bun no PATH o plugin falha e o Claude Code passa ~15 min sem tentar de novo.
 # Terminais abertos antes da instalação do Bun (e o Agendador) não têm o PATH novo.
 $env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
+# Uma falha do plugin em QUALQUER sessão aberta nesta pasta (ex.: sem bun no PATH) fica gravada neste
+# cache e faz o agente pular o Telegram por ~15 min. Limpa antes de subir.
+$cache = "$env:USERPROFILE\.claude\mcp-needs-auth-cache.json"
+if (Test-Path $cache) {
+  $c = Get-Content $cache -Raw | ConvertFrom-Json
+  $c.PSObject.Properties.Remove('plugin:telegram:telegram')
+  [IO.File]::WriteAllText($cache, ($c | ConvertTo-Json -Compress))  # sem BOM (Set-Content do PS 5.1 grava BOM)
+}
 Set-Location $PSScriptRoot
 
 # Canal gaspar-eventos (marco 2): usa a chave da conta de serviço do worker do WhatsApp; sem ela, o /loop varre tudo a cada 5 min.
