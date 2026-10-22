@@ -45,16 +45,74 @@ class _Consulta:
         return list(self._docs)
 
 
+class _Settings:
+    def __init__(self, dados):
+        self.exists = dados is not None
+        self._dados = dados
+
+    def document(self, nome):
+        assert nome == "settings", nome
+        return self
+
+    def get(self):
+        return self
+
+    def to_dict(self):
+        return dict(self._dados or {})
+
+
 class _Db:
-    def __init__(self, tarefas):
+    def __init__(self, tarefas, settings=None):
         self._tarefas = [_Doc(i, d) for i, d in tarefas.items()]
+        self._settings = settings
 
     def collection(self, nome):
+        if nome == "system":
+            return _Settings(self._settings)
         assert nome == "tarefas", nome
         return _Consulta(self._tarefas)
 
 
 class TestBriefing(unittest.TestCase):
+    def _rodar(self, db):
+        enviar = mock.Mock()
+        sincronizar = mock.Mock()
+        falso_main = types.SimpleNamespace(
+            get_db=lambda: db,
+            get_calendar_service=lambda: None,
+            get_target_calendar_id=lambda _db: "cal",
+            _resolve_default_telegram_chat_id=lambda _db: "123",
+            _get_telegram_token=lambda _db: "token",
+            _send_telegram_message=enviar,
+        )
+        modulos = {
+            "main": falso_main,
+            "hermes_calendar_tools": types.SimpleNamespace(consultar_eventos=lambda *a, **k: []),
+            "investimentos_sync": types.SimpleNamespace(sincronizar_decisao_investimentos=sincronizar),
+        }
+        with mock.patch.dict(sys.modules, modulos):
+            fn = getattr(daily_morning_briefing.briefing_matinal_acoes, "__wrapped__",
+                         daily_morning_briefing.briefing_matinal_acoes)
+            fn(None)
+        return enviar, sincronizar
+
+    def test_envio_desligado_nao_manda_mas_sincroniza_investimentos(self):
+        db = _Db({}, settings={"briefing_matinal": {"enviar_telegram": False}})
+        enviar, sincronizar = self._rodar(db)
+        enviar.assert_not_called()
+        sincronizar.assert_called_once()
+
+    def test_sem_configuracao_ou_ligado_manda(self):
+        for settings in (None, {}, {"briefing_matinal": {}}, {"briefing_matinal": {"enviar_telegram": True}}):
+            with self.subTest(settings=settings):
+                enviar, _ = self._rodar(_Db({}, settings=settings))
+                enviar.assert_called_once()
+
+    def test_erro_ao_ler_a_configuracao_manda(self):
+        db = mock.Mock()
+        db.collection.side_effect = RuntimeError("fora")
+        self.assertTrue(daily_morning_briefing.envio_ligado(db))
+
     def test_stand_by_fica_fora_das_acoes_programadas(self):
         hoje = datetime.datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
         db = _Db({

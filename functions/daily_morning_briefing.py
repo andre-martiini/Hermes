@@ -35,6 +35,19 @@ def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
         _briefing(db, now_sp, run)
 
 
+def envio_ligado(db) -> bool:
+    """O dono deixou de ler o briefing quando o agente residente passou a abrir o
+    dia (22/10/2026). Padrão ligado; na dúvida (erro de leitura), manda."""
+    try:
+        snap = db.collection("system").document("settings").get()
+        dados = (snap.to_dict() or {}) if snap.exists else {}
+    except Exception as exc:
+        print(f"[BriefingMatinal] Falha ao ler a configuração do envio: {exc}")
+        return True
+    cfg = dados.get("briefing_matinal")
+    return not (isinstance(cfg, dict) and cfg.get("enviar_telegram") is False)
+
+
 def _briefing(db, now_sp, run):
     from main import (
         get_calendar_service,
@@ -59,6 +72,12 @@ def _briefing(db, now_sp, run):
         investimentos_sync.sincronizar_decisao_investimentos(db)
     except Exception as exc_sync:
         print(f"[BriefingMatinal] Sincronizacao de investimentos ignorada: {exc_sync}")
+
+    # A sincronização acima continua rodando; só a mensagem pode ser desligada.
+    if not envio_ligado(db):
+        print("[BriefingMatinal] Envio desligado em system/settings.briefing_matinal.enviar_telegram.")
+        run.resumo("Envio do briefing desligado (system/settings.briefing_matinal.enviar_telegram)")
+        return
 
     tarefas_hoje = []
     try:
