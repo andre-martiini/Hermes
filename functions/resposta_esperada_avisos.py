@@ -23,6 +23,10 @@ from firebase_admin import firestore
 COLECAO_ESTADO = "sinais_resposta_estado"
 COLECAO_AVISOS = "sinais_resposta_avisos"
 JANELA_AVISO = timedelta(hours=4)
+# "Do assunto, sem resolver" no máximo uma vez por dia por etapa: na 1ª semana
+# (16 a 22/10) uma conversa ativa gerou 4 avisos P em 3 dias para a mesma etapa,
+# e os P repetidos foram a maior parte dos avisos ruins. R segue com 4 h.
+JANELA_AVISO_P = timedelta(hours=24)
 CONFIANCAS = ("alta", "media")
 CLASSES = ("R", "P", "N")
 CRITERIOS = {
@@ -134,6 +138,11 @@ def _dentro_da_janela(estado: dict, agora: datetime) -> bool:
     return bool(ultimo) and agora - ultimo < JANELA_AVISO
 
 
+def _p_recente(estado: dict, agora: datetime) -> bool:
+    ultimo_p = _como_data(estado.get("ultimo_p_em"))
+    return bool(ultimo_p) and agora - ultimo_p < JANELA_AVISO_P
+
+
 def avaliar(db, mensagem: dict, resultado: dict, entradas: list[dict], *,
             classificar=None, avisar=None, agora: datetime | None = None) -> dict | None:
     """Classifica a mensagem contra a espera mais provável e avisa se for R ou P."""
@@ -170,7 +179,7 @@ def avaliar(db, mensagem: dict, resultado: dict, entradas: list[dict], *,
             {"classificacao": {"classe": classe, "modelo": "gemini_flash", "em": agora.isoformat()}}, merge=True)
     if classe not in ("R", "P"):
         return {"status": "ruido" if classe == "N" else "sem_classificacao", "classe": classe}
-    if na_janela and classe == "P":
+    if classe == "P" and (na_janela or _p_recente(estado, agora)):
         return {"status": "janela", "classe": classe}
 
     aviso_ref = db.collection(COLECAO_AVISOS).document()
@@ -180,7 +189,11 @@ def avaliar(db, mensagem: dict, resultado: dict, entradas: list[dict], *,
         "chat_id": chat_id, "autor": autor, "criado_em": agora.isoformat(),
     }
     aviso_ref.set(aviso)
-    estado_ref.set({"ultimo_aviso_em": agora, "ultima_classe": classe, "ultimo_aviso_id": aviso_ref.id})
+    novo_estado = {"ultimo_aviso_em": agora, "ultima_classe": classe, "ultimo_aviso_id": aviso_ref.id}
+    ultimo_p = agora if classe == "P" else estado.get("ultimo_p_em")
+    if ultimo_p:
+        novo_estado["ultimo_p_em"] = ultimo_p
+    estado_ref.set(novo_estado)
     (avisar or _avisar_no_telegram)(db, aviso_ref.id, aviso, texto)
     return {"status": "avisado", "classe": classe, "aviso_id": aviso_ref.id}
 
