@@ -79,7 +79,10 @@
       "WebSearch",
       "Read(**/channels/**/.env)",
       "Bash",
-      "PowerShell"
+      "PowerShell",
+      "Edit",
+      "Write",
+      "NotebookEdit"
     ]
   },
   "enabledMcpjsonServers": [

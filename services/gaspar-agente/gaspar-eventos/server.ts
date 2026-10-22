@@ -115,7 +115,9 @@ async function transcrever(caminho: string): Promise<string> {
   const groq = str(((await r.json()) as any).fields?.groq_api_key)
   if (!groq) throw new Error('groq_api_key ausente em system/api_keys')
   const form = new FormData()
-  form.append('file', new Blob([readFileSync(p)]), 'audio' + extname(p))
+  // O Telegram salva voz como .oga, extensao que o Groq recusa (assim como .opus); o conteudo e ogg/opus.
+  const ext = ['.oga', '.opus'].includes(extname(p).toLowerCase()) ? '.ogg' : extname(p)
+  form.append('file', new Blob([readFileSync(p)]), 'audio' + ext)
   form.append('model', 'whisper-large-v3-turbo'); form.append('language', 'pt'); form.append('response_format', 'json')
   const t = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${groq}` }, body: form })
@@ -148,8 +150,10 @@ async function tick() {
   for (const d of await runQuery('whatsapp_messages', [gt('ingested_at', cursor.whatsapp)], 'ingested_at')) {
     const f = d.f
     cursor.whatsapp = str(f.ingested_at)
-    // status@broadcast são os Status (stories) dos contatos: não são conversa e só gastariam tokens.
-    if (str(f.from_me) === true || str(f.is_group) === true || String(str(f.chat_id)).endsWith('@broadcast')) continue
+    // Só conversa individual (@lid ou @c.us). Fora: grupos (@g.us), Status (status@broadcast) e
+    // Canais (@newsletter) -- nas 400 mensagens mais recentes, 90% eram desses três e só gastariam tokens.
+    const chat = String(str(f.chat_id))
+    if (str(f.from_me) === true || !(chat.endsWith('@lid') || chat.endsWith('@c.us'))) continue
     await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: str(f.chat_id), chat_name: str(f.chat_name),
       autor: str(f.author_name), message_type: str(f.message_type), message_id: str(f.wa_message_id) },
       str(f.content) || str(f.transcription_text) || `[${str(f.message_type)}]`)
