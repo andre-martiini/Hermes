@@ -13,9 +13,8 @@
   "permissions": {
     "defaultMode": "default",
     "allow": [
-      "Read",
-      "Grep",
-      "Glob",
+      "Read(./**)",
+      "Read(~/.claude/channels/telegram-gaspar/access.json)",
       "Skill",
       "PowerShell(Get-Date*)",
       "mcp__plugin_telegram_telegram",
@@ -56,6 +55,9 @@
       "mcp__claude_ai_Google_Calendar__respond_to_event"
     ],
     "deny": [
+      "Read(//c/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
+      "Read(//C:/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
+      "Read(**/firebase_service_account_key.json)",
       "mcp__claude_ai_Sistema_Hermes__registrar_aporte_investimento",
       "mcp__claude_ai_Sistema_Hermes__registrar_execucao_investimento",
       "mcp__claude_ai_Sistema_Hermes__video_renderizar",
@@ -74,7 +76,12 @@
       "mcp__claude_ai_Canva",
       "mcp__claude_ai_Google_Drive",
       "WebFetch",
-      "WebSearch"
+      "WebSearch",
+      "Read(**/channels/**/.env)",
+      "Bash(*firebase_service_account_key*)",
+      "PowerShell(*firebase_service_account_key*)",
+      "Bash(*service_account*)",
+      "PowerShell(*service_account*)"
     ]
   },
   "enabledMcpjsonServers": [

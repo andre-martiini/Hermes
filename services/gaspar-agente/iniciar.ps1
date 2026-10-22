@@ -7,10 +7,10 @@ $env:TELEGRAM_STATE_DIR = "$env:USERPROFILE\.claude\channels\telegram-gaspar"
 $env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
 Set-Location $PSScriptRoot
 
-# Canal gaspar-eventos (marco 2) só depois do login.ps1; sem ele, o /loop varre tudo a cada 5 min.
+# Canal gaspar-eventos (marco 2): usa a chave da conta de serviço do worker do WhatsApp; sem ela, o /loop varre tudo a cada 5 min.
 $canais = @('plugin:telegram@claude-plugins-official')
 $pulso = '5m'
-if (Test-Path 'gaspar-eventos\state\refresh.dpapi') {
+if (Test-Path '..\..\firebase_service_account_key.json') {
   $env:GASPAR_EVENTOS = '1'
   $canais = @('--channels') + $canais + @('--dangerously-load-development-channels', 'server:gaspar-eventos')
   $pulso = '15m'

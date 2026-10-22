@@ -6,6 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createSign } from 'node:crypto'
 
 // Só a sessão do agente (iniciar.ps1) liga o canal: outra sessão aberta na pasta adiantaria o cursor e perderia eventos.
 if (process.env.GASPAR_EVENTOS !== '1') process.exit(0)
@@ -13,34 +14,32 @@ if (process.env.GASPAR_EVENTOS !== '1') process.exit(0)
 const ROOT = import.meta.dir
 const STATE = join(ROOT, 'state')
 mkdirSync(STATE, { recursive: true })
-// Chave Web pública do app (a mesma de firebase.ts na raiz do repositório).
-const API_KEY = process.env.FIREBASE_WEB_API_KEY ?? 'AIzaSyCc00Qqsa7Zgfx9NZkLoPj_gvXcuMczuxk'
-const PROJECT = process.env.FIREBASE_PROJECT_ID ?? 'gestao-hermes'
+// Mesma conta de serviço do worker do WhatsApp (services/whatsapp-capture/run-hidden.bat).
+// É admin e ignora as regras do Firestore: este código só lê atencao, whatsapp_messages e promessas_abertas.
+const KEY_FILE = process.env.GASPAR_SA_KEY ?? join(ROOT, '..', '..', '..', 'firebase_service_account_key.json')
+const sa = JSON.parse(readFileSync(KEY_FILE, 'utf8')) as { client_email: string; private_key: string; project_id: string }
 const POLL_MS = Number(process.env.POLL_SECONDS ?? 20) * 1000
-const FS = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`
+const FS = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`
 const log = (m: string) => process.stderr.write(`gaspar-eventos: ${m}\n`)
 
-// ---------- auth: refresh token (DPAPI) -> ID token (1 h) ----------
-let idToken = '', idTokenExp = 0
-function refreshTokenPlain(): string {
-  const ps = Bun.spawnSync(['powershell', '-NoProfile', '-Command',
-    `Add-Type -AssemblyName System.Security; $b=[IO.File]::ReadAllBytes('${join(STATE, 'refresh.dpapi')}'); ` +
-    `[Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($b,$null,'CurrentUser'))`])
-  const out = ps.stdout.toString().trim()
-  if (!out) throw new Error('refresh.dpapi ausente ou ilegível: rode login.ps1')
-  return out
-}
-async function getIdToken(): Promise<string> {
-  if (idToken && Date.now() < idTokenExp - 120_000) return idToken
-  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`, {
+// ---------- auth: JWT assinado pela conta de serviço -> access token (1 h) ----------
+let accessToken = '', tokenExp = 0
+const b64url = (s: string | Buffer) => Buffer.from(s).toString('base64url')
+async function getAccessToken(): Promise<string> {
+  if (accessToken && Date.now() < tokenExp - 120_000) return accessToken
+  const now = Math.floor(Date.now() / 1000)
+  const unsigned = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64url(JSON.stringify({
+    iss: sa.client_email, scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }))
+  const jwt = unsigned + '.' + createSign('RSA-SHA256').update(unsigned).sign(sa.private_key).toString('base64url')
+  const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshTokenPlain() }),
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
   })
-  if (!r.ok) throw new Error(`securetoken ${r.status}: ${await r.text()}`)
-  const j = await r.json() as { id_token: string; expires_in: string }
-  idToken = j.id_token; idTokenExp = Date.now() + Number(j.expires_in) * 1000
-  // ponytail: o refresh token rotacionado não é regravado (DPAPI exige PowerShell); se expirar, rodar login.ps1 de novo.
-  return idToken
+  if (!r.ok) throw new Error(`oauth2 ${r.status}: ${await r.text()}`)
+  const j = await r.json() as { access_token: string; expires_in: number }
+  accessToken = j.access_token; tokenExp = Date.now() + j.expires_in * 1000
+  return accessToken
 }
 
 // ---------- cursores ----------
@@ -61,7 +60,7 @@ async function runQuery(collection: string, where: any[], orderField: string, li
     orderBy: [{ field: { fieldPath: orderField }, direction: 'ASCENDING' }],
     limit } }
   const r = await fetch(`${FS}:runQuery`, { method: 'POST',
-    headers: { Authorization: `Bearer ${await getIdToken()}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${await getAccessToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body) })
   if (!r.ok) throw new Error(`runQuery ${collection} ${r.status}: ${await r.text()}`)
   const rows = await r.json() as any[]
