@@ -5,17 +5,18 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, extname, sep } from 'node:path'
 import { createSign } from 'node:crypto'
 
 // Só a sessão do agente (iniciar.ps1) liga o canal: outra sessão aberta na pasta adiantaria o cursor e perderia eventos.
 if (process.env.GASPAR_EVENTOS !== '1') process.exit(0)
 
 const ROOT = import.meta.dir
-const STATE = join(ROOT, 'state')
+const STATE = process.env.GASPAR_EVENTOS_STATE ?? join(ROOT, 'state')
 mkdirSync(STATE, { recursive: true })
 // Mesma conta de serviço do worker do WhatsApp (services/whatsapp-capture/run-hidden.bat).
-// É admin e ignora as regras do Firestore: este código só lê atencao, whatsapp_messages e promessas_abertas.
+// É admin e ignora as regras do Firestore: este código só lê atencao, whatsapp_messages, promessas_abertas
+// e a chave do Groq em system/api_keys (para transcrever áudio, sem expor a chave ao modelo).
 const KEY_FILE = process.env.GASPAR_SA_KEY ?? join(ROOT, '..', '..', '..', 'firebase_service_account_key.json')
 const sa = JSON.parse(readFileSync(KEY_FILE, 'utf8')) as { client_email: string; private_key: string; project_id: string }
 const POLL_MS = Number(process.env.POLL_SECONDS ?? 20) * 1000
@@ -81,8 +82,13 @@ const mcp = new Server({ name: 'gaspar-eventos', version: '0.1.0' }, {
 })
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   name: 'marcar_visto', description: 'Confirma que o evento foi tratado; evita reenvio apos reinicio.',
-  inputSchema: { type: 'object', properties: { event_id: { type: 'string' } }, required: ['event_id'] } }] }))
+  inputSchema: { type: 'object', properties: { event_id: { type: 'string' } }, required: ['event_id'] } }, {
+  name: 'transcrever_audio',
+  description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
+  inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
+  if (req.params.name === 'transcrever_audio')
+    return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
   const id = String((req.params.arguments as any).event_id)
   if (!cursor.vistos.includes(id)) cursor.vistos.push(id)
@@ -90,6 +96,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   return { content: [{ type: 'text', text: 'ok' }] }
 })
 await mcp.connect(new StdioServerTransport())
+
+// ---------- transcricao (Groq Whisper, a mesma do Gaspar em functions/telegram_utils.py) ----------
+// So aceita arquivos de audio da pasta onde o plugin Telegram salva anexos: uma mensagem maliciosa
+// nao consegue mandar outro arquivo do notebook (ex.: a chave da conta de servico) para fora.
+const INBOX = resolve(process.env.TELEGRAM_STATE_DIR ?? '', 'inbox')
+const AUDIO = new Set(['.ogg', '.oga', '.opus', '.mp3', '.m4a', '.wav', '.webm', '.flac', '.mp4', '.mpeg', '.mpga'])
+async function transcrever(caminho: string): Promise<string> {
+  const p = resolve(caminho)
+  if (!process.env.TELEGRAM_STATE_DIR || !p.toLowerCase().startsWith(INBOX.toLowerCase() + sep) || !AUDIO.has(extname(p).toLowerCase()))
+    throw new Error(`so transcrevo audio baixado do Telegram (pasta ${INBOX})`)
+  const r = await fetch(`${FS}/system/api_keys`, { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
+  if (!r.ok) throw new Error(`api_keys ${r.status}`)
+  const groq = str(((await r.json()) as any).fields?.groq_api_key)
+  if (!groq) throw new Error('groq_api_key ausente em system/api_keys')
+  const form = new FormData()
+  form.append('file', new Blob([readFileSync(p)]), 'audio' + extname(p))
+  form.append('model', 'whisper-large-v3-turbo'); form.append('language', 'pt'); form.append('response_format', 'json')
+  const t = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${groq}` }, body: form })
+  if (!t.ok) throw new Error(`groq ${t.status}: ${await t.text()}`)
+  return ((await t.json()) as { text: string }).text.trim()
+}
 
 async function emit(event_id: string, meta: Record<string, string>, content: string) {
   if (cursor.vistos.includes(event_id)) return

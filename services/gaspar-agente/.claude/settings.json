@@ -20,7 +20,8 @@
       "mcp__claude_ai_Sistema_Hermes",
       "mcp__claude_ai_Gmail",
       "mcp__claude_ai_Google_Calendar",
-      "mcp__gaspar-eventos__marcar_visto"
+      "mcp__gaspar-eventos__marcar_visto",
+      "mcp__gaspar-eventos__transcrever_audio"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",
