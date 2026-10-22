@@ -94,6 +94,11 @@ class AtencaoCompromissoTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 marcar_enviado(e, d)
 
+    def test_enviado_com_relogio_defasado(self):
+        e = montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), AGORA)
+        env = marcar_enviado(e, AGORA - timedelta(seconds=5))
+        self.assertTrue(deve_gravar(e, env))
+
     def test_malformados(self):
         a = montar_item_atencao(CH, 1, DecisaoFollowup(ADIAR, "d"), AGORA)
         b = montar_item_atencao(CH, 1, DecisaoFollowup(ADIAR, "d"), AGORA + timedelta(hours=5))

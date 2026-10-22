@@ -82,7 +82,8 @@ def marcar_enviado(item: dict, agora) -> dict:
         raise ValueError("item malformado") from exc
     if item["estado"] != ESTADO_ABERTO or item["acao"] != ENVIAR:
         raise ValueError("só item aberto com ação enviar vira enviado")
-    return {**item, "estado": ESTADO_ENVIADO, "avaliado_em": _agora_utc(agora).isoformat(),
+    quando = max(_agora_utc(agora), datetime.fromisoformat(item["avaliado_em"]).astimezone(timezone.utc))
+    return {**item, "estado": ESTADO_ENVIADO, "avaliado_em": quando.isoformat(),
             "proxima_avaliacao": None}
 
 
