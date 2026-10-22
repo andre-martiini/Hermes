@@ -33,7 +33,10 @@ class CorrelacaoTest(unittest.TestCase):
             __eq__ = lambda s, o: True
             __hash__ = str.__hash__
 
-        for bad in (None, [1]):
+        V = ce.Vinculo
+        for bad in (None, [1], [V("", "sms", "id", False, "")], [V("r", "gmail", "id", 0, "x")],
+                    [V("r", "gmail", "semantico", False, "x")], [V("r", "gmail", "id", True, "x")],
+                    [V("r", "sms", "id", False, "x")], [V("r", "gmail", "zzz", True, "x")]):
             with self.assertRaises(ValueError):
                 ce.vinculo_firme(bad)
         for e in [Evidencia(C("zzz"), "m"), Evidencia("gmail", "a\nb"), Evidencia("gmail", " x "),
