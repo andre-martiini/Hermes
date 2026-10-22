@@ -35,4 +35,23 @@ O token e o `access.json` ficam em `~/.claude/channels/telegram-gaspar` (via `TE
 Motivo: o Telegram entrega cada mensagem a um único `getUpdates`. Qualquer outra sessão aberta nesta pasta (VS Code, por exemplo) sobe o plugin
 e, se achasse o token, roubaria mensagens do agente. A limpeza de poller antigo do plugin usa `ps` e não funciona no Windows.
 Para reconfigurar token ou acesso, rode `/telegram:configure` e `/telegram:access` dentro da sessão aberta pelo `iniciar.ps1`.
-Agendador, `encerrar.ps1` e watchdog ficam para o marco 3; o canal `gaspar-eventos`, para o marco 2.
+## Marco 2: canal gaspar-eventos
+`gaspar-eventos/server.ts` consulta o Firestore a cada 20 s como o dono e empurra para a sessão:
+- itens abertos da fila de atenção;
+- WhatsApp recebido em conversa individual (grupos ficam de fora por enquanto);
+- promessas vencidas.
+
+O `iniciar.ps1` liga o canal sozinho quando existe `gaspar-eventos/state/refresh.dpapi`; aí o pulso cai para 15 min.
+A variável `GASPAR_EVENTOS=1` impede que outra sessão aberta na pasta suba o canal e adiante o cursor.
+
+Login único (pede e-mail e senha do Firebase; grava só o refresh token, cifrado com DPAPI):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\gaspar-eventos\login.ps1
+```
+Na primeira subida com o canal, o Claude Code pede confirmação do `--dangerously-load-development-channels`.
+
+Diferenças em relação ao plano:
+- **Fila de atenção:** consultada só por `atualizado_em`, com o `estado` filtrado no canal, porque não há índice composto `estado`+`atualizado_em`.
+- **Chave Web:** a mesma de `firebase.ts`, pública, então não há `.env`.
+
+Agendador, `encerrar.ps1` e watchdog ficam para o marco 3.

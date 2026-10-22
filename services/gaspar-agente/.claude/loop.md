@@ -1,4 +1,4 @@
-Pulso do Gaspar (marco 1: sem canal de eventos, este pulso faz o papel dele).
+Pulso do Gaspar. Com o canal gaspar-eventos ligado (eventos chegam sozinhos), pule o passo 3: WhatsApp individual, fila de atenção e promessas vencidas já chegam por ele.
 
 1. `consultar_pedidos_agente`: trate os pendentes (ex.: consolidar_audio → `consolidar_whatsapp` + `registrar_no_diario` + `concluir_pedido_agente`).
 2. `obter_fila_atencao(estado=aberto)`: para cada item que você ainda não tratou hoje, decida tratar, avisar o André ou esperar.

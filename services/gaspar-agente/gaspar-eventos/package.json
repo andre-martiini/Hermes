@@ -1,0 +1,7 @@
+{
+  "name": "gaspar-eventos",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "bun server.ts" },
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0" }
+}

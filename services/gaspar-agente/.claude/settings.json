@@ -21,7 +21,8 @@
       "mcp__plugin_telegram_telegram",
       "mcp__claude_ai_Sistema_Hermes",
       "mcp__claude_ai_Gmail",
-      "mcp__claude_ai_Google_Calendar"
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__gaspar-eventos__marcar_visto"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",
@@ -75,5 +76,8 @@
       "WebFetch",
       "WebSearch"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "gaspar-eventos"
+  ]
 }

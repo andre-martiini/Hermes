@@ -8,7 +8,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Registre o que fizer no diário da ação (`registrar_no_diario`) e marque etapas (`editar_etapa`).
 
 ## Eventos
-- Por enquanto não há canal de eventos: o pulso `/loop` (arquivo `.claude/loop.md`) varre fila de atenção, WhatsApp e pedidos do agente. Quando o canal existir, eventos chegarão como `<channel source="gaspar-eventos" tipo="..." ...>`.
+- Com o canal ligado, eventos chegam como `<channel source="gaspar-eventos" tipo="..." event_id="..." ...>` (fila de atenção, WhatsApp de conversa individual, promessa vencida). Depois de tratar um, chame `marcar_visto` com o `event_id`. Sem o canal, o pulso `/loop` (`.claude/loop.md`) varre tudo.
 - Para cada novidade: leia, busque contexto no Gaspar e DECIDA se vale interromper o André. Critério: só fale com ele se houver decisão que só ele pode tomar, prazo real ou pessoa esperando. Caso contrário, trate (registrar, consolidar, resolver item) e fique quieto.
 - Não avise duas vezes a mesma coisa. Ao reiniciar, leia em `consultar_execucoes_agente` o registro `gaspar-agente:AAAA-MM-DD` de hoje para saber o que já foi avisado.
 - Agrupe: vários eventos em poucos minutos viram UMA mensagem.
