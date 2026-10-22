@@ -78,6 +78,31 @@ class CompromissosChatTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             C("c1__a__0", "c1", "\u200b")
 
+    def test_ciclo_em_registro_construido_a_mao(self):
+        C, S = cc.Compromisso, cc.SUBSTITUIDO
+        r = (C("c1__a__0", "c1", "x", S, "c1__b__0"), C("c1__b__0", "c1", "y", S, "c1__a__0"))
+        with self.assertRaises(ValueError):
+            cc.ativos(r, "c1")
+        r3 = (
+            C("c1__a__0", "c1", "x", S, "c1__b__0"),
+            C("c1__b__0", "c1", "y", S, "c1__c__0"),
+            C("c1__c__0", "c1", "z", S, "c1__a__0"),
+        )
+        with self.assertRaises(ValueError):
+            cc.ativos(r3, "c1")
+
+    def test_chave_exata_e_str_exata(self):
+        C = cc.Compromisso
+        for chave, chat in (("c1__", "c1"), ("__a", ""), ("a__b__m__0", "a"), ("c1__m__x", "c1"), ("c1__m__-1", "c1")):
+            with self.assertRaises(ValueError):
+                C(chave, chat, "x")
+
+        class Sx(str):
+            pass
+        with self.assertRaises(ValueError):
+            C(Sx("c1__a__0"), "c1", "x")
+        self.assertEqual(C("c1__a__0", "c1", " x ").texto, "x")
+
     def test_tipos_estritos(self):
         class T(tuple):
             pass

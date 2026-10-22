@@ -27,8 +27,11 @@ class Compromisso:
     substituido_por: str | None = None
 
     def __post_init__(self):
-        if not all(isinstance(v, str) for v in (self.chave, self.chat_id, self.texto)):
+        if not all(type(v) is str for v in (self.chave, self.chat_id, self.texto)) or (
+            self.substituido_por is not None and type(self.substituido_por) is not str
+        ):
             raise ValueError("chave, chat_id e texto devem ser texto")
+        object.__setattr__(self, "texto", self.texto.strip())
         if not self.texto.strip() or not self.texto.isprintable():
             raise ValueError("texto do compromisso é obrigatório e imprimível")
         if self.estado not in ESTADOS:
@@ -39,7 +42,12 @@ class Compromisso:
             not isinstance(self.substituido_por, str) or self.substituido_por == self.chave
         ):
             raise ValueError("substituido_por inválido")
-        if not self.chave.startswith(f"{self.chat_id}__"):
+        partes = self.chave.split("__")
+        try:
+            esperada = chave_compromisso(self.chat_id, partes[1], int(partes[2]))
+        except (ValueError, IndexError):
+            raise ValueError("chave incoerente com o chat") from None
+        if len(partes) != 3 or esperada != self.chave:
             raise ValueError("chave incoerente com o chat")
 
 
@@ -115,4 +123,12 @@ def _registro(registro) -> tuple[Compromisso, ...]:
             alvo = por_chave.get(c.substituido_por)
             if alvo is None or alvo.chat_id != c.chat_id:
                 raise ValueError("substituido_por aponta para compromisso inválido")
+    for c in registro:
+        visto = {c.chave}
+        atual = c
+        while atual.substituido_por is not None:
+            if atual.substituido_por in visto:
+                raise ValueError("registro com ciclo de substituição")
+            visto.add(atual.substituido_por)
+            atual = por_chave[atual.substituido_por]
     return registro
