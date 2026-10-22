@@ -74,15 +74,21 @@ Diferenças em relação ao plano:
 - **Perfil próprio:** o `iniciar.ps1` usa `CLAUDE_CONFIG_DIR=~/.claude-gaspar`, com login, plugins, memória e configurações separados dos do André.
   Na primeira subida, o Claude Code pede login nesse perfil e a confiança na pasta.
 - **Confirmação do canal próprio:** o Claude Code pede a cada início, sem opção para lembrar. Um job no `iniciar.ps1` escreve Enter direto no buffer de entrada do console do agente (`WriteConsoleInput`), sem depender de foco nem de tela desbloqueada, até a sessão começar.
-- **Briefing da manhã:** nos dias úteis, o agente sobe às 05:00 e manda o briefing pelo Telegram (`.claude/briefing.md`; levantamento num subagente, para as leituras não ficarem no contexto do dia). No fim de semana roda a tarefa "Briefing da manhã do Gaspar" do app desktop.
+- **Briefing da manhã:** todos os dias às 05:00, pelo Telegram (`.claude/briefing.md`; levantamento num subagente, para as leituras não ficarem no contexto do dia). A tarefa "Briefing da manhã do Gaspar" do app desktop foi desativada.
 - **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. Por isso a mesma tarefa serve para ligar e para vigiar.
 - **`encerrar.ps1`:** derruba só a árvore de processos do agente (o claude dele, o Telegram e o canal), não as outras sessões.
 
-Agendador (como o usuário do André). Liga às 05:00 e repete a cada 30 min até 18:30 (vigia); desliga às 19:00, só em dias úteis:
+Agendador (como o usuário do André). O agente roda 24 h, todos os dias.
+- **"iniciar":** a cada 30 min, o dia inteiro. Funciona como vigia: sai sem fazer nada se o agente já está rodando.
+- **"encerrar":** às 04:30 reinicia a sessão (contexto novo); o vigia das 05:00 a religa a tempo do briefing.
+
+Recriar com `/F` encerra a instância que está rodando: rode `schtasks /Run /TN "Gaspar - iniciar"` em seguida.
 ```powershell
-schtasks /Create /TN "Gaspar - iniciar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 05:00 /RI 30 /DU 13:31 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
-schtasks /Create /TN "Gaspar - encerrar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 19:00 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\encerrar.ps1" /F
+schtasks /Create /TN "Gaspar - iniciar" /SC DAILY /ST 00:00 /RI 30 /DU 24:00 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
+schtasks /Create /TN "Gaspar - encerrar" /SC DAILY /ST 04:30 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\encerrar.ps1" /F
 ```
+O pulso só roda das 05:00 às 22:59 (`*/15 5-22 * * *`); de madrugada, só os eventos acordam o agente.
+Depois de um reinício do Windows (ex.: Windows Update de madrugada), o agente só volta quando o André fizer login, porque a tarefa é "interativa apenas".
 
 Energia (o André roda; no adaptador de tomada: não suspender, não hibernar, tampa fechada não faz nada):
 ```powershell

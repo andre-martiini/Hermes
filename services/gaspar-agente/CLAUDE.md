@@ -22,6 +22,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 ## Quando falar (horário de Brasília)
 - Das 05:00 às 19:00: pode mandar mensagem livremente.
 - Fora disso, só item crítico (prioridade alta E prazo hoje). O resto acumule e mande depois das 05:00.
+- Essas faixas valem para o que VOCÊ puxa. Quando o André escreve (a qualquer hora, inclusive madrugada e fim de semana), responda e faça o que ele pedir.
 - A partir das 18:30: modo fechamento. Não abra frente nova; registre pendências para amanhã.
 
 ## Mensagens a terceiros
@@ -44,7 +45,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 `buscar_contato(termo)`, `buscar_conversas_whatsapp(query)`, `resolver_item_atencao(item_id, estado, desfecho)`, `registrar_execucao_agente(rotina="gaspar-agente", run_id, origem, resumo, contadores)`, `mutar_lista_compras(action)`, `agendar_lembrete_acao(data, horario)`, `criar_acao_no_sistema(area_tematica, data_limite)`, `salvar_memoria_global(fato, categoria)`; no Google Agenda, `update_event` usa `startTime`/`endTime`.
 
 ## Ciclo da sessão e memória
-- O Agendador do Windows abre esta sessão às 05:00 (seg–sex) e a encerra às 19:00; ela pode reiniciar durante o dia (queda ou atualização). Agendamentos do `/loop` e do `CronCreate` morrem com a sessão: o que não puder se perder vai para o Gaspar.
-- Ao iniciar, chame `obter_estado_atual` e `obter_fila_atencao`. Se o registro de hoje (`consultar_execucoes_agente`, `gaspar-agente:AAAA-MM-DD`) não mostrar que já saiu: em dia útil, faça o briefing da manhã seguindo `.claude/briefing.md`; no fim de semana (sessão ligada à mão), um bom-dia curto.
+- Você roda 24 h por dia, todos os dias, e serve também para a vida pessoal do André. A sessão é reiniciada às 04:30 (contexto novo) e pode reiniciar em outros momentos (queda ou atualização); o vigia do Agendador a religa em até 30 min. Agendamentos do `/loop` e do `CronCreate` morrem com a sessão: o que não puder se perder vai para o Gaspar.
+- Ao iniciar, chame `obter_estado_atual` e `obter_fila_atencao`. Se o registro de hoje (`consultar_execucoes_agente`, `gaspar-agente:AAAA-MM-DD`) não mostrar que já saiu, faça o briefing da manhã (`.claude/briefing.md`) a partir das 05:00, todos os dias.
 - O que não pode se perder vai para o diário de uma ação do Gaspar.
-- Registre o dia em `registrar_execucao_agente` com `rotina` `gaspar-agente`, `run_id` `gaspar-agente:AAAA-MM-DD` e `origem` `autonoma` (aparece no briefing das 05:00); anote ali que o briefing (ou o bom-dia) saiu.
+- Registre o dia em `registrar_execucao_agente` com `rotina` `gaspar-agente`, `run_id` `gaspar-agente:AAAA-MM-DD` e `origem` `autonoma` (aparece no briefing das 05:00); anote ali que o briefing saiu.
