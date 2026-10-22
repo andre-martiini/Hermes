@@ -115,7 +115,9 @@ async function transcrever(caminho: string): Promise<string> {
   const groq = str(((await r.json()) as any).fields?.groq_api_key)
   if (!groq) throw new Error('groq_api_key ausente em system/api_keys')
   const form = new FormData()
-  form.append('file', new Blob([readFileSync(p)]), 'audio' + extname(p))
+  // O Telegram salva voz como .oga, extensao que o Groq recusa (assim como .opus); o conteudo e ogg/opus.
+  const ext = ['.oga', '.opus'].includes(extname(p).toLowerCase()) ? '.ogg' : extname(p)
+  form.append('file', new Blob([readFileSync(p)]), 'audio' + ext)
   form.append('model', 'whisper-large-v3-turbo'); form.append('language', 'pt'); form.append('response_format', 'json')
   const t = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${groq}` }, body: form })
