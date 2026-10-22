@@ -1,0 +1,89 @@
+{
+  "enabledPlugins": {
+    "telegram@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": false,
+    "i-have-adhd@i-have-adhd": false,
+    "impeccable@impeccable": false,
+    "ponytail@ponytail": false
+  },
+  "claudeMdExcludes": [
+    "C:/Users/Bolsista/.claude/CLAUDE.md"
+  ],
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read(./**)",
+      "Read(~/.claude/channels/telegram-gaspar/access.json)",
+      "Skill",
+      "PowerShell(Get-Date*)",
+      "mcp__plugin_telegram_telegram",
+      "mcp__claude_ai_Sistema_Hermes",
+      "mcp__claude_ai_Gmail",
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__gaspar-eventos__marcar_visto"
+    ],
+    "ask": [
+      "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",
+      "mcp__claude_ai_Sistema_Hermes__confirmar_acao",
+      "mcp__claude_ai_Sistema_Hermes__aprovar_rascunho_whatsapp",
+      "mcp__claude_ai_Sistema_Hermes__criar_rascunho_email",
+      "mcp__claude_ai_Sistema_Hermes__pausar_conversa",
+      "mcp__claude_ai_Sistema_Hermes__criar_objetivo_whatsapp",
+      "mcp__claude_ai_Sistema_Hermes__responder_objetivo_whatsapp",
+      "mcp__claude_ai_Sistema_Hermes__ativar_modo_secretario",
+      "mcp__claude_ai_Sistema_Hermes__desativar_modo_secretario",
+      "mcp__claude_ai_Sistema_Hermes__preparar_contato_prioritario_secretario",
+      "mcp__claude_ai_Sistema_Hermes__registrar_transacao_financeira_publica",
+      "mcp__claude_ai_Sistema_Hermes__registrar_inscricao_bolsa_publica",
+      "mcp__claude_ai_Sistema_Hermes__mutar_portal_compras_publico",
+      "mcp__claude_ai_Sistema_Hermes__atualizar_arquivo_drive",
+      "mcp__claude_ai_Sistema_Hermes__solicitar_autorizacao_argos",
+      "mcp__claude_ai_Sistema_Hermes__consumir_autorizacao_argos",
+      "mcp__claude_ai_Sistema_Hermes__decidir_promocao_autonomia",
+      "mcp__claude_ai_Sistema_Hermes__excluir_objetivo_estrategico",
+      "mcp__claude_ai_Sistema_Hermes__remover_anexo",
+      "mcp__claude_ai_Sistema_Hermes__liveideas_apagar",
+      "mcp__claude_ai_Sistema_Hermes__gerar_imagem",
+      "mcp__claude_ai_Sistema_Hermes__editar_imagem",
+      "mcp__claude_ai_Gmail__send_message",
+      "mcp__claude_ai_Gmail__reply",
+      "mcp__claude_ai_Gmail__forward",
+      "mcp__claude_ai_Gmail__create_draft",
+      "mcp__claude_ai_Google_Calendar__create_event",
+      "mcp__claude_ai_Google_Calendar__update_event",
+      "mcp__claude_ai_Google_Calendar__respond_to_event"
+    ],
+    "deny": [
+      "Read(//c/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
+      "Read(//C:/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
+      "Read(**/firebase_service_account_key.json)",
+      "mcp__claude_ai_Sistema_Hermes__registrar_aporte_investimento",
+      "mcp__claude_ai_Sistema_Hermes__registrar_execucao_investimento",
+      "mcp__claude_ai_Sistema_Hermes__video_renderizar",
+      "mcp__claude_ai_Sistema_Hermes__video_refazer_cena",
+      "mcp__claude_ai_Sistema_Hermes__salvar_pop_global",
+      "mcp__claude_ai_Sistema_Hermes__atualizar_personalidade",
+      "mcp__claude_ai_Gmail__trash_thread",
+      "mcp__claude_ai_Gmail__trash_message",
+      "mcp__claude_ai_Google_Calendar__delete_event",
+      "mcp__claude_ai_Claude_Docs",
+      "mcp__claude_ai_Tactiq",
+      "mcp__claude_ai_Sigex",
+      "mcp__claude_ai_Uber",
+      "mcp__claude_ai_Consensus",
+      "mcp__claude_ai_Argos",
+      "mcp__claude_ai_Canva",
+      "mcp__claude_ai_Google_Drive",
+      "WebFetch",
+      "WebSearch",
+      "Read(**/channels/**/.env)",
+      "Bash(*firebase_service_account_key*)",
+      "PowerShell(*firebase_service_account_key*)",
+      "Bash(*service_account*)",
+      "PowerShell(*service_account*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "gaspar-eventos"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gaspar-eventos": {
+      "command": "bun",
+      "args": ["run", "./gaspar-eventos/server.ts"]
+    }
+  }
+}
