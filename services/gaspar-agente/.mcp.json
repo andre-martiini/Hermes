@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gaspar": {
+      "type": "http",
+      "url": "https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer"
+    }
+  }
+}
