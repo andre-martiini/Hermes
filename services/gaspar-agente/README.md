@@ -73,14 +73,14 @@ Diferenças em relação ao plano:
 ## Marco 3: operação sozinho
 - **Perfil próprio:** o `iniciar.ps1` usa `CLAUDE_CONFIG_DIR=~/.claude-gaspar`, com login, plugins, memória e configurações separados dos do André.
   Na primeira subida, o Claude Code pede login nesse perfil e a confiança na pasta.
-- **Confirmação do canal próprio:** o Claude Code pede a cada início, sem opção para lembrar. Um job no `iniciar.ps1` aperta Enter
-  na janela do agente, só com a tela desbloqueada, até a sessão começar.
+- **Confirmação do canal próprio:** o Claude Code pede a cada início, sem opção para lembrar. Um job no `iniciar.ps1` escreve Enter direto no buffer de entrada do console do agente (`WriteConsoleInput`), sem depender de foco nem de tela desbloqueada, até a sessão começar.
+- **Briefing da manhã:** nos dias úteis, o agente sobe às 05:00 e manda o briefing pelo Telegram (`.claude/briefing.md`; levantamento num subagente, para as leituras não ficarem no contexto do dia). No fim de semana roda a tarefa "Briefing da manhã do Gaspar" do app desktop.
 - **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. Por isso a mesma tarefa serve para ligar e para vigiar.
 - **`encerrar.ps1`:** derruba só a árvore de processos do agente (o claude dele, o Telegram e o canal), não as outras sessões.
 
-Agendador (como o usuário do André). Liga às 06:00 e repete a cada 30 min até 18:30 (vigia); desliga às 19:00, só em dias úteis:
+Agendador (como o usuário do André). Liga às 05:00 e repete a cada 30 min até 18:30 (vigia); desliga às 19:00, só em dias úteis:
 ```powershell
-schtasks /Create /TN "Gaspar - iniciar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 06:00 /RI 30 /DU 12:31 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
+schtasks /Create /TN "Gaspar - iniciar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 05:00 /RI 30 /DU 13:31 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
 schtasks /Create /TN "Gaspar - encerrar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 19:00 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\encerrar.ps1" /F
 ```
 
