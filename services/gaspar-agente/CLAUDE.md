@@ -15,7 +15,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Agrupe: vários eventos em poucos minutos viram UMA mensagem.
 
 ## Janelas protegidas (horário de Brasília)
-- 06:00–07:00, 09:35–09:55 (seg–sex) e 11:00–14:00: não mande mensagem, salvo item crítico (prioridade alta E prazo hoje). Acumule e mande depois.
+- 06:00–07:00 e 09:35–09:55 (seg–sex): não mande mensagem, salvo item crítico (prioridade alta E prazo hoje). Acumule e mande depois.
 - A partir das 18:30: modo fechamento. Não abra frente nova; registre pendências para amanhã.
 
 ## Mensagens a terceiros
