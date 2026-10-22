@@ -34,6 +34,18 @@ class CorrelacaoTest(unittest.TestCase):
             __hash__ = str.__hash__
 
         V = ce.Vinculo
+
+        class S(str):
+            def __eq__(s, o):
+                raise RuntimeError("x")
+            __hash__ = str.__hash__
+
+        incompleto = V("r", "gmail", "id", False, "m")
+        object.__delattr__(incompleto, "motivo")
+        with self.assertRaises(ValueError):
+            ce.vinculo_firme([incompleto])
+        with self.assertRaises(ValueError):
+            ce.vinculo_firme([V("r", "gmail", S("id"), False, "m")])
         for bad in (None, [1], [V("", "sms", "id", False, "")], [V("r", "gmail", "id", 0, "x")],
                     [V("r", "gmail", "semantico", False, "x")], [V("r", "gmail", "id", True, "x")],
                     [V("r", "sms", "id", False, "x")], [V("r", "gmail", "zzz", True, "x")]):

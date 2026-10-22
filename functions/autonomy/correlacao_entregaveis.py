@@ -87,13 +87,17 @@ def correlacionar(promessa, evidencias, ids_compromisso=()) -> tuple[Vinculo, ..
 def _validar_vinculo(v):
     if type(v) is not Vinculo:
         raise ValueError("vinculos deve conter só Vinculo")
+    try:
+        v.canal, v.ref, v.tipo, v.incerta, v.motivo
+    except AttributeError:
+        raise ValueError("Vinculo incompleto") from None
     if type(v.canal) is not str or v.canal not in CANAIS:
         raise ValueError("canal inválido")
     if type(v.ref) is not str or not v.ref or v.ref != v.ref.strip() or not v.ref.isprintable():
         raise ValueError("ref inválido")
     if type(v.motivo) is not str or type(v.incerta) is not bool:
         raise ValueError("motivo/incerta inválidos")
-    if v.tipo not in (VINCULO_ID, VINCULO_SEMANTICO) or type(v.tipo) is not str:
+    if type(v.tipo) is not str or v.tipo not in (VINCULO_ID, VINCULO_SEMANTICO):
         raise ValueError("tipo inválido")
     if (v.tipo == VINCULO_SEMANTICO) != v.incerta:
         raise ValueError("tipo e incerta incoerentes")
