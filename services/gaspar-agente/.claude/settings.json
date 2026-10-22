@@ -52,11 +52,7 @@
       "mcp__claude_ai_Gmail__create_draft",
       "mcp__claude_ai_Google_Calendar__create_event",
       "mcp__claude_ai_Google_Calendar__update_event",
-      "mcp__claude_ai_Google_Calendar__respond_to_event",
-      "Bash",
-      "PowerShell",
-      "Write",
-      "Edit"
+      "mcp__claude_ai_Google_Calendar__respond_to_event"
     ],
     "deny": [
       "mcp__claude_ai_Sistema_Hermes__registrar_aporte_investimento",
