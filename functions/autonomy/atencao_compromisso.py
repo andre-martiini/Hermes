@@ -77,12 +77,12 @@ def marcar_enviado(item: dict, agora) -> dict:
     """Estado terminal depois do envio: o item deixa de ser elegível.
     Só um item aberto com ação ENVIAR pode ser marcado."""
     try:
-        _validar(item)
+        avaliado = _validar(item)[2]
     except (KeyError, TypeError) as exc:
         raise ValueError("item malformado") from exc
     if item["estado"] != ESTADO_ABERTO or item["acao"] != ENVIAR:
         raise ValueError("só item aberto com ação enviar vira enviado")
-    quando = max(_agora_utc(agora), datetime.fromisoformat(item["avaliado_em"]).astimezone(timezone.utc))
+    quando = max(_agora_utc(agora), avaliado)
     return {**item, "estado": ESTADO_ENVIADO, "avaliado_em": quando.isoformat(),
             "proxima_avaliacao": None}
 
@@ -102,6 +102,11 @@ def _validar(item) -> tuple[str, int, datetime, datetime | None]:
     proxima = None if proxima is None else datetime.fromisoformat(proxima)
     if avaliado.utcoffset() is None or (proxima is not None and proxima.utcoffset() is None):
         raise ValueError("datas sem fuso")
+    try:
+        avaliado = avaliado.astimezone(timezone.utc)
+        proxima = None if proxima is None else proxima.astimezone(timezone.utc)
+    except OverflowError:
+        raise ValueError("data fora do intervalo") from None
     estado, acao = item["estado"], item["acao"]
     coerente = (
         (estado == ESTADO_ABERTO and acao in (ENVIAR, ADIAR) and proxima is not None)

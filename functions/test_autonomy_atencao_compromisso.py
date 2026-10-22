@@ -99,6 +99,14 @@ class AtencaoCompromissoTest(unittest.TestCase):
         env = marcar_enviado(e, AGORA - timedelta(seconds=5))
         self.assertTrue(deve_gravar(e, env))
 
+    def test_avaliado_em_extremo(self):
+        e = montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), AGORA)
+        for extremo in ("0001-01-01T00:00:00+03:00", "9999-12-31T23:59:59-03:00"):
+            ruim = {**e, "avaliado_em": extremo}
+            self.assertFalse(deve_gravar(None, ruim))
+            with self.assertRaises(ValueError):
+                marcar_enviado(ruim, AGORA)
+
     def test_malformados(self):
         a = montar_item_atencao(CH, 1, DecisaoFollowup(ADIAR, "d"), AGORA)
         b = montar_item_atencao(CH, 1, DecisaoFollowup(ADIAR, "d"), AGORA + timedelta(hours=5))
