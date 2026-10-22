@@ -643,7 +643,7 @@ testes:
   resultados:
     - "functions/ completo ANTES 4552 OK (conforme P07 sub 6); test_autonomy_correlacao_entregaveis 4 OK (novo); DEPOIS 4556 OK (226s, head final)."
 revisao_adversarial:
-  - "Rodada 1: docstring de vinculo_firme incoerente, vinculo_firme com entrada ruim levantava TypeError/AttributeError, canal subclasse de str com __eq__ hostil, ref com caractere não imprimível/espaços. Corrigido. Rodada 2: não achou nada. Codex + rodada 3: vinculo_firme revalida campos do Vinculo; __eq__ hostil e atributo removido viram ValueError; corrigido. Rodada 4 (observações da 2: objetos genéricos como 'arquivo' geram ruído semântico, sempre incerto)."
+  - "Rodada 1: docstring de vinculo_firme incoerente, vinculo_firme com entrada ruim levantava TypeError/AttributeError, canal subclasse de str com __eq__ hostil, ref com caractere não imprimível/espaços. Corrigido. Rodada 2: não achou nada. Codex + rodada 3: vinculo_firme revalida campos do Vinculo; __eq__ hostil e atributo removido viram ValueError; corrigido. Rodada 4: não achou nada. Observação: objetos genéricos como "arquivo" geram ruído semântico, sempre incerto."
 pendencias:
   - "P07 passo 2 (extração estruturada, sombra); wiring em atencao_whatsapp somente com flag/sombra."
 ```
