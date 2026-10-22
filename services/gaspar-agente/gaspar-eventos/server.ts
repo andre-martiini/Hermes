@@ -31,7 +31,7 @@ async function getAccessToken(): Promise<string> {
   if (accessToken && Date.now() < tokenExp - 120_000) return accessToken
   const now = Math.floor(Date.now() / 1000)
   const unsigned = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64url(JSON.stringify({
-    iss: sa.client_email, scope: 'https://www.googleapis.com/auth/datastore',
+    iss: sa.client_email, scope: 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/devstorage.read_only',
     aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }))
   const jwt = unsigned + '.' + createSign('RSA-SHA256').update(unsigned).sign(sa.private_key).toString('base64url')
   const r = await fetch('https://oauth2.googleapis.com/token', {
@@ -48,9 +48,10 @@ async function getAccessToken(): Promise<string> {
 const CURSOR_FILE = join(STATE, 'cursor.json')
 // pendentes: eventos entregues e ainda não marcados como vistos; voltam para a sessão depois de um reinício.
 type Pendente = { meta: Record<string, string>; content: string }
-type Cursor = { atencao: string; whatsapp: string; promessas: string; reacoes: string; vistos: string[]; pendentes: Record<string, Pendente> }
+// grupos: grupos de WhatsApp que o agente pediu para vigiar (chat_id -> nome), via tool vigiar_grupo.
+type Cursor = { atencao: string; whatsapp: string; promessas: string; reacoes: string; vistos: string[]; pendentes: Record<string, Pendente>; grupos: Record<string, string> }
 const cursor: Cursor = { atencao: new Date(Date.now() - 6 * 3600e3).toISOString(), whatsapp: new Date().toISOString(),
-  promessas: new Date().toISOString(), reacoes: new Date().toISOString(), vistos: [], pendentes: {},
+  promessas: new Date().toISOString(), reacoes: new Date().toISOString(), vistos: [], pendentes: {}, grupos: {},
   ...(existsSync(CURSOR_FILE) ? JSON.parse(readFileSync(CURSOR_FILE, 'utf8')) : {}) }
 const saveCursor = () => writeFileSync(CURSOR_FILE, JSON.stringify(cursor, null, 2))
 
@@ -89,6 +90,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   inputSchema: { type: 'object', properties: {} } }, {
   name: 'consumo_hoje', description: 'Tokens que esta sessao do agente gastou hoje (turnos, entrada, cache, saida, por modelo).',
   inputSchema: { type: 'object', properties: {} } }, {
+  name: 'vigiar_grupo',
+  description: 'Liga ou desliga a vigilancia de um grupo de WhatsApp: com ela, as mensagens do grupo chegam como eventos. Sem argumentos, so lista os vigiados. Persiste entre reinicios.',
+  inputSchema: { type: 'object', properties: { chat_id: { type: 'string', description: 'termina em @g.us' },
+    nome: { type: 'string' }, ativo: { type: 'boolean' } } } }, {
   name: 'transcrever_audio',
   description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
   inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
@@ -97,6 +102,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
   if (req.params.name === 'consumo_hoje')
     return { content: [{ type: 'text', text: JSON.stringify(consumoHoje()) }] }
+  if (req.params.name === 'vigiar_grupo') {
+    const a = (req.params.arguments ?? {}) as { chat_id?: string; nome?: string; ativo?: boolean }
+    if (a.chat_id) {
+      if (!a.chat_id.endsWith('@g.us')) throw new Error('chat_id de grupo termina em @g.us')
+      if (a.ativo === false) delete cursor.grupos[a.chat_id]; else cursor.grupos[a.chat_id] = a.nome || a.chat_id
+      saveCursor()
+    }
+    return { content: [{ type: 'text', text: JSON.stringify(cursor.grupos) }] }
+  }
   if (req.params.name === 'transcrever_audio')
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
@@ -117,19 +131,41 @@ async function transcrever(caminho: string): Promise<string> {
   const p = resolve(caminho)
   if (!process.env.TELEGRAM_STATE_DIR || !p.toLowerCase().startsWith(INBOX.toLowerCase() + sep) || !AUDIO.has(extname(p).toLowerCase()))
     throw new Error(`so transcrevo audio baixado do Telegram (pasta ${INBOX})`)
+  return transcreverBytes(readFileSync(p), extname(p))
+}
+async function transcreverBytes(bytes: Uint8Array, extensao: string): Promise<string> {
   const r = await fetch(`${FS}/system/api_keys`, { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
   if (!r.ok) throw new Error(`api_keys ${r.status}`)
   const groq = str(((await r.json()) as any).fields?.groq_api_key)
   if (!groq) throw new Error('groq_api_key ausente em system/api_keys')
   const form = new FormData()
   // O Telegram salva voz como .oga, extensao que o Groq recusa (assim como .opus); o conteudo e ogg/opus.
-  const ext = ['.oga', '.opus'].includes(extname(p).toLowerCase()) ? '.ogg' : extname(p)
-  form.append('file', new Blob([readFileSync(p)]), 'audio' + ext)
+  const ext = ['.oga', '.opus'].includes(extensao.toLowerCase()) ? '.ogg' : extensao
+  form.append('file', new Blob([bytes]), 'audio' + ext)
   form.append('model', 'whisper-large-v3-turbo'); form.append('language', 'pt'); form.append('response_format', 'json')
   const t = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${groq}` }, body: form })
   if (!t.ok) throw new Error(`groq ${t.status}: ${await t.text()}`)
   return ((await t.json()) as { text: string }).text.trim()
+}
+
+// Áudio de WhatsApp chega ao agente já transcrito (o André quer avaliar todo áudio). O worker sobe a
+// mídia para o Storage em whatsapp_media/... e grava o caminho em media.storage_path.
+const BUCKET = process.env.FIREBASE_STORAGE_BUCKET ?? 'gestao-hermes.firebasestorage.app'
+async function transcreverAudioWhatsapp(f: any): Promise<string> {
+  const m = f.media?.mapValue?.fields
+  const caminho = str(m?.storage_path)
+  if (!caminho) return '[áudio sem arquivo no Storage; peça a transcrição ao Gaspar]'
+  if (Number(str(m?.sizeBytes)) > 20e6) return '[áudio grande demais para transcrever aqui]'
+  try {
+    const r = await fetch(`https://storage.googleapis.com/storage/v1/b/${BUCKET}/o/${encodeURIComponent(caminho)}?alt=media`,
+      { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
+    if (!r.ok) throw new Error(`storage ${r.status}`)
+    return `[áudio transcrito] ${await transcreverBytes(new Uint8Array(await r.arrayBuffer()), extname(caminho) || '.ogg')}`
+  } catch (e) {
+    log(`transcrição de ${caminho}: ${e}`)
+    return `[áudio sem transcrição (${String(e).slice(0, 80)}); peça ao Gaspar]`
+  }
 }
 
 // ---------- telemetria: soma o usage das transcricoes de hoje do perfil do agente ----------
@@ -178,6 +214,9 @@ function esquecerAtencao(item_id: string, manter = '') {
 }
 const versao = (...campos: unknown[]) => createHash('sha1').update(campos.map(String).join('|')).digest('hex').slice(0, 10)
 
+const TIPOS_TECNICOS = new Set(['e2e_notification', 'notification', 'notification_template', 'gp2', 'protocol',
+  'ciphertext', 'revoked', 'broadcast_notification'])
+
 // ---------- ciclo ----------
 // ponytail: cursor "maior que" com limit 100; dois docs com o mesmo timestamp na borda de um lote cheio
 // podem pular um. Trocar por cursor (timestamp, id) se o volume passar de 100 por ciclo.
@@ -196,18 +235,22 @@ async function tick() {
       tipo_item: str(f.tipo), acao_id: str(f.acao_id), pessoa: str(f.pessoa), prazo: str(f.prazo) },
       `${str(f.titulo)}\n${str(f.resumo)}\nSugestao do Gaspar: ${str(f.sugestao)}`)
   }
-  // 2. WhatsApp recebido em conversa individual (fora: mensagens do André e grupos)
-  // ponytail: grupos ficam de fora; incluir os monitorados quando houver campo gravado para isso.
+  // 2. WhatsApp recebido em conversa individual ou em grupo vigiado (vigiar_grupo)
   for (const d of await runQuery('whatsapp_messages', [gt('ingested_at', cursor.whatsapp)], 'ingested_at')) {
     const f = d.f
     cursor.whatsapp = str(f.ingested_at)
     // Só conversa individual (@lid ou @c.us). Fora: grupos (@g.us), Status (status@broadcast) e
     // Canais (@newsletter) -- nas 400 mensagens mais recentes, 90% eram desses três e só gastariam tokens.
-    const chat = String(str(f.chat_id))
-    if (str(f.from_me) === true || !(chat.endsWith('@lid') || chat.endsWith('@c.us'))) continue
-    await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: str(f.chat_id), chat_name: str(f.chat_name),
-      autor: str(f.author_name), message_type: str(f.message_type), message_id: str(f.wa_message_id) },
-      str(f.content) || str(f.transcription_text) || `[${str(f.message_type)}]`)
+    const chat = String(str(f.chat_id)), tipo = String(str(f.message_type))
+    const grupo = cursor.grupos[chat]
+    if (str(f.from_me) === true || !(chat.endsWith('@lid') || chat.endsWith('@c.us') || grupo)) continue
+    // Avisos técnicos do WhatsApp (criptografia, mudança de grupo etc.): não são mensagem de ninguém.
+    if (TIPOS_TECNICOS.has(tipo)) continue
+    const texto = str(f.content) || str(f.transcription_text)
+      || (tipo === 'ptt' || tipo === 'audio' ? await transcreverAudioWhatsapp(f) : `[${tipo}]`)
+    await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: chat, chat_name: str(f.chat_name),
+      autor: str(f.author_name), message_type: tipo, message_id: str(f.wa_message_id), ...(grupo ? { grupo } : {}) },
+      texto)
   }
   // 3. promessas vencidas
   for (const d of await runQuery('promessas_abertas', [eq('estado', 'vencida'), gt('vence_em', cursor.promessas)], 'vence_em')) {

@@ -55,6 +55,15 @@ Entrega e telemetria (revisão externa de 22/10):
 - **`consumo_hoje`:** soma os tokens do dia a partir das transcrições do perfil do agente (deduplicadas por `message.id`). O pulso grava o resultado em `contadores` de `registrar_execucao_agente`.
 - **Modelo:** o agente roda no Sonnet 5.5 (`--model` no `iniciar.ps1`).
 
+Ajustes do primeiro dia de uso (22/10):
+- **Áudio do WhatsApp chega transcrito:** o canal baixa o arquivo do Storage (`media.storage_path`) e usa o mesmo Groq Whisper; o agente avalia todo áudio.
+- **Grupos vigiados:** a tool `vigiar_grupo` liga e desliga grupos, e a lista persiste em `state/cursor.json`.
+- **Avisos técnicos filtrados:** `e2e_notification`, `gp2` e semelhantes deixam de chegar.
+- **WhatsApp com um botão só:** `schedule_whatsapp_message` sai do "ask"; o botão fica no `confirmar_acao`.
+- **Apagar evento de agenda:** `delete_event` passa de proibido para "ask" (botão).
+- **Menos turnos:** `awaySummaryEnabled` e `promptSuggestionEnabled` desligados (aqui e em `~/.claude-gaspar/settings.json`).
+- **`CLAUDE.md`:** ciclo da sessão, agenda "Ações Gaspar", parâmetros que costumam errar e bom-dia uma vez por dia.
+
 Diferenças em relação ao plano:
 - **Fila de atenção:** consultada só por `atualizado_em`, com o `estado` filtrado no canal, porque não há índice composto `estado`+`atualizado_em`.
 - **Credencial:** a conta de serviço do worker do WhatsApp, não o login por senha do dono (a conta do André só entra com Google).

@@ -22,10 +22,10 @@
       "mcp__gaspar-eventos__marcar_visto",
       "mcp__gaspar-eventos__transcrever_audio",
       "mcp__gaspar-eventos__agora",
-      "mcp__gaspar-eventos__consumo_hoje"
+      "mcp__gaspar-eventos__consumo_hoje",
+      "mcp__gaspar-eventos__vigiar_grupo"
     ],
     "ask": [
-      "mcp__claude_ai_Sistema_Hermes__schedule_whatsapp_message",
       "mcp__claude_ai_Sistema_Hermes__confirmar_acao",
       "mcp__claude_ai_Sistema_Hermes__aprovar_rascunho_whatsapp",
       "mcp__claude_ai_Sistema_Hermes__criar_rascunho_email",
@@ -53,7 +53,8 @@
       "mcp__claude_ai_Gmail__create_draft",
       "mcp__claude_ai_Google_Calendar__create_event",
       "mcp__claude_ai_Google_Calendar__update_event",
-      "mcp__claude_ai_Google_Calendar__respond_to_event"
+      "mcp__claude_ai_Google_Calendar__respond_to_event",
+      "mcp__claude_ai_Google_Calendar__delete_event"
     ],
     "deny": [
       "Read(//c/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
@@ -67,7 +68,6 @@
       "mcp__claude_ai_Sistema_Hermes__atualizar_personalidade",
       "mcp__claude_ai_Gmail__trash_thread",
       "mcp__claude_ai_Gmail__trash_message",
-      "mcp__claude_ai_Google_Calendar__delete_event",
       "mcp__claude_ai_Claude_Docs",
       "mcp__claude_ai_Tactiq",
       "mcp__claude_ai_Sigex",
@@ -88,5 +88,7 @@
   },
   "enabledMcpjsonServers": [
     "gaspar-eventos"
-  ]
+  ],
+  "awaySummaryEnabled": false,
+  "promptSuggestionEnabled": false
 }
