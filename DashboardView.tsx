@@ -1278,6 +1278,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     // --- ACTIONS LOGIC ---
     const inProgressActions = useMemo(() => tarefas.filter(t => t.status !== 'concluído' && t.status !== 'excluído' as any), [tarefas]);
 
+    // A carga semanal usa o mesmo critério do card "Ações de hoje": não conta a
+    // ação com todos os passos feitos nem a que tem o passo corrente esperando
+    // terceiro -- nenhuma das duas é trabalho do dono naquele dia.
+    const workloadActions = useMemo(() => inProgressActions.filter(t => {
+        const plano = Array.isArray(t.plano_acao) ? t.plano_acao : [];
+        const [feitas, totais] = contarSubtarefas(plano);
+        if (totais > 0 && feitas >= totais) return false;
+        const corrente = plano.find(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
+        return !(corrente && estadoDaSubtarefa(corrente) === 'aguardando_terceiro');
+    }), [inProgressActions]);
+
     const actionsByDay = useMemo(() => {
         const result = [];
         const today = new Date();
@@ -1286,8 +1297,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         for (let i = 0; i < 7; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
-            const dStr = d.toISOString().split('T')[0];
-            const count = inProgressActions.filter(t => t.data_limite === dStr).length;
+            // Data local: toISOString() vira o dia às 21h (UTC-3) e desloca o gráfico.
+            const dStr = formatDateLocalISO(d);
+            const count = workloadActions.filter(t => String(t.data_limite || '').slice(0, 10) === dStr).length;
 
             result.push({
                 dateStr: dStr,
@@ -1298,7 +1310,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             });
         }
         return result;
-    }, [inProgressActions]);
+    }, [workloadActions]);
 
     // --- FINANCE LOGIC ---
     const periodKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
