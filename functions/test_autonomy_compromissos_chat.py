@@ -103,6 +103,23 @@ class CompromissosChatTest(unittest.TestCase):
             C(Sx("c1__a__0"), "c1", "x")
         self.assertEqual(C("c1__a__0", "c1", " x ").texto, "x")
 
+    def test_subtipos_hostis_so_value_error(self):
+        class F(str):
+            def __format__(s, spec):
+                return 5
+
+        class I(int):
+            pass
+
+        class S(str):
+            def strip(s, *a):
+                raise KeyError("x")
+        for args in (
+            (F("c1"), "m", 0, "x"), ("c1", "m", I(0), "x"), ("c1", "m", 0, S("x")), (S("c1"), "m", 0, "x"),
+        ):
+            with self.assertRaises(ValueError):
+                cc.abrir((), *args)
+
     def test_tipos_estritos(self):
         class T(tuple):
             pass

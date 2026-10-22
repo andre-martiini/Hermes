@@ -55,10 +55,14 @@ def abrir(registro, chat_id, mensagem_id, indice, texto) -> tuple[Compromisso, .
     """Acrescenta um compromisso. Chave repetida é erro (idempotência fica com
     quem chama: ver `existe`)."""
     registro = _registro(registro)
+    _texto(chat_id)
+    _texto(mensagem_id)
+    if type(indice) is not int or type(texto) is not str:
+        raise ValueError("indice deve ser int e texto deve ser texto")
     chave = chave_compromisso(chat_id, mensagem_id, indice)
     if existe(registro, chave):
         raise ValueError("compromisso já registrado")
-    novo = Compromisso(chave, chat_id, texto.strip() if isinstance(texto, str) else texto)
+    novo = Compromisso(chave, chat_id, texto)
     return tuple.__add__(registro, (novo,))
 
 
