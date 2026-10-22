@@ -1278,15 +1278,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     // --- ACTIONS LOGIC ---
     const inProgressActions = useMemo(() => tarefas.filter(t => t.status !== 'concluído' && t.status !== 'excluído' as any), [tarefas]);
 
-    // A carga semanal usa o mesmo critério do card "Ações de hoje": não conta a
-    // ação com todos os passos feitos nem a que tem o passo corrente esperando
-    // terceiro -- nenhuma das duas é trabalho do dono naquele dia.
-    const workloadActions = useMemo(() => inProgressActions.filter(t => {
+    // A carga semanal usa o mesmo critério do card "Ações de hoje": a ação com
+    // todos os passos feitos não conta, e a que tem o passo corrente esperando
+    // terceiro vai num segmento próprio da barra -- não depende do dono.
+    const workloadActions = useMemo(() => inProgressActions.flatMap(t => {
         const plano = Array.isArray(t.plano_acao) ? t.plano_acao : [];
         const [feitas, totais] = contarSubtarefas(plano);
-        if (totais > 0 && feitas >= totais) return false;
+        if (totais > 0 && feitas >= totais) return [];
         const corrente = plano.find(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
-        return !(corrente && estadoDaSubtarefa(corrente) === 'aguardando_terceiro');
+        const emEspera = !!corrente && estadoDaSubtarefa(corrente) === 'aguardando_terceiro';
+        return [{ dataLimite: String(t.data_limite || '').slice(0, 10), emEspera }];
     }), [inProgressActions]);
 
     const actionsByDay = useMemo(() => {
@@ -1299,13 +1300,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             d.setDate(today.getDate() + i);
             // Data local: toISOString() vira o dia às 21h (UTC-3) e desloca o gráfico.
             const dStr = formatDateLocalISO(d);
-            const count = workloadActions.filter(t => String(t.data_limite || '').slice(0, 10) === dStr).length;
+            const doDia = workloadActions.filter(t => t.dataLimite === dStr);
+            const waiting = doDia.filter(t => t.emEspera).length;
 
             result.push({
                 dateStr: dStr,
                 dayNum: d.getDate(),
                 monthName: ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][d.getMonth()],
-                count,
+                count: doDia.length,
+                active: doDia.length - waiting,
+                waiting,
                 isToday: i === 0
             });
         }
@@ -1584,15 +1588,27 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                                         }`}>
                                                             {String(day.count).padStart(2, '0')}
                                                         </span>
+                                                        {/* Segmentos empilhados: em espera (âmbar) em cima,
+                                                            em andamento (roxo) embaixo, proporcionais à contagem. */}
                                                         <div
-                                                            className={`min-h-0 w-full flex-1 transition-all duration-300 rounded-lg ${
-                                                                day.isToday
-                                                                    ? 'bg-[#7800ce] shadow-[0_0_12px_rgba(120,0,206,0.3)]'
-                                                                    : day.count > 0
-                                                                        ? 'bg-[#9333ea]/20 hover:bg-[#9333ea]/40'
-                                                                        : isDark ? 'bg-white/5' : 'bg-slate-100'
-                                                            }`}
-                                                        />
+                                                            title={day.count > 0 ? `${day.active} em andamento · ${day.waiting} em espera` : undefined}
+                                                            className={`flex min-h-0 w-full flex-1 flex-col gap-[2px] overflow-hidden rounded-lg transition-all duration-300 ${
+                                                                day.count === 0 ? (isDark ? 'bg-white/5' : 'bg-slate-100') : ''
+                                                            } ${day.isToday && day.active > 0 ? 'shadow-[0_0_12px_rgba(120,0,206,0.3)]' : ''}`}
+                                                        >
+                                                            {day.waiting > 0 && (
+                                                                <div
+                                                                    className={day.isToday ? 'bg-[#f59e0b]' : 'bg-[#f59e0b]/30 hover:bg-[#f59e0b]/50'}
+                                                                    style={{ flexGrow: day.waiting, flexBasis: 0 }}
+                                                                />
+                                                            )}
+                                                            {day.active > 0 && (
+                                                                <div
+                                                                    className={day.isToday ? 'bg-[#7800ce]' : 'bg-[#9333ea]/20 hover:bg-[#9333ea]/40'}
+                                                                    style={{ flexGrow: day.active, flexBasis: 0 }}
+                                                                />
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1609,6 +1625,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                         </div>
                                     );
                                 })}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-4 text-[9px] font-semibold uppercase tracking-widest font-mono text-slate-400">
+                                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#9333ea]" />Em andamento</span>
+                                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#f59e0b]" />Em espera</span>
                             </div>
                         </div>
                     </DashboardCard>
