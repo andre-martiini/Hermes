@@ -1,4 +1,5 @@
-# Sobe a sessão residente do Gaspar. O Agendador chama este script às 05:00 e a cada 30 min até 18:30;
+# Sobe a sessão residente do Gaspar (24 h por dia, todos os dias). O Agendador chama este script a cada 30 min
+# e a tarefa "Gaspar - encerrar" reinicia a sessão às 04:30 (contexto novo; agendamentos do /loop vencem em 7 dias);
 # se o agente já estiver rodando, sai sem fazer nada (é o que faz o papel de vigia).
 $agente = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" |
   Where-Object { $_.CommandLine -match 'plugin:telegram@claude-plugins-official' }
@@ -24,11 +25,11 @@ Set-Location $PSScriptRoot
 
 # Canal gaspar-eventos (marco 2): usa a chave da conta de serviço do worker do WhatsApp; sem ela, o /loop varre tudo a cada 5 min.
 $canais = @('plugin:telegram@claude-plugins-official')
-$pulso = '5m'
+$cron = '*/5 5-22 * * *'
 if (Test-Path '..\..\firebase_service_account_key.json') {
   $env:GASPAR_EVENTOS = '1'
   $canais = @('--channels') + $canais + @('--dangerously-load-development-channels', 'server:gaspar-eventos')
-  $pulso = '15m'
+  $cron = '*/15 5-22 * * *'
   # O Claude Code pede confirmação do --dangerously-load-development-channels a TODO início, sem opção
   # para lembrar. Este job escreve um Enter direto no buffer de entrada do console deste PowerShell
   # (WriteConsoleInput), sem depender de foco nem de tela desbloqueada, até a sessão começar (aparece o
@@ -73,7 +74,7 @@ public static class ConsoleEnter {
 } else {
   $canais = @('--channels') + $canais
 }
-$prompt = "Bom dia. Voce acabou de iniciar. 1) Chame obter_estado_atual e obter_fila_atencao. 2) Rode /loop $pulso com o conteudo de .claude/loop.md. 3) Se o registro de hoje (consultar_execucoes_agente, gaspar-agente:AAAA-MM-DD) nao mostrar briefing ja enviado: em dia util, faca o briefing da manha seguindo .claude/briefing.md; no fim de semana, mande um bom-dia curto com no maximo 3 pontos."
+$prompt = "Voce acabou de iniciar. 1) Chame obter_estado_atual e obter_fila_atencao. 2) Agende o pulso com CronCreate, cron '$cron', prompt: siga o conteudo de .claude/loop.md (sem pulso de madrugada; eventos continuam chegando). 3) Briefing da manha (.claude/briefing.md), se o registro de hoje (consultar_execucoes_agente, gaspar-agente:AAAA-MM-DD) nao mostrar briefing nem bom-dia ja enviado: se ja passou das 05:00, faca agora; se for antes, agende com CronCreate para as 05:00 de hoje."
 # --channels aceita vários valores: o -- impede que ele engula o prompt.
 # Entre aspas porque o Windows PowerShell 5.1 descarta um -- solto.
 # Sonnet 5.5: o Opus consome o limite semanal da assinatura bem mais rápido (medido em 22/10: ~94 mil tokens de contexto por turno).

@@ -1,4 +1,4 @@
-Briefing da manhã (dias úteis, na subida das 05:00). Substitui o bom-dia. Veio da tarefa agendada "Briefing da manhã do Gaspar" do app desktop, que agora roda só no fim de semana.
+Briefing da manhã (todos os dias, às 05:00). Veio da tarefa agendada "Briefing da manhã do Gaspar" do app desktop, que foi desativada quando o agente passou a rodar 24 h.
 
 COMO FAZER: o levantamento tem dezenas de leituras. Para elas não ficarem no seu contexto o dia todo, chame a tool `Agent` (subagent_type `general-purpose`) com o bloco PROMPT DO SUBAGENTE abaixo, inteiro. Ele devolve o texto pronto. Você manda pelo `reply` do Telegram em texto simples (`format` padrão), numa mensagem só (o plugin divide se passar do limite), e anota no registro do dia que o briefing saiu. Se o subagente falhar, mande um bom-dia curto com no máximo 3 pontos e diga que o briefing completo falhou.
 
