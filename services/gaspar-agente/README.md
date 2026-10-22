@@ -41,7 +41,8 @@ A hora vem da tool `agora` do canal, porque a análise de comandos de PowerShell
 `gaspar-eventos/server.ts` consulta o Firestore a cada 20 s e empurra para a sessão:
 - itens abertos da fila de atenção;
 - WhatsApp recebido em conversa individual (grupos, Status e Canais ficam de fora);
-- promessas vencidas.
+- promessas vencidas;
+- reações de contatos a mensagens do André em conversa individual, gravadas pelo worker em `whatsapp_reactions` (`services/whatsapp-capture/reacoes.js`). Uma reação removida não vira evento.
 
 O `iniciar.ps1` liga o canal sozinho quando existe `firebase_service_account_key.json` na raiz do repositório; aí o pulso cai para 15 min.
 A variável `GASPAR_EVENTOS=1` impede que outra sessão aberta na pasta suba o canal e adiante o cursor.

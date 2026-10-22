@@ -12,6 +12,7 @@ import { criarExecutorCoalescido } from './coalescido.js';
 import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes.js';
 import { criarInicializador } from './inicializacao.js';
 import { ehPaginaQuebrada, criarRecuperadorDePagina, jaFoiEnviada } from './pagina_quebrada.js';
+import { montarReacao } from './reacoes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -739,6 +740,33 @@ async function handleMessage(message) {
 }
 
 client.on('message_create', handleMessage);
+
+// Reações (👍 numa mensagem etc.): o agente residente usa a reação a uma mensagem do André como
+// confirmação de ciência. Mesmo filtro de captura das mensagens. Ver reacoes.js.
+async function handleReaction(reacao) {
+    try {
+        const r = montarReacao(reacao, idsDoDono());
+        if (!r || !deveCapturar(r.dados.chat_id)) return;
+        let senderName = null;
+        if (!r.dados.from_me) {
+            try {
+                const contato = await client.getContactById(r.dados.sender_id);
+                senderName = contato?.name || contato?.pushname || contato?.number || null;
+            } catch (e) { /* sem nome, o agente ainda tem o chat_id */ }
+        }
+        await db.collection('whatsapp_reactions').doc(r.id).set({
+            ...r.dados,
+            sender_name: r.dados.from_me ? 'Eu' : senderName,
+            reacted_at: admin.firestore.Timestamp.fromMillis(r.dados.reacted_at_ms || Date.now()),
+            ingested_at: admin.firestore.Timestamp.now(),
+        }, { merge: true });
+        console.log(`Stored reaction ${r.id} (${r.dados.removida ? 'removida' : r.dados.emoji}).`);
+    } catch (error) {
+        console.error('Error handling reaction:', error);
+    }
+}
+
+client.on('message_reaction', handleReaction);
 
 // --- Sync sob demanda (backfill de histórico) ---
 // A captura ao vivo (handleMessage) só grava o que chega enquanto o worker está
