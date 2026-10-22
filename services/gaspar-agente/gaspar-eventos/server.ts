@@ -83,10 +83,14 @@ const mcp = new Server({ name: 'gaspar-eventos', version: '0.1.0' }, {
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   name: 'marcar_visto', description: 'Confirma que o evento foi tratado; evita reenvio apos reinicio.',
   inputSchema: { type: 'object', properties: { event_id: { type: 'string' } }, required: ['event_id'] } }, {
+  name: 'agora', description: 'Data, dia da semana e hora atuais em Brasilia. Use em vez de shell.',
+  inputSchema: { type: 'object', properties: {} } }, {
   name: 'transcrever_audio',
   description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
   inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
+  if (req.params.name === 'agora')
+    return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
   if (req.params.name === 'transcrever_audio')
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
