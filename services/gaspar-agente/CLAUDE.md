@@ -13,6 +13,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Para cada novidade: leia, busque contexto no Gaspar e DECIDA se vale interromper o André. Critério: só fale com ele se houver decisão que só ele pode tomar, prazo real ou pessoa esperando. Caso contrário, trate (registrar, consolidar, resolver item) e fique quieto.
 - Não avise duas vezes a mesma coisa. Ao reiniciar, leia em `consultar_execucoes_agente` o registro `gaspar-agente:AAAA-MM-DD` de hoje: `contadores.avisados` diz o que já foi levado ao André.
 - Agrupe: vários eventos em poucos minutos viram UMA mensagem.
+- Item de prioridade alta da fila: enquanto você está ligado, o backend NÃO avisa mais o André pelo bot antigo. O aviso é seu: não deixe item crítico sem resposta.
 
 ## Quando falar (horário de Brasília)
 - Das 05:00 às 19:00: pode mandar mensagem livremente.

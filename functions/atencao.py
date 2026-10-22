@@ -1075,6 +1075,22 @@ def dentro_janela_permitida(
 esta_na_janela_silencio = dentro_janela_permitida
 
 
+# Agente residente (services/gaspar-agente): enquanto ele está ligado, o canal gaspar-eventos grava
+# system/agente_residente.ultimo_sinal a cada minuto, e é ele quem decide avisar o André dos itens
+# de alta prioridade (com contexto e faixa de horário). Sem sinal recente, este aviso volta a valer.
+AGENTE_SINAL_MAX = timedelta(minutes=3)
+
+
+def agente_residente_ativo(db, now: datetime) -> bool:
+    try:
+        doc = db.collection("system").document("agente_residente").get()
+        ultimo = (doc.to_dict() or {}).get("ultimo_sinal") if doc.exists else None
+        return isinstance(ultimo, datetime) and timedelta(0) <= now - ultimo <= AGENTE_SINAL_MAX
+    except Exception as exc:  # na dúvida, o backend avisa
+        print(f"[AtencaoInterrupcao] Falha ao ler sinal do agente residente: {exc}")
+        return False
+
+
 def avaliar_interrupcao_atencao(db, now: datetime | None = None) -> dict:
     """Varre itens de alta prioridade na fila de atenção e agenda notificações no Telegram.
 
@@ -1114,9 +1130,20 @@ def avaliar_interrupcao_atencao(db, now: datetime | None = None) -> dict:
     avaliados = 0
     notificados = 0
     pulados_janela = 0
+    delegados_agente = 0
+    agente_ativo = agente_residente_ativo(db, now)
 
     for doc, item in candidatos:
         try:
+            # O agente residente já recebe o item pelo canal e decide se avisa: marca como avaliado
+            # para o backend não repetir o aviso pelo bot antigo nem depois que o agente desligar.
+            if agente_ativo:
+                doc_ref = getattr(doc, "reference", None) or db.collection(COLLECTION).document(doc.id)
+                doc_ref.update({"avaliado_interrupcao_em": firestore.SERVER_TIMESTAMP,
+                                "interrupcao_delegada": "agente_residente"})
+                delegados_agente += 1
+                continue
+
             # a. Janela de silêncio: se fora da janela permitida, pula sem marcar
             # avaliado_interrupcao_em para retentar automaticamente no próximo minuto
             if not dentro_janela_permitida(horario_sp_str, AI_PLANNER_WINDOW_START, AI_PLANNER_WINDOW_END):
@@ -1173,4 +1200,5 @@ def avaliar_interrupcao_atencao(db, now: datetime | None = None) -> dict:
         "avaliados": avaliados,
         "notificados": notificados,
         "pulados_janela": pulados_janela,
+        "delegados_agente": delegados_agente,
     }

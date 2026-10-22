@@ -16,7 +16,8 @@ const STATE = process.env.GASPAR_EVENTOS_STATE ?? join(ROOT, 'state')
 mkdirSync(STATE, { recursive: true })
 // Mesma conta de serviço do worker do WhatsApp (services/whatsapp-capture/run-hidden.bat).
 // É admin e ignora as regras do Firestore: este código só lê atencao, whatsapp_messages, promessas_abertas
-// e a chave do Groq em system/api_keys (para transcrever áudio, sem expor a chave ao modelo).
+// e a chave do Groq em system/api_keys (para transcrever áudio, sem expor a chave ao modelo); grava só
+// system/agente_residente.ultimo_sinal (sinal de vida para o backend não repetir o aviso de item crítico).
 const KEY_FILE = process.env.GASPAR_SA_KEY ?? join(ROOT, '..', '..', '..', 'firebase_service_account_key.json')
 const sa = JSON.parse(readFileSync(KEY_FILE, 'utf8')) as { client_email: string; private_key: string; project_id: string }
 const POLL_MS = Number(process.env.POLL_SECONDS ?? 20) * 1000
@@ -216,6 +217,20 @@ async function tick() {
       `Promessa sem retorno para ${str(f.chat_name)}: "${str(f.texto)}" (prometido em ${str(f.prometido_em)})`)
   }
   saveCursor()
+  await sinalDeVida()
+}
+
+// O backend (atencao.avaliar_interrupcao_atencao) deixa de avisar item crítico pelo bot antigo
+// enquanto este sinal tem menos de 3 min; com o agente desligado, volta a avisar.
+let ultimoSinal = 0
+async function sinalDeVida() {
+  if (Date.now() - ultimoSinal < 60_000) return
+  try {
+    const r = await fetch(`${FS}/system/agente_residente?updateMask.fieldPaths=ultimo_sinal`, { method: 'PATCH',
+      headers: { Authorization: `Bearer ${await getAccessToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { ultimo_sinal: { timestampValue: new Date().toISOString() } } }) })
+    if (r.ok) ultimoSinal = Date.now(); else log(`sinal de vida ${r.status}`)
+  } catch (e) { log(`sinal de vida: ${e}`) }
 }
 
 // Reentrega o que ficou sem marcar_visto (a sessão anterior caiu ou encerrou antes de tratar).

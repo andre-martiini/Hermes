@@ -1,6 +1,6 @@
 """Testes do detector e da fila de atenção (functions/atencao.py)."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import unittest
 from unittest.mock import MagicMock, patch
 import uuid
@@ -582,6 +582,37 @@ class TestAvaliarInterrupcaoAtencao(unittest.TestCase):
         # Verifica que gravou avaliado_interrupcao_em no documento
         doc = db.collection(COLLECTION).document("item-1")
         self.assertIsNotNone(doc.to_dict().get("avaliado_interrupcao_em"))
+
+    def _db_com_sinal(self, ultimo_sinal):
+        dados = {COLLECTION: {"item-1": {"estado": ESTADO_ABERTO, "prioridade": PRIORIDADE_ALTA,
+                                         "origem": "acao", "titulo": "Prazo crítico", "resumo": "Hoje"}}}
+        if ultimo_sinal is not None:
+            dados["system"] = {"agente_residente": {"ultimo_sinal": ultimo_sinal}}
+        return MockDb(dados)
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_agente_residente_ativo_nao_avisa_e_marca(self, mock_reserve):
+        now = datetime(2026, 9, 4, 10, 30, tzinfo=self.tz_sp)
+        db = self._db_com_sinal(now - timedelta(minutes=1))
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        mock_reserve.assert_not_called()
+        self.assertEqual(res["delegados_agente"], 1)
+        self.assertEqual(res["notificados"], 0)
+        item = db.collection(COLLECTION).document("item-1").to_dict()
+        self.assertIsNotNone(item.get("avaliado_interrupcao_em"))
+        self.assertEqual(item.get("interrupcao_delegada"), "agente_residente")
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_sinal_velho_ou_ausente_backend_avisa(self, mock_reserve):
+        mock_reserve.return_value = True
+        now = datetime(2026, 9, 4, 10, 30, tzinfo=self.tz_sp)
+        for sinal in (now - timedelta(minutes=10), None):
+            mock_reserve.reset_mock()
+            res = avaliar_interrupcao_atencao(self._db_com_sinal(sinal), now=now)
+            mock_reserve.assert_called_once()
+            self.assertEqual(res["delegados_agente"], 0)
+            self.assertEqual(res["notificados"], 1)
 
     @patch("atencao._reserve_and_create_notification")
     def test_avaliar_interrupcao_fora_da_janela_pula_sem_marcar(self, mock_reserve):
