@@ -29,6 +29,23 @@ if (Test-Path '..\..\firebase_service_account_key.json') {
   $env:GASPAR_EVENTOS = '1'
   $canais = @('--channels') + $canais + @('--dangerously-load-development-channels', 'server:gaspar-eventos')
   $pulso = '15m'
+  # O Claude Code pede confirmação do --dangerously-load-development-channels a TODO início, sem opção
+  # para lembrar. Este job aperta Enter na janela deste PowerShell até a sessão começar (aparece o
+  # histórico da conversa), só com a tela desbloqueada. Enter a mais no campo vazio não faz nada.
+  Start-Job -ArgumentList $PID, (Get-Date), "$env:CLAUDE_CONFIG_DIR\projects" -ScriptBlock {
+    param($janela, $inicio, $projetos)
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $shell = New-Object -ComObject WScript.Shell
+    $limite = $inicio.AddHours(6)
+    while ((Get-Date) -lt $limite) {
+      Start-Sleep 15
+      $sessao = Get-ChildItem "$projetos\*gaspar-agente\*.jsonl" -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -gt $inicio }
+      if ($sessao) { break }
+      if (Get-Process LogonUI -ErrorAction SilentlyContinue) { continue }  # tela bloqueada
+      try { [Microsoft.VisualBasic.Interaction]::AppActivate($janela); $shell.SendKeys('{ENTER}') } catch {}
+    }
+  } | Out-Null
 } else {
   $canais = @('--channels') + $canais
 }

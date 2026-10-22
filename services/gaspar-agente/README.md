@@ -55,6 +55,8 @@ Diferenças em relação ao plano:
 ## Marco 3: operação sozinho
 - **Perfil próprio:** o `iniciar.ps1` usa `CLAUDE_CONFIG_DIR=~/.claude-gaspar`, com login, plugins, memória e configurações separados dos do André.
   Na primeira subida, o Claude Code pede login nesse perfil e a confiança na pasta.
+- **Confirmação do canal próprio:** o Claude Code pede a cada início, sem opção para lembrar. Um job no `iniciar.ps1` aperta Enter
+  na janela do agente, só com a tela desbloqueada, até a sessão começar.
 - **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. Por isso a mesma tarefa serve para ligar e para vigiar.
 - **`encerrar.ps1`:** derruba só a árvore de processos do agente (o claude dele, o Telegram e o canal), não as outras sessões.
 
