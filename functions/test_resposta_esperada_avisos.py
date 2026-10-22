@@ -115,6 +115,30 @@ class TestJanela(_Base):
         self.assertEqual(len(self.avisos), 2)
 
 
+    def test_p_avisa_no_maximo_uma_vez_por_dia_por_etapa(self):
+        self._avaliar(self._msg("Vou verificar", mid="m1"), classe="P")
+        cinco_h = AGORA + dt.timedelta(hours=5)
+        res = self._avaliar(self._msg("Outra dúvida", mid="m2"), classe="P", agora=cinco_h)
+        self.assertEqual(res, {"status": "janela", "classe": "P"})
+        um_dia = AGORA + av.JANELA_AVISO_P + dt.timedelta(minutes=1)
+        res = self._avaliar(self._msg("Mais uma", mid="m3"), classe="P", agora=um_dia)
+        self.assertEqual(res["status"], "avisado")
+        self.assertEqual([a[1]["classe"] for a in self.avisos], ["P", "P"])
+
+    def test_r_fora_da_janela_de_4h_avisa_mesmo_com_p_recente(self):
+        self._avaliar(self._msg("Vou verificar", mid="m1"), classe="P")
+        cinco_h = AGORA + dt.timedelta(hours=5)
+        res = self._avaliar(self._msg("Resolvido", mid="m2"), classe="R", agora=cinco_h)
+        self.assertEqual(res["status"], "avisado")
+
+    def test_r_no_meio_nao_apaga_o_p_do_dia(self):
+        self._avaliar(self._msg("Vou verificar", mid="m1"), classe="P")
+        self._avaliar(self._msg("Resolvido", mid="m2"), classe="R", agora=AGORA + dt.timedelta(minutes=30))
+        seis_h = AGORA + dt.timedelta(hours=6)
+        res = self._avaliar(self._msg("Nova dúvida", mid="m3"), classe="P", agora=seis_h)
+        self.assertEqual(res, {"status": "janela", "classe": "P"})
+
+
 class TestBotoes(_Base):
     def _aviso(self):
         self._avaliar(self._msg())
