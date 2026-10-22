@@ -24,7 +24,10 @@ ESTADOS_TERMINAIS = (ESTADO_ENCERRADO, ESTADO_ENVIADO)
 def _agora_utc(agora) -> datetime:
     if not isinstance(agora, datetime) or agora.utcoffset() is None:
         raise ValueError("agora deve ser datetime com fuso")
-    return agora.astimezone(timezone.utc).replace(microsecond=0)
+    try:
+        return agora.astimezone(timezone.utc).replace(microsecond=0)
+    except OverflowError:
+        raise ValueError("agora fora do intervalo") from None
 
 
 def _versao(versao) -> int:
@@ -71,7 +74,14 @@ def montar_item_atencao(chave: str, versao: int, decisao: DecisaoFollowup, agora
 
 
 def marcar_enviado(item: dict, agora) -> dict:
-    """Estado terminal depois do envio: o item deixa de ser elegível."""
+    """Estado terminal depois do envio: o item deixa de ser elegível.
+    Só um item aberto com ação ENVIAR pode ser marcado."""
+    try:
+        _validar(item)
+    except (KeyError, TypeError) as exc:
+        raise ValueError("item malformado") from exc
+    if item["estado"] != ESTADO_ABERTO or item["acao"] != ENVIAR:
+        raise ValueError("só item aberto com ação enviar vira enviado")
     return {**item, "estado": ESTADO_ENVIADO, "avaliado_em": _agora_utc(agora).isoformat(),
             "proxima_avaliacao": None}
 
@@ -91,6 +101,14 @@ def _validar(item) -> tuple[str, int, datetime, datetime | None]:
     proxima = None if proxima is None else datetime.fromisoformat(proxima)
     if avaliado.utcoffset() is None or (proxima is not None and proxima.utcoffset() is None):
         raise ValueError("datas sem fuso")
+    estado, acao = item["estado"], item["acao"]
+    coerente = (
+        (estado == ESTADO_ABERTO and acao in (ENVIAR, ADIAR) and proxima is not None)
+        or (estado == ESTADO_ENCERRADO and acao == SUPRIMIR and proxima is None)
+        or (estado == ESTADO_ENVIADO and acao == ENVIAR and proxima is None)
+    )
+    if not coerente:
+        raise ValueError("estado, ação e próxima avaliação incoerentes")
     return item["chave_compromisso"], versao, avaliado, proxima
 
 
@@ -109,7 +127,9 @@ def deve_gravar(existente: dict | None, novo: dict) -> bool:
             return versao > e_versao
         if existente["estado"] in ESTADOS_TERMINAIS or avaliado < e_avaliado:
             return False
-        if (existente["acao"], existente["motivo"]) != (novo["acao"], novo["motivo"]):
+        if (existente["estado"], existente["acao"], existente["motivo"]) != (
+            novo["estado"], novo["acao"], novo["motivo"]
+        ):
             return True
         return proxima is not None and (e_proxima is None or proxima > e_proxima)
     except (KeyError, TypeError, ValueError):

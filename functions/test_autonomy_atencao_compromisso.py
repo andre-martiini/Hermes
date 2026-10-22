@@ -66,7 +66,33 @@ class AtencaoCompromissoTest(unittest.TestCase):
         e = montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), AGORA)
         env = marcar_enviado(e, AGORA)
         self.assertEqual(env["estado"], "enviado")
+        self.assertTrue(deve_gravar(e, env))
+        self.assertTrue(deve_gravar(e, marcar_enviado(e, AGORA + timedelta(minutes=1))))
         self.assertFalse(deve_gravar(env, montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), AGORA + timedelta(hours=9))))
+
+    def test_coerencia_e_overflow(self):
+        e = montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), AGORA)
+        enc = montar_item_atencao(CH, 1, DecisaoFollowup(SUPRIMIR, "c"), AGORA)
+        for ruim in (
+            {**e, "estado": "enviado", "acao": "adiar"},
+            {**e, "estado": "enviado"},
+            {**e, "acao": "suprimir"},
+            {**e, "proxima_avaliacao": None},
+            {**enc, "acao": "enviar"},
+        ):
+            self.assertFalse(deve_gravar(None, ruim))
+        with self.assertRaises(ValueError):
+            marcar_enviado(enc, AGORA)
+        with self.assertRaises(ValueError):
+            marcar_enviado(marcar_enviado(e, AGORA), AGORA)
+        with self.assertRaises(ValueError):
+            marcar_enviado({}, AGORA)
+        for d in (datetime.min.replace(tzinfo=timezone(timedelta(hours=3))),
+                  datetime.max.replace(tzinfo=timezone(-timedelta(hours=3)))):
+            with self.assertRaises(ValueError):
+                montar_item_atencao(CH, 1, DecisaoFollowup(ENVIAR, "ok"), d)
+            with self.assertRaises(ValueError):
+                marcar_enviado(e, d)
 
     def test_malformados(self):
         a = montar_item_atencao(CH, 1, DecisaoFollowup(ADIAR, "d"), AGORA)
