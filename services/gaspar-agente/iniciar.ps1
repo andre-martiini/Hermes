@@ -1,13 +1,20 @@
-# Sobe a sessão residente do Gaspar.
+# Sobe a sessão residente do Gaspar. O Agendador chama este script às 06:00 e a cada 30 min até 18:30;
+# se o agente já estiver rodando, sai sem fazer nada (é o que faz o papel de vigia).
+$agente = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" |
+  Where-Object { $_.CommandLine -match 'plugin:telegram@claude-plugins-official' }
+if ($agente) { exit 0 }
+
+$Host.UI.RawUI.WindowTitle = 'Gaspar agente'
+# Perfil próprio do agente: login, plugins, memória e configurações separados dos do André.
+$env:CLAUDE_CONFIG_DIR = "$env:USERPROFILE\.claude-gaspar"
 # O token do bot fica só em telegram-gaspar: as outras sessões do Claude Code que carregarem
 # o plugin não acham token, saem na hora e não disputam o getUpdates com o agente.
 $env:TELEGRAM_STATE_DIR = "$env:USERPROFILE\.claude\channels\telegram-gaspar"
 # Sem bun no PATH o plugin falha e o Claude Code passa ~15 min sem tentar de novo.
 # Terminais abertos antes da instalação do Bun (e o Agendador) não têm o PATH novo.
 $env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
-# Uma falha do plugin em QUALQUER sessão aberta nesta pasta (ex.: sem bun no PATH) fica gravada neste
-# cache e faz o agente pular o Telegram por ~15 min. Limpa antes de subir.
-$cache = "$env:USERPROFILE\.claude\mcp-needs-auth-cache.json"
+# Uma falha anterior do plugin fica gravada neste cache e faz o agente pular o Telegram por ~15 min.
+$cache = "$env:CLAUDE_CONFIG_DIR\mcp-needs-auth-cache.json"
 if (Test-Path $cache) {
   $c = Get-Content $cache -Raw | ConvertFrom-Json
   $c.PSObject.Properties.Remove('plugin:telegram:telegram')

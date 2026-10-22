@@ -52,4 +52,19 @@ Diferenças em relação ao plano:
   Ela é admin e ignora as regras. O código só lê as 3 coleções, e o `settings.json` impede o agente de ler a chave
   (Read só na pasta do agente; Read, Bash e PowerShell negados para o arquivo da chave).
 
-Agendador, `encerrar.ps1` e watchdog ficam para o marco 3.
+## Marco 3: operação sozinho
+- **Perfil próprio:** o `iniciar.ps1` usa `CLAUDE_CONFIG_DIR=~/.claude-gaspar`, com login, plugins, memória e configurações separados dos do André.
+  Na primeira subida, o Claude Code pede login nesse perfil e a confiança na pasta.
+- **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. Por isso a mesma tarefa serve para ligar e para vigiar.
+- **`encerrar.ps1`:** derruba só a árvore de processos do agente (o claude dele, o Telegram e o canal), não as outras sessões.
+
+Agendador (como o usuário do André). Liga às 06:00 e repete a cada 30 min até 18:30 (vigia); desliga às 19:00, só em dias úteis:
+```powershell
+schtasks /Create /TN "Gaspar - iniciar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 06:00 /RI 30 /DU 12:31 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
+schtasks /Create /TN "Gaspar - encerrar" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 19:00 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\encerrar.ps1" /F
+```
+
+Energia (o André roda; no adaptador de tomada: não suspender, não hibernar, tampa fechada não faz nada):
+```powershell
+powercfg /change standby-timeout-ac 0; powercfg /change hibernate-timeout-ac 0; powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0; powercfg /setactive SCHEME_CURRENT
+```
