@@ -31,10 +31,9 @@ class Compromisso:
             self.substituido_por is not None and type(self.substituido_por) is not str
         ):
             raise ValueError("chave, chat_id e texto devem ser texto")
-        object.__setattr__(self, "texto", self.texto.strip())
-        if not self.texto.strip() or not self.texto.isprintable():
-            raise ValueError("texto do compromisso é obrigatório e imprimível")
-        if self.estado not in ESTADOS:
+        if not self.texto or self.texto != self.texto.strip() or not self.texto.isprintable():
+            raise ValueError("texto do compromisso é obrigatório, imprimível e sem espaço nas pontas")
+        if type(self.estado) is not str or self.estado not in ESTADOS:
             raise ValueError("estado inválido")
         if (self.estado == SUBSTITUIDO) != (self.substituido_por is not None):
             raise ValueError("substituido_por só existe em compromisso substituído")
@@ -62,7 +61,7 @@ def abrir(registro, chat_id, mensagem_id, indice, texto) -> tuple[Compromisso, .
     chave = chave_compromisso(chat_id, mensagem_id, indice)
     if existe(registro, chave):
         raise ValueError("compromisso já registrado")
-    novo = Compromisso(chave, chat_id, texto)
+    novo = Compromisso(chave, chat_id, texto.strip())
     return tuple.__add__(registro, (novo,))
 
 
@@ -118,6 +117,11 @@ def _texto(valor) -> None:
 def _registro(registro) -> tuple[Compromisso, ...]:
     if type(registro) is not tuple or not all(type(c) is Compromisso for c in registro):
         raise ValueError("registro deve ser tupla de Compromisso")
+    for c in registro:
+        try:  # revalida registros montados à mão ou mutados
+            Compromisso.__post_init__(c)
+        except AttributeError:
+            raise ValueError("compromisso com campo ausente") from None
     chaves = [c.chave for c in registro]
     if len(set(chaves)) != len(chaves):
         raise ValueError("registro com chaves duplicadas")

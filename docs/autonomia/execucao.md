@@ -634,3 +634,24 @@ revisao_adversarial:
 pendencias:
   - "P07 passos 2 (extração estruturada, sombra), 3, 5; wiring em atencao_whatsapp somente com flag/sombra."
 ```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 5/N -- passo 3 (parte pura): functions/autonomy/compromissos_chat.py. Registro imutável (tupla de Compromisso) com vários compromissos independentes por chat (chave chat__msg__indice) e substituição só por relação explícita: substituir(registro, antigo, novo) exige mesmo chat, ambos abertos, chaves distintas e nunca cria ciclo. Registro revalidado em profundidade a cada chamada (tipos exatos, chaves únicas, chave == chave_compromisso, estado/substituido_por coerentes, sem ciclo, sem mutar objetos do chamador); só ValueError. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
+estado: validado
+inicio: "2026-10-22T13:50:00Z"
+fim: "2026-10-22T14:40:00Z"
+decisoes:
+  - id: p07-sub5-substituicao-explicita
+    motivo: "Nunca por semelhança de texto nem entre chats; antigo vira 'substituido' com substituido_por; cadeia A->B->C permitida, ciclo recusado."
+  - id: p07-sub5-triagem
+    motivo: "Nenhuma PR aberta no início do disparo de 11h BRT; branches claude/gaspar-agente-* recentes são de outra linha de trabalho (já mescladas) e não foram tocadas."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4517 OK (head de main); test_autonomy_compromissos_chat 20 OK (novo arquivo); DEPOIS 4537 OK (head final)."
+revisao_adversarial:
+  - "Rodada 1: registro sem validação profunda (chave incoerente, duplicadas, estado inválido, subclasses). Rodada 2: ciclo em registro montado à mão, chave só por prefixo, str exata. Rodada 3: abrir() com subtipos hostis (exceção não-ValueError). Rodada 4: estado hostil. Rodada 5: revalidação contornável por __post_init__ de instância e atributo apagado. Rodada 6: validação mutava o objeto do chamador (strip). Todos corrigidos. Rodada 7: não achou nada."
+pendencias:
+  - "P07 passos 2 (extração estruturada, sombra), 5; wiring em atencao_whatsapp somente com flag/sombra."
+```

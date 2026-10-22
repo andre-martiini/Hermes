@@ -101,7 +101,8 @@ class CompromissosChatTest(unittest.TestCase):
             pass
         with self.assertRaises(ValueError):
             C(Sx("c1__a__0"), "c1", "x")
-        self.assertEqual(C("c1__a__0", "c1", " x ").texto, "x")
+        with self.assertRaises(ValueError):
+            C("c1__a__0", "c1", " x ")
 
     def test_subtipos_hostis_so_value_error(self):
         class F(str):
@@ -119,6 +120,46 @@ class CompromissosChatTest(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 cc.abrir((), *args)
+
+    def test_estado_hostil_e_registro_mutado(self):
+        C = cc.Compromisso
+
+        class H:
+            def __eq__(s, o):
+                raise KeyError("x")
+            __hash__ = None
+
+        class SE(str):
+            def __eq__(s, o):
+                return True
+            __hash__ = str.__hash__
+        for est in (H(), SE("zzz")):
+            with self.assertRaises(ValueError):
+                C("c1__a__0", "c1", "x", est)
+        a = C("c1__a__0", "c1", "x")
+        object.__setattr__(a, "estado", cc.SUBSTITUIDO)
+        with self.assertRaises(ValueError):
+            cc.ativos((a,), "c1")
+
+    def test_revalidacao_nao_contornavel(self):
+        C = cc.Compromisso
+        a = C("c1__a__0", "c1", "x")
+        object.__setattr__(a, "estado", "qualquer")
+        object.__setattr__(a, "__post_init__", lambda: None)
+        with self.assertRaises(ValueError):
+            cc.ativos((a,), "c1")
+        b = C("c1__b__0", "c1", "x")
+        object.__delattr__(b, "chave")
+        for fn in (lambda: cc.ativos((b,), "c1"), lambda: cc.abrir((b,), "c1", "m", 0, "x")):
+            with self.assertRaises(ValueError):
+                fn()
+
+    def test_validacao_nao_altera_objeto_do_chamador(self):
+        a = cc.abrir((), "c", "m", 0, "x")[0]
+        object.__setattr__(a, "texto", " z ")
+        with self.assertRaises(ValueError):
+            cc.ativos((a,), "c")
+        self.assertEqual(a.texto, " z ")
 
     def test_tipos_estritos(self):
         class T(tuple):
