@@ -144,7 +144,8 @@ async function tick() {
   for (const d of await runQuery('whatsapp_messages', [gt('ingested_at', cursor.whatsapp)], 'ingested_at')) {
     const f = d.f
     cursor.whatsapp = str(f.ingested_at)
-    if (str(f.from_me) === true || str(f.is_group) === true) continue
+    // status@broadcast são os Status (stories) dos contatos: não são conversa e só gastariam tokens.
+    if (str(f.from_me) === true || str(f.is_group) === true || String(str(f.chat_id)).endsWith('@broadcast')) continue
     await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: str(f.chat_id), chat_name: str(f.chat_name),
       autor: str(f.author_name), message_type: str(f.message_type), message_id: str(f.wa_message_id) },
       str(f.content) || str(f.transcription_text) || `[${str(f.message_type)}]`)
