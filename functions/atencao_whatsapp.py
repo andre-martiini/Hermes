@@ -700,6 +700,12 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
         print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
 
     try:
+        import extracao_compromissos_sombra
+        extracao_compromissos_sombra.processar_mensagem(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha na extração de compromissos (modo sombra): {exc}")
+
+    try:
         import resposta_esperada
         resposta_esperada.processar_mensagem(db, mensagem)
     except Exception as exc:
