@@ -25,7 +25,14 @@
       "mcp__gaspar-eventos__agora",
       "mcp__gaspar-eventos__consumo_hoje",
       "mcp__gaspar-eventos__vigiar_grupo",
-      "mcp__gaspar-eventos__conversa_telegram"
+      "mcp__gaspar-eventos__conversa_telegram",
+      "mcp__claude_ai_Google_Drive__search_files",
+      "mcp__claude_ai_Google_Drive__read_file_content",
+      "mcp__claude_ai_Google_Drive__get_file_metadata",
+      "mcp__claude_ai_Google_Drive__list_recent_files",
+      "mcp__claude_ai_Google_Drive__download_file_content",
+      "mcp__claude_ai_Google_Drive__get_file_permissions",
+      "mcp__gaspar-eventos__ler_planilha"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__confirmar_acao",
@@ -54,7 +61,11 @@
       "mcp__claude_ai_Google_Calendar__create_event",
       "mcp__claude_ai_Google_Calendar__update_event",
       "mcp__claude_ai_Google_Calendar__respond_to_event",
-      "mcp__claude_ai_Google_Calendar__delete_event"
+      "mcp__claude_ai_Google_Calendar__delete_event",
+      "mcp__claude_ai_Google_Drive__create_file",
+      "mcp__claude_ai_Google_Drive__update_file",
+      "mcp__claude_ai_Google_Drive__copy_file",
+      "mcp__claude_ai_Google_Drive__share_file"
     ],
     "deny": [
       "Read(//c/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
@@ -75,7 +86,6 @@
       "mcp__claude_ai_Consensus",
       "mcp__claude_ai_Argos",
       "mcp__claude_ai_Canva",
-      "mcp__claude_ai_Google_Drive",
       "WebFetch",
       "WebSearch",
       "Read(**/channels/**/.env)",
@@ -83,7 +93,8 @@
       "PowerShell",
       "Edit",
       "Write",
-      "NotebookEdit"
+      "NotebookEdit",
+      "mcp__claude_ai_Google_Drive__trash_file"
     ]
   },
   "enabledMcpjsonServers": [
