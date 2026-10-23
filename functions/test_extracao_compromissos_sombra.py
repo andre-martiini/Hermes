@@ -28,7 +28,11 @@ class _Doc:
 
     def set(self, dados, merge=False):
         self.db.escritas.append((self.colecao, self.id, dados, merge))
-        if not merge:
+        if merge:
+            atual = self.db.dados.setdefault((self.colecao, self.id), {})
+            for k, v in dados.items():
+                atual[k] = atual.get(k, 0) + v.value if hasattr(v, "value") else v
+        else:
             self.db.dados[(self.colecao, self.id)] = dados
 
 
@@ -97,9 +101,16 @@ class TestSombra(unittest.TestCase):
         db = _DB({"enabled": True, "max_por_dia": 1})
         modelo = mock.Mock(return_value=SAIDA_OK)
         self.assertIsNotNone(_rodar(db, _msg(), modelo))
-        db.dados[(ecs.CONTADORES_COLLECTION, "2026-10-23")] = {"chamadas": 1}
         self.assertIsNone(_rodar(db, _msg(id="chat_m2"), modelo))
         self.assertEqual(modelo.call_count, 1)
+
+    def test_reentrega_nao_chama_nem_conta_de_novo(self):
+        db = _DB({"enabled": True})
+        modelo = mock.Mock(return_value=SAIDA_OK)
+        self.assertIsNotNone(_rodar(db, _msg(), modelo))
+        self.assertIsNone(_rodar(db, _msg(), modelo))
+        self.assertEqual(modelo.call_count, 1)
+        self.assertEqual(db.dados[(ecs.CONTADORES_COLLECTION, "2026-10-23")]["avaliadas"], 1)
 
     def test_saida_invalida_e_erro_do_modelo_nao_gravam_nem_propagam(self):
         db = _DB({"enabled": True})

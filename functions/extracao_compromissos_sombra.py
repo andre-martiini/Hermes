@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
 
@@ -24,6 +25,7 @@ SOMBRA_COLLECTION = "extracao_compromissos_sombra"
 CONTADORES_COLLECTION = "extracao_compromissos_sombra_contadores"
 FEATURE = "atencao_extracao_compromissos"
 DEFAULT_MAX_POR_DIA = 200
+_FUSO = ZoneInfo("America/Sao_Paulo")
 
 
 def _config(db) -> dict:
@@ -96,15 +98,18 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
     if base.classe == NAO_RELACIONADA:
         return None
 
+    ref = db.collection(SOMBRA_COLLECTION).document(doc_id)
+    if ref.get().exists:  # reentrega do gatilho: não gasta chamada nem infla a métrica
+        return None
     limite = int(cfg.get("max_por_dia", DEFAULT_MAX_POR_DIA))
-    cont_ref = db.collection(CONTADORES_COLLECTION).document(agora.strftime("%Y-%m-%d"))
-    cont = cont_ref.get()
-    chamadas = int((cont.to_dict() or {}).get("chamadas", 0)) if cont.exists else 0
-    if chamadas >= limite:
+    dia = agora.astimezone(_FUSO).strftime("%Y-%m-%d")
+    cont_ref = db.collection(CONTADORES_COLLECTION).document(dia)
+    # Incrementa antes de ler: execuções paralelas veem o total já com a sua parte,
+    # então o limite não é furado por leitura-e-depois-incremento. Falha do modelo também consome.
+    cont_ref.set({"chamadas": firestore.Increment(1)}, merge=True)
+    if int((cont_ref.get().to_dict() or {}).get("chamadas", 0)) > limite:
         cont_ref.set({"limite_atingido": firestore.Increment(1)}, merge=True)
         return None
-    # Conta antes de chamar: falha do modelo também consome orçamento.
-    cont_ref.set({"chamadas": firestore.Increment(1)}, merge=True)
 
     resumo: dict = {"message_doc_id": doc_id, "chat_id": str(mensagem.get("chat_id") or ""),
                     "modo": "sombra", "criado_em": agora.isoformat(), "base_classe": base.classe}
@@ -114,7 +119,6 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
             cont_ref.set({"sem_modelo": firestore.Increment(1)}, merge=True)
             return None
         extraidos = validar_extracao(texto, saida, agora.date())
-        resumo.update(comparar_sombra(base, extraidos), n_extraidos=len(extraidos))
     except ValueError:
         cont_ref.set({"saida_invalida": firestore.Increment(1)}, merge=True)
         return None
@@ -122,7 +126,8 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
         print(f"[ExtracaoCompromissos] Falha na chamada do modelo: {exc}")
         cont_ref.set({"erro_modelo": firestore.Increment(1)}, merge=True)
         return None
-    db.collection(SOMBRA_COLLECTION).document(doc_id).set(resumo)
+    resumo.update(comparar_sombra(base, extraidos), n_extraidos=len(extraidos))
+    ref.set(resumo)
     cont_ref.set({
         "avaliadas": firestore.Increment(1),
         "concordam": firestore.Increment(1 if resumo["concorda"] else 0),
