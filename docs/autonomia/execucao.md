@@ -627,9 +627,9 @@ decisoes:
     motivo: "Aceitas por ser sombra desligada por padrão: dedupe não atômico (duas entregas simultâneas do mesmo evento podem contar em dobro avaliadas/concordam); client Gemini sem timeout próprio (bloco roda por último no gatilho, após os demais detectores); ValueError do SDK conta como saida_invalida; cerca ```JSON em maiúsculas conta como saida_invalida. Reabrir antes de ligar a flag."
 testes:
   resultados:
-    - "functions/ completo ANTES 4582 OK (P07 sub 8); test_extracao_compromissos_sombra 6 OK (novo); DEPOIS 4588 OK (246s, head final)."
+    - "functions/ completo ANTES 4582 OK (P07 sub 8); test_extracao_compromissos_sombra 7 OK (novo); DEPOIS 4589 OK (head final, após o ajuste do Codex; teste novo de idade da mensagem)."
 revisao_adversarial:
-  - "Rodada 1: contador lido-depois-incrementado (limite furável), reentrega duplicando chamada/métrica, bloco antes de resposta_esperada, dia UTC no contador. Corrigido (incremento antes de ler, dedupe por documento, bloco por último, fuso local). Rodada 2: prazos relativos usavam data UTC (dia errado entre 21h e 24h) -> corrigido com hoje local; dedupe concorrente não atômico aceito (ver limitações). Não houve rodada 3 sobre a correção do fuso (troca de uma linha, coberta pela suíte)."
+  - "Rodada 1: contador lido-depois-incrementado (limite furável), reentrega duplicando chamada/métrica, bloco antes de resposta_esperada, dia UTC no contador. Corrigido (incremento antes de ler, dedupe por documento, bloco por último, fuso local). Rodada 2: prazos relativos usavam data UTC (dia errado entre 21h e 24h) -> corrigido com hoje local; dedupe concorrente não atômico aceito (ver limitações). Não houve rodada 3 sobre a correção do fuso (troca de uma linha, coberta pela suíte). Codex (P2) na PR: mensagem antiga do bot restaurada por backfill escapava da marca de 6h -> só mensagens com timestamp entre -5min e 1h são avaliadas (IDADE_MAX); teste novo."
 pendencias:
   - "P07: suíte F02 com limiar de precisão da seção 11 (medir com dados da sombra); wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; revisão final do pacote para pacote_concluido: P07."
 ```

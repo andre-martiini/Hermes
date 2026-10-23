@@ -13,7 +13,7 @@ Limite diário de chamadas (`max_por_dia`) contém o custo.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
@@ -26,6 +26,8 @@ CONTADORES_COLLECTION = "extracao_compromissos_sombra_contadores"
 FEATURE = "atencao_extracao_compromissos"
 DEFAULT_MAX_POR_DIA = 200
 _FUSO = ZoneInfo("America/Sao_Paulo")
+# Só mensagens recentes: backfill de histórico traz mensagens antigas (inclusive do bot, cuja marca expira).
+IDADE_MAX = timedelta(hours=1)
 
 
 def _config(db) -> dict:
@@ -89,11 +91,16 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
     doc_id = str(mensagem.get("id") or mensagem.get("wa_message_id") or "")
     if not doc_id:
         return None
+    agora = agora or datetime.now(timezone.utc)
+    from resposta_esperada import _como_datetime
+
+    enviada = _como_datetime(mensagem.get("timestamp"))
+    if enviada is None or not (-timedelta(minutes=5) <= agora - enviada <= IDADE_MAX):
+        return None
     from secretario_whatsapp import eh_mensagem_do_bot
 
     if eh_mensagem_do_bot(mensagem, db):
         return None
-    agora = agora or datetime.now(timezone.utc)
     hoje = agora.astimezone(_FUSO).date()  # prazos relativos valem no dia local
     base = classificar_mensagem(texto, hoje)
     if base.classe == NAO_RELACIONADA:

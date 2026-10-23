@@ -59,7 +59,8 @@ class _DB:
 
 def _msg(**campos):
     base = {"id": "chat_m1", "chat_id": "111@lid", "is_group": False, "from_me": True,
-            "message_type": "chat", "content": TEXTO}
+            "message_type": "chat", "content": TEXTO,
+            "timestamp": datetime(2026, 10, 23, 14, 50, tzinfo=timezone.utc)}
     base.update(campos)
     return base
 
@@ -95,6 +96,16 @@ class TestSombra(unittest.TestCase):
                   _msg(content="bom dia"), _msg(content="")):
             self.assertIsNone(_rodar(db, m, modelo))
         self.assertIsNone(_rodar(db, _msg(), modelo, bot=True))
+        modelo.assert_not_called()
+
+    def test_mensagem_antiga_ou_sem_data_nao_chama_modelo(self):
+        modelo = mock.Mock(return_value=SAIDA_OK)
+        db = _DB({"enabled": True})
+        antiga = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
+        futura = datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc)
+        for ts in (antiga, futura, None, "lixo"):
+            self.assertIsNone(_rodar(db, _msg(timestamp=ts), modelo))
+        self.assertIsNone(_rodar(db, {k: v for k, v in _msg().items() if k != "timestamp"}, modelo))
         modelo.assert_not_called()
 
     def test_limite_diario(self):
