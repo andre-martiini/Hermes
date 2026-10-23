@@ -94,7 +94,8 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
     if eh_mensagem_do_bot(mensagem, db):
         return None
     agora = agora or datetime.now(timezone.utc)
-    base = classificar_mensagem(texto, agora.date())
+    hoje = agora.astimezone(_FUSO).date()  # prazos relativos valem no dia local
+    base = classificar_mensagem(texto, hoje)
     if base.classe == NAO_RELACIONADA:
         return None
 
@@ -102,7 +103,7 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
     if ref.get().exists:  # reentrega do gatilho: não gasta chamada nem infla a métrica
         return None
     limite = int(cfg.get("max_por_dia", DEFAULT_MAX_POR_DIA))
-    dia = agora.astimezone(_FUSO).strftime("%Y-%m-%d")
+    dia = hoje.strftime("%Y-%m-%d")
     cont_ref = db.collection(CONTADORES_COLLECTION).document(dia)
     # Incrementa antes de ler: execuções paralelas veem o total já com a sua parte,
     # então o limite não é furado por leitura-e-depois-incremento. Falha do modelo também consome.
@@ -118,7 +119,7 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
         if saida is None:
             cont_ref.set({"sem_modelo": firestore.Increment(1)}, merge=True)
             return None
-        extraidos = validar_extracao(texto, saida, agora.date())
+        extraidos = validar_extracao(texto, saida, hoje)
     except ValueError:
         cont_ref.set({"saida_invalida": firestore.Increment(1)}, merge=True)
         return None
