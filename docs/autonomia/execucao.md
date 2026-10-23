@@ -562,48 +562,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 5/N -- passo 3 (parte pura): functions/autonomy/compromissos_chat.py. Registro imutável (tupla de Compromisso) com vários compromissos independentes por chat (chave chat__msg__indice) e substituição só por relação explícita: substituir(registro, antigo, novo) exige mesmo chat, ambos abertos, chaves distintas e nunca cria ciclo. Registro revalidado em profundidade a cada chamada (tipos exatos, chaves únicas, chave == chave_compromisso, estado/substituido_por coerentes, sem ciclo, sem mutar objetos do chamador); só ValueError. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-22T13:50:00Z"
-fim: "2026-10-22T14:40:00Z"
-decisoes:
-  - id: p07-sub5-substituicao-explicita
-    motivo: "Nunca por semelhança de texto nem entre chats; antigo vira 'substituido' com substituido_por; cadeia A->B->C permitida, ciclo recusado."
-  - id: p07-sub5-triagem
-    motivo: "Nenhuma PR aberta no início do disparo de 11h BRT; branches claude/gaspar-agente-* recentes são de outra linha de trabalho (já mescladas) e não foram tocadas."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4517 OK (head de main); test_autonomy_compromissos_chat 20 OK (novo arquivo); DEPOIS 4537 OK (head final)."
-revisao_adversarial:
-  - "Rodada 1: registro sem validação profunda (chave incoerente, duplicadas, estado inválido, subclasses). Rodada 2: ciclo em registro montado à mão, chave só por prefixo, str exata. Rodada 3: abrir() com subtipos hostis (exceção não-ValueError). Rodada 4: estado hostil. Rodada 5: revalidação contornável por __post_init__ de instância e atributo apagado. Rodada 6: validação mutava o objeto do chamador (strip). Todos corrigidos. Rodada 7: não achou nada."
-pendencias:
-  - "P07 passos 2 (extração estruturada, sombra), 5; wiring em atencao_whatsapp somente com flag/sombra."
-```
-
-
----
-
-```yaml
-pacote: "P07 sub-entrega 6/N -- passo 4 (parte pura): functions/autonomy/prazo_followup.py. planejar_acompanhamento(prazo, enviado_em, horas_resposta, fuso) -> Acompanhamento(verificar_em UTC sem microssegundos, origem, vinculante, amostra). Prazo expresso com data é vinculante e só é acompanhado após a meia-noite seguinte no fuso do dono; sem ele, o momento de olhar de novo é ESTIMATIVA (p75 do histórico de horas de resposta do contato, amostra mínima 5, limitada a 1-168h, nunca vinculante) ou padrão de 24h. Natureza/data inválidas, histórico ruim (bool, nan, <=0, não lista/tupla), fuso inválido e entradas hostis viram só ValueError. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-22T16:48:00Z"
-fim: "2026-10-22T17:30:00Z"
-decisoes:
-  - id: p07-sub6-triagem
-    motivo: "PR #495 (briefing 5h desligável, outra linha de trabalho; limpa, CI verde, flag padrão ligado, Codex sem achados) mesclada. Nenhuma PR da linha de autonomia aberta; nenhuma execução paralela."
-  - id: p07-sub6-arquivo-execucao
-    motivo: "execucao.md arquivado (blocos P07 sub 2 e 3 -> execucao-archive-p07sub2-sub3.md)."
-  - id: p07-sub6-prazo-vencido
-    motivo: "Prazo expresso anterior à promessa é recusado (ValueError) em vez de gerar acompanhamento no passado; quem chamar decide o tratamento."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4542 OK (CI de main após #495); com o módulo novo (versão inicial) 4549 OK (188s); test_autonomy_prazo_followup 10 OK na versão final; DEPOIS 4552 OK (193s, head final)."
-revisao_adversarial:
-  - "Rodada 1: OverflowError com int enorme, Prazo.data não-date, natureza/iterável/tzinfo hostis, bytearray aceito. Corrigido. Rodada 2: microssegundos no resultado, fim do dia com hora repetida (fold), data datetime aceita. Corrigido (meia-noite seguinte no fuso, truncamento, tipo date exato). Rodada 3: não achei nada."
-pendencias:
-  - "P07 passo 2 (extração estruturada, sombra), passo 5 (correlação entre canais); wiring em atencao_whatsapp somente com flag/sombra."
-```
+# (Em 2026-10-23 os blocos "P07 sub-entrega 5/N" e "6/N" foram movidos para docs/autonomia/execucao-archive-p07sub5-sub6.md, sem alteração de conteúdo.)
 
 ---
 
@@ -649,4 +608,28 @@ revisao_adversarial:
   - "Rodada 1: evidência/objeto só invisível, comparar_sombra com entradas inválidas e iterador. Rodada 2: preenchedores Hangul, cautela só em promessa, base não validada. Rodada 3: incerteza da base descartada, preenchedor U+3164. Rodada 4: contagem de jamos Hangul (NFC). Rodada 5: incerteza herdada só em classes de cautela. Rodada 6: divergência da base perdia dúvida. Todos corrigidos. Rodada 7 (fuzz diferencial de 30 mil mensagens contra oráculo): não achou nada. Depois da PR, Codex P2 (base global contaminava cláusulas independentes) -> base por sentença; rodadas 8-17 sobre esse isolamento acharam, cada uma, ressalvas vizinhas órfãs, item espúrio de evidência curta, dedup dependente de ordem, anáfora, flexões/plural -ões, e-mail com hífen e abreviações (doc/mail), todas corrigidas (isolamento só com ressalva explicada por outro item de entregável conhecido, sem dúvida residual). Rodada 17 achou só abreviação doc (corrigida); não houve rodada final limpa após essa correção."
 pendencias:
   - "P07: wiring em atencao_whatsapp somente com flag/sombra (chamar o modelo de extração, gravar comparar_sombra); suíte F02 com limiar de precisão da seção 11; revisão final do pacote para pacote_concluido: P07."
+```
+
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 9/N -- passo 2 (wiring em sombra): functions/extracao_compromissos_sombra.py, chamado no fim de on_whatsapp_message_atencao (isolado em try/except, depois de resposta_esperada). Atrás de system/settings.atencao.extracao_estruturada.enabled (padrão DESLIGADO = reversão). Só mensagem from_me de chat individual, fora do bot, em que a seleção barata (classificar_mensagem) achou candidato; chama o modelo leve, valida com validar_extracao e grava em extracao_compromissos_sombra apenas ids, classes e concordância (comparar_sombra) -- nunca o texto. Não altera promessas_abertas, fila de atenção nem A06. Custo contido por max_por_dia (padrão 200; contador incrementado antes de ler, dia em America/Sao_Paulo) e dedupe por doc já existente (reentrega do gatilho)."
+estado: validado
+inicio: "2026-10-23T13:45:00Z"
+fim: "2026-10-23T14:40:00Z"
+decisoes:
+  - id: p07-sub9-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia."
+  - id: p07-sub9-arquivo-execucao
+    motivo: "execucao.md arquivado (blocos P07 sub 5 e 6 -> execucao-archive-p07sub5-sub6.md)."
+  - id: p07-sub9-limitacoes
+    motivo: "Aceitas por ser sombra desligada por padrão: dedupe não atômico (duas entregas simultâneas do mesmo evento podem contar em dobro avaliadas/concordam); client Gemini sem timeout próprio (bloco roda por último no gatilho, após os demais detectores); ValueError do SDK conta como saida_invalida; cerca ```JSON em maiúsculas conta como saida_invalida. Reabrir antes de ligar a flag."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4582 OK (P07 sub 8); test_extracao_compromissos_sombra 7 OK (novo); DEPOIS 4589 OK (head final, após o ajuste do Codex; teste novo de idade da mensagem)."
+revisao_adversarial:
+  - "Rodada 1: contador lido-depois-incrementado (limite furável), reentrega duplicando chamada/métrica, bloco antes de resposta_esperada, dia UTC no contador. Corrigido (incremento antes de ler, dedupe por documento, bloco por último, fuso local). Rodada 2: prazos relativos usavam data UTC (dia errado entre 21h e 24h) -> corrigido com hoje local; dedupe concorrente não atômico aceito (ver limitações). Não houve rodada 3 sobre a correção do fuso (troca de uma linha, coberta pela suíte). Codex (P2) na PR: mensagem antiga do bot restaurada por backfill escapava da marca de 6h -> só mensagens com timestamp entre -5min e 1h são avaliadas (IDADE_MAX); teste novo."
+pendencias:
+  - "P07: suíte F02 com limiar de precisão da seção 11 (medir com dados da sombra); wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; revisão final do pacote para pacote_concluido: P07."
 ```

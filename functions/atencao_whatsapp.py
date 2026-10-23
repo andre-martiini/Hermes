@@ -705,6 +705,12 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no sinal resposta_esperada (modo sombra): {exc}")
 
+    try:
+        import extracao_compromissos_sombra
+        extracao_compromissos_sombra.processar_mensagem(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha na extração de compromissos (modo sombra): {exc}")
+
 
 @scheduler_fn.on_schedule(
     schedule="every 15 minutes",
