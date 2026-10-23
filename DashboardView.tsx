@@ -1073,6 +1073,57 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
         }
     };
 
+    // Painel de etapas restantes, usado pelas ações ativas e pelas em espera.
+    const painelEtapas = (a: ResumoAcao) => {
+        const etapasAbertas = (acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [])
+            .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
+        return (
+            <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
+                {carregandoPlanos[a.id] ? (
+                    <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Carregando etapas…</p>
+                ) : errosPlanos[a.id] ? (
+                    <p className="m-0 text-xs text-rose-500">Não foi possível carregar as etapas agora.</p>
+                ) : etapasAbertas.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                        <p className={`m-0 text-[10.5px] font-bold font-mono uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                            Etapas restantes ({etapasAbertas.length})
+                        </p>
+                        {etapasAbertas.map(etapa => {
+                            const estado = estadoDaSubtarefa(etapa);
+                            const dataPrevista = String(etapa.data_prevista || '').slice(0, 10);
+                            return (
+                                <div key={etapa.id} className="flex items-start gap-2 text-xs leading-relaxed">
+                                    <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                        estado === 'em_andamento' ? 'bg-blue-500' :
+                                            estado === 'aguardando_terceiro' ? 'bg-amber-400' : 'bg-slate-400'
+                                    }`} />
+                                    <div className="min-w-0">
+                                        <p className={`m-0 ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{textoDaSubtarefa(etapa)}</p>
+                                        <p className={`m-0 text-[10px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                            {ROTULO_ESTADO[estado]}{dataPrevista ? ` · ${dataPrevista}` : ''}{estado === 'aguardando_terceiro' && etapa.aguardando_de ? ` · ${etapa.aguardando_de}` : ''}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : a.etapas_totais > 0 ? (
+                    <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Todas as etapas deste plano foram concluídas.</p>
+                ) : a.proximo_passo && (
+                    <p className={`m-0 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-[#4d4354]'}`}>{a.proximo_passo}</p>
+                )}
+                <div className="flex gap-2 mt-1 flex-wrap">
+                    {a.area_tematica && (
+                        <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>{a.area_tematica}</span>
+                    )}
+                    <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>
+                        Prazo: {a.data_limite}
+                    </span>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <DashboardCard title="Ações de Hoje" isDark={isDark}>
             <div className="flex flex-col gap-5">
@@ -1126,13 +1177,12 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                 : null;
                             const isOpen = !!expanded[a.id];
                             const pct = a.etapas_totais > 0 ? Math.round((a.etapas_feitas / a.etapas_totais) * 100) : 0;
-                            const etapasAbertas = (acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [])
-                                .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
                             return (
                                 <div key={a.id} className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}>
                                     <button
                                         type="button"
                                         onClick={() => toggle(a.id)}
+                                        title={a.titulo}
                                         className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
                                     >
                                         <span
@@ -1172,51 +1222,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                             <path d="m6 9 6 6 6-6" />
                                         </svg>
                                     </button>
-                                    {isOpen && (
-                                        <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
-                                            {carregandoPlanos[a.id] ? (
-                                                <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Carregando etapas…</p>
-                                            ) : errosPlanos[a.id] ? (
-                                                <p className="m-0 text-xs text-rose-500">Não foi possível carregar as etapas agora.</p>
-                                            ) : etapasAbertas.length > 0 ? (
-                                                <div className="flex flex-col gap-2">
-                                                    <p className={`m-0 text-[10.5px] font-bold font-mono uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
-                                                        Etapas restantes ({etapasAbertas.length})
-                                                    </p>
-                                                    {etapasAbertas.map(etapa => {
-                                                        const estado = estadoDaSubtarefa(etapa);
-                                                        const dataPrevista = String(etapa.data_prevista || '').slice(0, 10);
-                                                        return (
-                                                            <div key={etapa.id} className="flex items-start gap-2 text-xs leading-relaxed">
-                                                                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                                                    estado === 'em_andamento' ? 'bg-blue-500' :
-                                                                        estado === 'aguardando_terceiro' ? 'bg-amber-400' : 'bg-slate-400'
-                                                                }`} />
-                                                                <div className="min-w-0">
-                                                                    <p className={`m-0 ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{textoDaSubtarefa(etapa)}</p>
-                                                                    <p className={`m-0 text-[10px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
-                                                                        {ROTULO_ESTADO[estado]}{dataPrevista ? ` · ${dataPrevista}` : ''}{estado === 'aguardando_terceiro' && etapa.aguardando_de ? ` · ${etapa.aguardando_de}` : ''}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : a.etapas_totais > 0 ? (
-                                                <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Todas as etapas deste plano foram concluídas.</p>
-                                            ) : a.proximo_passo && (
-                                                <p className={`m-0 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-[#4d4354]'}`}>{a.proximo_passo}</p>
-                                            )}
-                                            <div className="flex gap-2 mt-1 flex-wrap">
-                                                {a.area_tematica && (
-                                                    <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>{a.area_tematica}</span>
-                                                )}
-                                                <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>
-                                                    Prazo: {a.data_limite}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    )}
+                                    {isOpen && painelEtapas(a)}
                                 </div>
                             );
                         })}
@@ -1232,17 +1238,34 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                         <div className="flex flex-col gap-2">
                             {emEspera.map((a) => {
                                 const aguardandoDe = a.subtarefa_do_dia?.aguardando_de ?? null;
+                                const isOpen = !!expanded[a.id];
                                 return (
-                                    <div key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-2xl border border-dashed ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#f0f3ff] border-[#e5e7eb]'}`}>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
-                                            <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
-                                        </svg>
-                                        <div className="flex-1 min-w-0">
-                                            <p className={`m-0 text-[13px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{a.titulo}</p>
-                                            <p className={`m-0 mt-0.5 text-[11.5px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
-                                                {aguardandoDe ? `Aguardando: ${aguardandoDe}` : 'Aguardando terceiro'}
-                                            </p>
-                                        </div>
+                                    <div key={a.id} className={`rounded-2xl border border-dashed ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#f0f3ff] border-[#e5e7eb]'}`}>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggle(a.id)}
+                                            title={a.titulo}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                                        >
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                                                <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                                            </svg>
+                                            <div className="flex-1 min-w-0">
+                                                <p className={`m-0 text-[13px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{a.titulo}</p>
+                                                <p className={`m-0 mt-0.5 text-[11.5px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                                    {aguardandoDe ? `Aguardando: ${aguardandoDe}` : 'Aguardando terceiro'}
+                                                </p>
+                                            </div>
+                                            <svg
+                                                width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                                stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+                                                className="flex-shrink-0 transition-transform"
+                                                style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                            >
+                                                <path d="m6 9 6 6 6-6" />
+                                            </svg>
+                                        </button>
+                                        {isOpen && painelEtapas(a)}
                                     </div>
                                 );
                             })}
