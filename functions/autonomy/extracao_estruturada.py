@@ -69,8 +69,17 @@ def _objeto_concreto(obj_n: str) -> bool:
     return any(p in _OBJETOS or p.rstrip("s") in _OBJETOS for p in re.findall(r"\w+", obj_n))
 
 
+def _singulares(p: str) -> set:
+    cand = {p, p.rstrip("s")}
+    if p.endswith("oes"):
+        cand.add(p[:-3] + "ao")
+    if p.endswith("es"):
+        cand.add(p[:-2])
+    return cand
+
+
 def _termos(texto_n: str) -> set:
-    return {p.rstrip("s") if p.rstrip("s") in _OBJETOS else p for p in re.findall(r"\w+", texto_n)} & set(_OBJETOS)
+    return {t for p in re.findall(r"\w+", texto_n) for t in _singulares(p) & set(_OBJETOS)}
 
 
 def _explica(frase_n: str, gatilho_n: str, outras: list) -> bool:

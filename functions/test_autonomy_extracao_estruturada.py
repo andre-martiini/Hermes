@@ -164,6 +164,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                                           _i("cancelamento", "relatório", "Não vou mais enviar o relatório")))
             self.assertTrue(r[0].incerta, (m, obj))
 
+    def test_rodada15_plural_oes(self):
+        m = "Vou enviar a versão amanhã. Não vou enviar a planilha nem as versões."
+        r = ex.validar_extracao(m, _s(_i("promessa", "versão", "Vou enviar a versão amanhã"),
+                                      _i("cancelamento", "planilha", "Não vou enviar a planilha nem as versões")))
+        self.assertTrue(r[0].incerta)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
