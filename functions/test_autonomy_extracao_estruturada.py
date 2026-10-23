@@ -128,6 +128,15 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ex.validar_extracao("a. " * 5000, _s(_i("promessa", "ab", "a.")))
 
+    def test_negacao_nao_reconhecida_e_pergunta_independente(self):
+        for m in ("Te envio o relatório amanhã. Não vou conseguir.", "Te envio o relatório amanhã. Não."):
+            r = ex.validar_extracao(m, _s(_i("promessa", "relatorio", "Te envio o relatório amanhã")))
+            self.assertTrue(r[0].incerta, m)
+        m = "Você pode enviar o relatório? Te envio a planilha amanhã."
+        r = ex.validar_extracao(m, _s(_i("pergunta", "relatorio", "Você pode enviar o relatório"),
+                                      _i("promessa", "planilha", "Te envio a planilha amanhã")))
+        self.assertEqual((r[1].classe, r[1].incerta), ("promessa", False))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

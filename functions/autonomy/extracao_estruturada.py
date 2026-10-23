@@ -85,12 +85,16 @@ def _base_do_item(mensagem: str, evidencia_n: str, outras: list, hoje, base_glob
     if len(achadas) != 1:
         return base_global
     propria = achadas[0]
+    vizinhas = 0
     for t in sentencas:
         if t is propria:
             continue
         c = classificar_mensagem(t, hoje)
-        if _cautelosa(c) and not _explica(_normalizar(t), _normalizar(c.evidencia), outras):
+        vizinhas += _cautelosa(c)
+        if _cautelosa(c) and not _explica(_normalizar(t), _normalizar(c.evidencia).strip(" .!?;\n"), outras):
             return base_global
+    if _cautelosa(base_global) and not vizinhas:
+        return base_global  # a dúvida da mensagem não está numa frase vizinha identificável
     return classificar_mensagem(propria, hoje)
 
 
