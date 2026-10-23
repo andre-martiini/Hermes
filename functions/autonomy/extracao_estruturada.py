@@ -62,7 +62,17 @@ def _cautelosa(c: Classificacao) -> bool:
     return c.classe in _CAUTELA or c.incerta
 
 
-def _base_do_item(mensagem: str, evidencia_n: str, outras_n: list, hoje, base_global: Classificacao) -> Classificacao:
+def _explica(frase_n: str, outras: list) -> bool:
+    """Outro item explica a frase cautelosa se a evidência dele cobre a maior
+    parte dela e o objeto dele consta nela (evidência trivial como 'se' não)."""
+    nucleo = frase_n.strip(" .!?;\n")
+    return any(
+        ev in frase_n and len(ev) * 10 >= len(nucleo) * 6 and obj in frase_n
+        for ev, obj in outras
+    )
+
+
+def _base_do_item(mensagem: str, evidencia_n: str, outras: list, hoje, base_global: Classificacao) -> Classificacao:
     """Seleção barata na sentença que contém a evidência. A sentença só isola
     o item quando toda frase cautelosa vizinha é evidência de OUTRO compromisso
     extraído; ressalva órfã ("E. Mas só se der.") mantém a base da mensagem
@@ -75,7 +85,7 @@ def _base_do_item(mensagem: str, evidencia_n: str, outras_n: list, hoje, base_gl
     for t in sentencas:
         if t is propria or not _cautelosa(classificar_mensagem(t, hoje)):
             continue
-        if not any(o in _normalizar(t) for o in outras_n):
+        if not _explica(_normalizar(t), outras):
             return base_global
     return classificar_mensagem(propria, hoje)
 
@@ -92,8 +102,10 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
     base_global = classificar_mensagem(mensagem, hoje)
     texto_n = _normalizar(mensagem)
     vistos = set()
-    evidencias_n = [
-        _normalizar(it.get("evidencia")) if type(it) is dict and type(it.get("evidencia")) is str else ""
+    pares_n = [
+        (_normalizar(it.get("evidencia")), _normalizar(it.get("objeto")))
+        if type(it) is dict and type(it.get("evidencia")) is str and type(it.get("objeto")) is str
+        else ("", "")
         for it in itens
     ]
     resultado = []
@@ -108,8 +120,8 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
-        outras_n = [e for n, e in enumerate(evidencias_n) if n != pos and e]
-        base = _base_do_item(mensagem, _normalizar(evidencia), outras_n, hoje, base_global)
+        outras = [par for n, par in enumerate(pares_n) if n != pos and par[0] and par[1]]
+        base = _base_do_item(mensagem, _normalizar(evidencia), outras, hoje, base_global)
         if classe == base.classe:
             incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:

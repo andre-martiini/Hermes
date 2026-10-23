@@ -102,6 +102,13 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
             self.assertTrue(r[0].incerta, m)
             self.assertNotEqual((r[0].classe, r[0].incerta), (PROMESSA, False))
 
+    def test_item_espurio_de_evidencia_curta_nao_libera_ressalva_orfa(self):
+        m = "Vou te enviar o relatório amanhã. Mas só se der."
+        for ev, obj in (("se", "ab"), ("só", "ab"), ("Mas só se der.", "ab")):
+            r = ex.validar_extracao(m, _s(_i("promessa", "relatorio", "Vou te enviar o relatório amanhã."),
+                                          _i("promessa", obj, ev)))
+            self.assertTrue(r[0].incerta, ev)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
