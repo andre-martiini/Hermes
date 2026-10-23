@@ -109,6 +109,25 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                                           _i("promessa", obj, ev)))
             self.assertTrue(r[0].incerta, ev)
 
+    def test_duplicata_incerta_contamina_independente_da_ordem(self):
+        m = "Te envio a planilha amanhã. A planilha do mês passado tem erro."
+        a = _i("promessa", "planilha", "Te envio a planilha amanhã")
+        b = _i("promessa", "planilha", "A planilha do mês passado tem erro")
+        for ordem in ((a, b), (b, a)):
+            r = ex.validar_extracao(m, _s(*ordem))
+            self.assertEqual(len(r), 1)
+            self.assertTrue(r[0].incerta)
+
+    def test_gatilho_da_ressalva_deve_estar_na_evidencia_do_outro_item(self):
+        m = "Te envio a planilha amanhã. Só se der, e o relatório também."
+        r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha amanhã"),
+                                      _i("promessa", "relatório", "e o relatório também")))
+        self.assertTrue(r[0].incerta)
+
+    def test_mensagem_grande_demais(self):
+        with self.assertRaises(ValueError):
+            ex.validar_extracao("a. " * 5000, _s(_i("promessa", "ab", "a.")))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

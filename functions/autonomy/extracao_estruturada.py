@@ -30,6 +30,7 @@ from autonomy.commitments import (
 )
 
 MAX_COMPROMISSOS = 5
+MAX_MENSAGEM = 8000
 _MAX_CAMPO = 200
 _CAUTELA = (CANCELAMENTO, INTENCAO_VAGA, PERGUNTA)
 
@@ -62,12 +63,14 @@ def _cautelosa(c: Classificacao) -> bool:
     return c.classe in _CAUTELA or c.incerta
 
 
-def _explica(frase_n: str, outras: list) -> bool:
+def _explica(frase_n: str, gatilho_n: str, outras: list) -> bool:
     """Outro item explica a frase cautelosa se a evidência dele cobre a maior
-    parte dela e o objeto dele consta nela (evidência trivial como 'se' não)."""
+    parte dela, inclui o gatilho da ressalva e o objeto dele consta nela
+    (evidência trivial como 'se' não)."""
     nucleo = frase_n.strip(" .!?;\n")
     return any(
         ev in frase_n and len(ev) * 10 >= len(nucleo) * 6 and obj in frase_n
+        and (not gatilho_n or gatilho_n in ev)
         for ev, obj in outras
     )
 
@@ -83,16 +86,17 @@ def _base_do_item(mensagem: str, evidencia_n: str, outras: list, hoje, base_glob
         return base_global
     propria = achadas[0]
     for t in sentencas:
-        if t is propria or not _cautelosa(classificar_mensagem(t, hoje)):
+        if t is propria:
             continue
-        if not _explica(_normalizar(t), outras):
+        c = classificar_mensagem(t, hoje)
+        if _cautelosa(c) and not _explica(_normalizar(t), _normalizar(c.evidencia), outras):
             return base_global
     return classificar_mensagem(propria, hoje)
 
 
 def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, ...]:
     """`saida` = {"compromissos": [{classe, objeto, evidencia}, ...]}."""
-    if type(mensagem) is not str or not mensagem.strip():
+    if type(mensagem) is not str or not mensagem.strip() or len(mensagem) > MAX_MENSAGEM:
         raise ValueError("mensagem inválida")
     if type(saida) is not dict or type(saida.get("compromissos")) is not list:
         raise ValueError("saída sem lista de compromissos")
@@ -101,7 +105,7 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         raise ValueError("compromissos demais")
     base_global = classificar_mensagem(mensagem, hoje)
     texto_n = _normalizar(mensagem)
-    vistos = set()
+    vistos = {}
     pares_n = [
         (_normalizar(it.get("evidencia")), _normalizar(it.get("objeto")))
         if type(it) is dict and type(it.get("evidencia")) is str and type(it.get("objeto")) is str
@@ -132,8 +136,11 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
             incerta = True  # divergiu da seleção barata: modelo sozinho não firma nem apaga dúvida
         chave = (classe, _normalizar(objeto))
         if chave in vistos:
+            if incerta:  # duplicata incerta contamina a já aceita, independente da ordem
+                n = vistos[chave]
+                resultado[n] = CompromissoExtraido(classe, resultado[n].objeto, resultado[n].evidencia, True)
             continue
-        vistos.add(chave)
+        vistos[chave] = len(resultado)
         resultado.append(CompromissoExtraido(classe, objeto, evidencia, incerta))
     return tuple(resultado)
 
