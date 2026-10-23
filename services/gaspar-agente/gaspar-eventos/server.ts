@@ -88,6 +88,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   inputSchema: { type: 'object', properties: { event_id: { type: 'string' } }, required: ['event_id'] } }, {
   name: 'agora', description: 'Data, dia da semana e hora atuais em Brasilia. Use em vez de shell.',
   inputSchema: { type: 'object', properties: {} } }, {
+  name: 'conversa_telegram',
+  description: 'Conversa recente com o Andre no Telegram (mensagens dele e respostas suas, de todas as sessoes, inclusive antes de um reinicio), em ordem. Use ao iniciar para retomar o fio.',
+  inputSchema: { type: 'object', properties: { horas: { type: 'number', description: 'janela em horas (padrao 24, max 72)' },
+    limite: { type: 'number', description: 'quantas mensagens, das mais recentes (padrao 40, max 200)' } } } }, {
   name: 'consumo_hoje', description: 'Tokens que esta sessao do agente gastou hoje (turnos, entrada, cache, saida, por modelo).',
   inputSchema: { type: 'object', properties: {} } }, {
   name: 'vigiar_grupo',
@@ -100,6 +104,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   if (req.params.name === 'agora')
     return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
+  if (req.params.name === 'conversa_telegram')
+    return { content: [{ type: 'text', text: conversaTelegram(Number((req.params.arguments as any)?.horas) || 24, Number((req.params.arguments as any)?.limite) || 40) }] }
   if (req.params.name === 'consumo_hoje')
     return { content: [{ type: 'text', text: JSON.stringify(consumoHoje()) }] }
   if (req.params.name === 'vigiar_grupo') {
@@ -191,6 +197,49 @@ function consumoHoje() {
       }
     }
   return { dia: hoje, ...t, por_modelo }
+}
+
+// ---------- memória da conversa do Telegram ----------
+// Determinístico: relê as transcrições do perfil do agente (o Claude Code já grava cada sessão em
+// disco) e extrai só o Telegram: mensagem do André (<channel source="plugin:telegram...">), áudio
+// dele já transcrito (resultado de transcrever_audio) e cada `reply` do agente. Sobrevive a reinício.
+function conversaTelegram(horas: number, limite: number): string {
+  const desde = Date.now() - Math.min(Math.max(horas, 1), 72) * 3600e3
+  const base = join(process.env.CLAUDE_CONFIG_DIR ?? '', 'projects')
+  const linhas: { t: number; quem: string; texto: string }[] = []
+  const corta = (x: string) => (x.length > 400 ? x.slice(0, 400) + ' [...]' : x).trim()
+  for (const dir of existsSync(base) ? readdirSync(base).filter(d => d.endsWith('gaspar-agente')) : [])
+    for (const f of readdirSync(join(base, dir)).filter(f => f.endsWith('.jsonl'))) {
+      const p = join(base, dir, f)
+      if (statSync(p).mtimeMs < desde) continue
+      const audios = new Set<string>()
+      for (const l of readFileSync(p, 'utf8').split('\n')) {
+        if (!l.includes('telegram') && !l.includes('transcrever_audio') && !audios.size) continue
+        let d: any; try { d = JSON.parse(l) } catch { continue }
+        const t = Date.parse(d.timestamp)
+        if (!(t >= desde)) continue
+        const c = d.message?.content
+        for (const it of Array.isArray(c) ? c : [{ type: 'text', text: c }]) {
+          if (d.type === 'user' && it?.type === 'text' && typeof it.text === 'string' && it.text.includes('source="plugin:telegram')) {
+            const m = it.text.match(/<channel [^>]*>([\s\S]*?)<\/channel>/)
+            if (m) linhas.push({ t, quem: 'André', texto: corta(m[1]) })
+          } else if (d.type === 'assistant' && it?.type === 'tool_use') {
+            if (String(it.name).endsWith('telegram__reply') && it.input?.text) linhas.push({ t, quem: 'Gaspar', texto: corta(String(it.input.text)) })
+            if (String(it.name).endsWith('__transcrever_audio')) audios.add(it.id)
+          } else if (d.type === 'user' && it?.type === 'tool_result' && audios.has(it.tool_use_id)) {
+            const r = Array.isArray(it.content) ? it.content.map((x: any) => x.text ?? '').join(' ') : String(it.content ?? '')
+            if (!it.is_error && r) linhas.push({ t, quem: 'André (áudio transcrito)', texto: corta(r) })
+            audios.delete(it.tool_use_id)
+          }
+        }
+      }
+    }
+  linhas.sort((a, b) => a.t - b.t)
+  const fmt = (t: number) => new Date(t).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const ultimas = linhas.slice(-Math.min(Math.max(limite, 1), 200))
+  if (!ultimas.length) return 'Nenhuma conversa no Telegram nesse período.'
+  return (linhas.length > ultimas.length ? `(${linhas.length - ultimas.length} mensagens mais antigas omitidas)\n` : '')
+    + ultimas.map(x => `[${fmt(x.t)}] ${x.quem}: ${x.texto}`).join('\n')
 }
 
 async function notificar(event_id: string, p: Pendente) {

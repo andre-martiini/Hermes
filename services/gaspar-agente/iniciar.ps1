@@ -74,7 +74,7 @@ public static class ConsoleEnter {
 } else {
   $canais = @('--channels') + $canais
 }
-$prompt = "Voce acabou de iniciar. 1) Chame obter_estado_atual e obter_fila_atencao. 2) Agende o pulso com CronCreate, cron '$cron', prompt: siga o conteudo de .claude/loop.md (sem pulso de madrugada; eventos continuam chegando). 3) Briefing da manha (.claude/briefing.md), se o registro de hoje (consultar_execucoes_agente, gaspar-agente:AAAA-MM-DD) nao mostrar briefing nem bom-dia ja enviado: se ja passou das 05:00, faca agora; se for antes, agende com CronCreate para as 05:00 de hoje."
+$prompt = "Voce acabou de iniciar. 0) Chame conversa_telegram para retomar o fio da conversa recente com o Andre (nao repita a ele o que ja foi dito; continue de onde parou). 1) Chame obter_estado_atual e obter_fila_atencao. 2) Agende o pulso com CronCreate, cron '$cron', prompt: siga o conteudo de .claude/loop.md (sem pulso de madrugada; eventos continuam chegando). 3) Briefing da manha (.claude/briefing.md), se o registro de hoje (consultar_execucoes_agente, gaspar-agente:AAAA-MM-DD) nao mostrar briefing nem bom-dia ja enviado: se ja passou das 05:00, faca agora; se for antes, agende com CronCreate para as 05:00 de hoje."
 # --channels aceita vários valores: o -- impede que ele engula o prompt.
 # Entre aspas porque o Windows PowerShell 5.1 descarta um -- solto.
 # Sonnet 5.5: o Opus consome o limite semanal da assinatura bem mais rápido (medido em 22/10: ~94 mil tokens de contexto por turno).

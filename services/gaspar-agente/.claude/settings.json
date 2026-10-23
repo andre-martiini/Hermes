@@ -24,7 +24,8 @@
       "mcp__gaspar-eventos__transcrever_audio",
       "mcp__gaspar-eventos__agora",
       "mcp__gaspar-eventos__consumo_hoje",
-      "mcp__gaspar-eventos__vigiar_grupo"
+      "mcp__gaspar-eventos__vigiar_grupo",
+      "mcp__gaspar-eventos__conversa_telegram"
     ],
     "ask": [
       "mcp__claude_ai_Sistema_Hermes__confirmar_acao",
