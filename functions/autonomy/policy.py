@@ -73,8 +73,13 @@ from autonomy.contracts import (
 # do Gaspar. As outras nove do Live Ideas ficam fora: criar, ajustar e
 # renomear vão direto, e no ajuste a proposta mostrada antes do aplicar já é
 # a confirmação.
+#
+# Decisão explícita (23/10/2026, pedido do André para o agente residente):
+# `criar_rascunho_email` SAI do piso. Rascunho fica na caixa de rascunhos do
+# Gmail e não chega a ninguém; o efeito em terceiro é o ENVIO, que não existe
+# nesta tool (ela nunca envia) e segue exigindo aval do André no cliente.
 FLOOR_CONFIRMACAO_OBRIGATORIA: frozenset[str] = frozenset({
-    "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
+    "schedule_whatsapp_message", "pausar_conversa",
     "registrar_aporte_investimento", "registrar_execucao_investimento",
     "video_renderizar", "video_refazer_cena",
     "criar_objetivo_whatsapp",
@@ -88,7 +93,6 @@ FLOOR_CONFIRMACAO_OBRIGATORIA: frozenset[str] = frozenset({
 # preenchido pelo chamador em cada `PolicyRequest`.
 CLASSE_EFEITO_PISO: dict[str, ClasseEfeito] = {
     "schedule_whatsapp_message": ClasseEfeito.COMPROMISSO_TERCEIROS,
-    "criar_rascunho_email": ClasseEfeito.COMPROMISSO_TERCEIROS,
     "pausar_conversa": ClasseEfeito.COMPROMISSO_TERCEIROS,
     "registrar_aporte_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
     "registrar_execucao_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,

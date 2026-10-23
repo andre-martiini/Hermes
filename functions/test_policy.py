@@ -80,7 +80,10 @@ class TestFloorIdenticoAoMcpServer(unittest.TestCase):
         # abertura da conversa em nome do dono é sempre aprovada por ele.
         # 8 → 9 em 18/10/2026: liveideas_apagar (conector do Live Ideas), por
         # decisão explícita do André: manda reunião ou processo para a lixeira.
-        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 9)
+        # 9 → 8 em 23/10/2026: criar_rascunho_email SAI, por decisão explícita
+        # do André (rascunho não chega a ninguém; o envio segue com aval dele).
+        self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 8)
+        self.assertNotIn("criar_rascunho_email", policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
         self.assertTrue({"video_renderizar", "video_refazer_cena", "criar_objetivo_whatsapp",
                          "liveideas_apagar"} <= policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
 

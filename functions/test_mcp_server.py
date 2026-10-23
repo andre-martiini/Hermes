@@ -140,7 +140,7 @@ class TestDecisaoPisoMcp(unittest.TestCase):
             "estado_autonomia_atual",
             return_value=EstadoAutonomia.SOMENTE_PREPARACAO,
         ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"):
-            decisao = mcp_server._decisao_piso_mcp(ctx, "criar_rascunho_email", {})
+            decisao = mcp_server._decisao_piso_mcp(ctx, "pausar_conversa", {})
         self.assertEqual(decisao.decision, Decisao.PREPARE_ONLY)
 
     def test_usa_principal_cliente_assistido_no_request_avaliado(self):
@@ -247,7 +247,7 @@ class TestDecisaoPisoMcp(unittest.TestCase):
         ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar, patch.object(
             mcp_server.autonomy_policy, "decisao_piso"
         ) as mock_decisao_piso:
-            decisao = mcp_server._decisao_piso_mcp(ctx, "criar_rascunho_email", {})
+            decisao = mcp_server._decisao_piso_mcp(ctx, "pausar_conversa", {})
         self.assertEqual(decisao.decision, Decisao.PREPARE_ONLY)
         mock_registrar.assert_not_called()
         mock_decisao_piso.assert_not_called()
@@ -285,7 +285,7 @@ class TestHandleToolsCallPreflight(unittest.TestCase):
             mcp_server.registry, "is_mcp_enabled", return_value=True
         ), patch.object(mcp_server, "preview_tool") as mock_preview:
             resultado = mcp_server._handle_tools_call(
-                self._params("criar_rascunho_email"), ctx=ctx
+                self._params("pausar_conversa"), ctx=ctx
             )
         mock_preview.assert_not_called()
         self.assertFalse(resultado.get("isError", False))
@@ -345,9 +345,9 @@ class TestHandleToolsCallPreflight(unittest.TestCase):
 
 class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
     """Achado da revisão adversarial desta sub-entrega (P02 sub-entrega 2/N):
-    `criar_rascunho_email`, `registrar_aporte_investimento` e
-    `registrar_execucao_investimento` não têm hook de prévia
-    (`tools/hermes_tools.py::preview()` devolve `None` para as três). Antes
+    `criar_rascunho_email` (até 23/10/2026, quando saiu do piso),
+    `registrar_aporte_investimento` e `registrar_execucao_investimento` não
+    têm hook de prévia (`tools/hermes_tools.py::preview()` devolve `None`). Antes
     da correção, uma ÚNICA chamada `tools/call` com `_confirmed=true` e SEM
     `_confirmation_id` executava essas três tools direto — sem nunca criar
     uma confirmação real, sem nunca passar por `_decisao_piso_mcp` (só
@@ -392,16 +392,22 @@ class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
         mock_execute.assert_not_called()
         self.assertTrue(resultado.get("isError"))
 
-    def test_criar_rascunho_email_bloqueado_sem_confirmation_id(self):
+    def test_criar_rascunho_email_fora_do_piso_executa_direto(self):
+        # 23/10/2026: saiu do piso por decisão do André. Uma chamada comum,
+        # sem `_confirmed` nem `_confirmation_id`, chega direto à tool (que
+        # só cria rascunho, nunca envia).
         ctx = _ctx()
         with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
-            mcp_server, "execute_tool"
-        ) as mock_execute:
+            mcp_server, "execute_tool", return_value={"ok": True, "draft_id": "r-1"}
+        ) as mock_execute, patch.object(mcp_server, "preview_tool") as mock_preview:
             resultado = mcp_server._handle_tools_call(
-                self._params("criar_rascunho_email"), ctx=ctx
+                {"name": "criar_rascunho_email",
+                 "arguments": {"para": ["alguem@exemplo.com"], "assunto": "Oi", "corpo": "Texto"}},
+                ctx=ctx,
             )
-        mock_execute.assert_not_called()
-        self.assertTrue(resultado.get("isError"))
+        mock_execute.assert_called_once()
+        mock_preview.assert_not_called()
+        self.assertFalse(resultado.get("isError", False))
 
     def test_confirmation_id_real_ainda_funciona_para_tool_do_piso_sem_hook(self):
         # A correção não deve quebrar o caminho LEGÍTIMO: confirmation_id de

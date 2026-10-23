@@ -912,7 +912,7 @@ class TestCamadaJsonRpc(unittest.TestCase):
     def test_tools_confirmaveis_declararam_campos_legados_no_schema_mcp(self):
         payload = mcp_server._handle_tools_list()
         por_nome = {tool["name"]: tool for tool in payload["tools"]}
-        for name in ("schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email"):
+        for name in ("schedule_whatsapp_message", "pausar_conversa"):
             properties = por_nome[name]["inputSchema"]["properties"]
             self.assertEqual(properties["_confirmed"]["type"], "boolean")
             self.assertEqual(properties["_confirmation_id"]["type"], "string")
@@ -1050,9 +1050,11 @@ class TestCamadaJsonRpc(unittest.TestCase):
         with self._gating({"schedule_whatsapp_message"}):
             self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
 
-    def test_rascunho_email_e_mutante_e_exige_confirmacao(self):
+    def test_rascunho_email_e_mutante_mas_vai_direto_no_mcp(self):
+        # 23/10/2026: saiu do piso por decisão do André; o rascunho nunca é
+        # enviado. Continua marcado como mutante (anotação), como editar_etapa.
         self.assertTrue(registry.needs_confirmation("criar_rascunho_email"))
-        self.assertTrue(mcp_server._exige_confirmacao("criar_rascunho_email"))
+        self.assertFalse(mcp_server._exige_confirmacao("criar_rascunho_email"))
 
     def test_demais_tools_mutantes_nao_pedem_dupla_chamada(self):
         """`criar_acao_no_sistema` grava, mas o gating do canal esta desligado.
