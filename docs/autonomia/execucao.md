@@ -642,7 +642,7 @@ decisoes:
     motivo: "Objeto/evidência só com marcas combinantes são recusados (conservador); aceito."
 testes:
   resultados:
-    - "functions/ completo ANTES 4556 OK (P07 sub 7); com a versão intermediária 4565 OK (284s); test_autonomy_extracao_estruturada 13 OK (novo); DEPOIS ver PR (head final)."
+    - "functions/ completo ANTES 4556 OK (P07 sub 7); com a versão intermediária 4565 OK (284s); test_autonomy_extracao_estruturada 13 OK (novo); DEPOIS 4569 OK (295s, head final)."
 revisao_adversarial:
   - "Rodada 1: evidência/objeto só invisível, comparar_sombra com entradas inválidas e iterador. Rodada 2: preenchedores Hangul, cautela só em promessa, base não validada. Rodada 3: incerteza da base descartada, preenchedor U+3164. Rodada 4: contagem de jamos Hangul (NFC). Rodada 5: incerteza herdada só em classes de cautela. Rodada 6: divergência da base perdia dúvida. Todos corrigidos. Rodada 7 (fuzz diferencial de 30 mil mensagens contra oráculo): não achou nada."
 pendencias:
