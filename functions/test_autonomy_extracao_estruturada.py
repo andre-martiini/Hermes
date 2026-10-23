@@ -176,6 +176,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                                       _i("cancelamento", "contrato", "Não vou mais enviar o e-mail e o contrato")))
         self.assertTrue(r[0].incerta)
 
+    def test_rodada17_abreviacao_doc(self):
+        m = "Te envio o documento hoje. Não vou conseguir mandar o doc nem a planilha."
+        r = ex.validar_extracao(m, _s(_i("promessa", "documento", "Te envio o documento hoje"),
+                                      _i("cancelamento", "planilha", "Não vou conseguir mandar o doc nem a planilha")))
+        self.assertTrue(r[0].incerta)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

@@ -69,8 +69,12 @@ def _objeto_concreto(obj_n: str) -> bool:
     return any(p in _OBJETOS or p.rstrip("s") in _OBJETOS for p in re.findall(r"\w+", obj_n))
 
 
+_ALIAS = {"doc": "documento", "docx": "documento", "mail": "email", "xls": "planilha", "xlsx": "planilha"}
+
+
 def _singulares(p: str) -> set:
     cand = {p, p.rstrip("s")}
+    cand |= {_ALIAS[c] for c in tuple(cand) if c in _ALIAS}
     if p.endswith("oes"):
         cand.add(p[:-3] + "ao")
     if p.endswith("es"):
