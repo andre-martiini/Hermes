@@ -557,29 +557,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 # (Em 2026-10-21 os blocos "P06 sub-entrega 14/N" e "14/N (correção pós-merge)" foram movidos para docs/autonomia/execucao-archive-p06sub14.md, preventivamente: arquivo ativo >50KB.)
 # (Em 2026-10-22 o bloco "P07 sub-entrega 1/N" foi movido para docs/autonomia/execucao-archive-p07sub1.md, sem alteração de conteúdo.)
 # (Em 2026-10-22 os blocos "P07 sub-entrega 2/N" e "3/N" foram movidos para docs/autonomia/execucao-archive-p07sub2-sub3.md, sem alteração de conteúdo.)
-```
-
----
-
-```yaml
-pacote: "P07 sub-entrega 4/N -- passo 8 (parte pura): functions/autonomy/atencao_compromisso.py. montar_item_atencao(chave, versao, decisao, agora) converte a decisão de followup_guard em item de atenção endereçado por chave+versão (id <chave>__v<N>) com próxima avaliação (ENVIAR=agora, ADIAR=+4h, SUPRIMIR=nenhuma/encerrado). deve_gravar(existente, novo) dá idempotência: não regride versão, não aceita avaliação mais antiga, não reabre item terminal (encerrado/enviado), permite aberto->enviado e renova o agendamento quando a mesma decisão volta com proxima_avaliacao maior, recusa itens malformados/incoerentes. marcar_enviado só aceita item aberto/ENVIAR e não retrocede avaliado_em. Datas extremas e entradas ruins viram ValueError. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-22T10:50:00Z"
-fim: "2026-10-22T11:20:00Z"
-decisoes:
-  - id: p07-sub4-estado-enviado
-    motivo: "Revisor apontou que ENVIAR repetido ficaria elegível para sempre sem estado terminal; adicionado estado 'enviado' (marcar_enviado) e coerência estado/ação/proxima validada."
-  - id: p07-sub4-arquivo-execucao
-    motivo: "execucao.md arquivado (bloco P07 sub 1 -> execucao-archive-p07sub1.md)."
-  - id: p07-sub4-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela no início do disparo de 8h BRT."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4504 OK (head de main, conforme P07 sub 3); test_autonomy_atencao_compromisso 10 OK (novo arquivo); DEPOIS 4514 OK (219s, head final)."
-revisao_adversarial:
-  - "Rodada 1: ADIAR repetido não renovava proxima_avaliacao, avaliação antiga sobrescrevia nova, validação fraca do existente, chave com '/', exceções fora de ValueError. Corrigido. Rodada 2: transição aberto->enviado recusada, OverflowError em agora, itens incoerentes aceitos. Corrigido. Rodada 3: marcar_enviado com agora anterior ao avaliado_em. Corrigido (max). Rodada 4: OverflowError em avaliado_em extremo. Corrigido em _validar. Rodada 5: não achou nada."
-pendencias:
-  - "P07 passos 2 (extração estruturada, sombra), 3, 5; wiring em atencao_whatsapp somente com flag/sombra."
+# (Em 2026-10-23 o bloco "P07 sub-entrega 4/N" foi movido para docs/autonomia/execucao-archive-p07sub4.md, sem alteração de conteúdo.)
 ```
 
 ---
@@ -646,4 +624,29 @@ revisao_adversarial:
   - "Rodada 1: docstring de vinculo_firme incoerente, vinculo_firme com entrada ruim levantava TypeError/AttributeError, canal subclasse de str com __eq__ hostil, ref com caractere não imprimível/espaços. Corrigido. Rodada 2: não achou nada. Codex + rodada 3: vinculo_firme revalida campos do Vinculo; __eq__ hostil e atributo removido viram ValueError; corrigido. Rodada 4: não achou nada. Observação: objetos genéricos como "arquivo" geram ruído semântico, sempre incerto."
 pendencias:
   - "P07 passo 2 (extração estruturada, sombra); wiring em atencao_whatsapp somente com flag/sombra."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 8/N -- passo 2 (parte pura, sombra): functions/autonomy/extracao_estruturada.py. validar_extracao(mensagem, saida, hoje) valida a saída já decodificada de um modelo de extração ({compromissos:[{classe,objeto,evidencia}]}, máx. 5) contra a mensagem: evidência literal (normalizada) e com >=2 caracteres visíveis (NFC, sem preenchedores invisíveis), classe conhecida, duplicatas fundidas. O modelo nunca afrouxa a seleção barata: base cancelamento/vaga/pergunta prevalece com incerta=True; mesma classe herda base.incerta; promessa sobre base incerta vira intencao_vaga; qualquer outra divergência é incerta. comparar_sombra(base, extraidos) mede concordância (promessa firme modelo x base) para métricas em sombra. Só ValueError. Sem I/O, sem chamada de modelo e sem wiring; fila antiga e A06 não alteradas."
+estado: validado
+inicio: "2026-10-23T11:00:00Z"
+fim: "2026-10-23T12:30:00Z"
+decisoes:
+  - id: p07-sub8-triagem
+    motivo: "Nenhuma PR aberta no início do disparo; branches claude/* restantes são antigas/mescladas, nenhuma execução paralela."
+  - id: p07-sub8-arquivo-execucao
+    motivo: "execucao.md arquivado (bloco P07 sub 4 -> execucao-archive-p07sub4.md)."
+  - id: p07-sub8-limitacoes
+    motivo: "Aceitas por ser módulo puro em sombra, sem wiring: modelo que fabrica item consistente com a ressalva; ressalvas que o classificador barato não reconhece; entregável fora do vocabulário de cumprimento._OBJETOS; sobrecautela (itens independentes ficam incertos quando a dúvida não é identificável). Reabrir ao ligar o wiring."
+  - id: p07-sub8-marcas-combinantes
+    motivo: "Objeto/evidência só com marcas combinantes são recusados (conservador); aceito."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4556 OK (P07 sub 7); com a versão intermediária 4565 OK (284s); test_autonomy_extracao_estruturada 26 OK (novo); DEPOIS 4582 OK (280s, head final)."
+revisao_adversarial:
+  - "Rodada 1: evidência/objeto só invisível, comparar_sombra com entradas inválidas e iterador. Rodada 2: preenchedores Hangul, cautela só em promessa, base não validada. Rodada 3: incerteza da base descartada, preenchedor U+3164. Rodada 4: contagem de jamos Hangul (NFC). Rodada 5: incerteza herdada só em classes de cautela. Rodada 6: divergência da base perdia dúvida. Todos corrigidos. Rodada 7 (fuzz diferencial de 30 mil mensagens contra oráculo): não achou nada. Depois da PR, Codex P2 (base global contaminava cláusulas independentes) -> base por sentença; rodadas 8-17 sobre esse isolamento acharam, cada uma, ressalvas vizinhas órfãs, item espúrio de evidência curta, dedup dependente de ordem, anáfora, flexões/plural -ões, e-mail com hífen e abreviações (doc/mail), todas corrigidas (isolamento só com ressalva explicada por outro item de entregável conhecido, sem dúvida residual). Rodada 17 achou só abreviação doc (corrigida); não houve rodada final limpa após essa correção."
+pendencias:
+  - "P07: wiring em atencao_whatsapp somente com flag/sombra (chamar o modelo de extração, gravar comparar_sombra); suíte F02 com limiar de precisão da seção 11; revisão final do pacote para pacote_concluido: P07."
 ```
