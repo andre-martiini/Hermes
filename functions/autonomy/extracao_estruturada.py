@@ -81,8 +81,8 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
-        if base.classe in _CAUTELA and classe == base.classe:
-            incerta = base.incerta
+        if classe == base.classe:
+            incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:
             classe, incerta = base.classe, True  # modelo não afrouxa cautela em nenhuma classe
         elif classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):

@@ -77,6 +77,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ex.validar_extracao("te envio \uac00", _s(_i("promessa", "\uac01", "\uac00")))
 
+    def test_incerteza_herdada_em_qualquer_classe_coincidente(self):
+        m = "Já enviei a primeira parte, falta o resto"
+        base = classificar_mensagem(m)
+        r = ex.validar_extracao(m, _s(_i(base.classe, "relatorio", "primeira parte")))
+        self.assertEqual((r[0].classe, r[0].incerta), (base.classe, base.incerta))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
