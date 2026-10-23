@@ -14,6 +14,7 @@ Saída malformada vira só ValueError (quem consome cai na seleção barata).
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -57,6 +58,16 @@ def _texto(valor, campo: str) -> str:
     return valor
 
 
+def _base_do_item(mensagem: str, evidencia_n: str, hoje, base_global: Classificacao) -> Classificacao:
+    """Seleção barata na sentença que contém a evidência; sem sentença única
+    que a contenha (evidência atravessa sentenças), vale a mensagem inteira."""
+    sentencas = [t for t in re.split(r"(?<=[.!?;\n])\s+", mensagem) if t.strip()]
+    achadas = [t for t in sentencas if evidencia_n in _normalizar(t)]
+    if len(achadas) == 1:
+        return classificar_mensagem(achadas[0], hoje)
+    return base_global
+
+
 def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, ...]:
     """`saida` = {"compromissos": [{classe, objeto, evidencia}, ...]}."""
     if type(mensagem) is not str or not mensagem.strip():
@@ -66,7 +77,7 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
     itens = saida["compromissos"]
     if len(itens) > MAX_COMPROMISSOS:
         raise ValueError("compromissos demais")
-    base = classificar_mensagem(mensagem, hoje)
+    base_global = classificar_mensagem(mensagem, hoje)
     texto_n = _normalizar(mensagem)
     vistos = set()
     resultado = []
@@ -81,6 +92,7 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
+        base = _base_do_item(mensagem, _normalizar(evidencia), hoje, base_global)
         if classe == base.classe:
             incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:

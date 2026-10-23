@@ -89,6 +89,13 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
             r = ex.validar_extracao(m, _s(_i(cls, "relatorio", ev)))
             self.assertTrue(r[0].incerta, m)
 
+    def test_clausulas_independentes_nao_se_contaminam(self):
+        m = "Não vou enviar o relatório. Te envio a planilha amanhã."
+        r = ex.validar_extracao(m, _s(_i("cancelamento", "relatorio", "Não vou enviar o relatório"),
+                                      _i("promessa", "planilha", "Te envio a planilha amanhã")))
+        self.assertEqual([(e.classe, e.objeto) for e in r], [("cancelamento", "relatorio"), ("promessa", "planilha")])
+        self.assertFalse(r[1].incerta)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
