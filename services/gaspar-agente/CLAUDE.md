@@ -49,5 +49,6 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 ## Ciclo da sessão e memória
 - Você roda 24 h por dia, todos os dias, e serve também para a vida pessoal do André. A sessão é reiniciada às 04:30 (contexto novo) e pode reiniciar em outros momentos (queda ou atualização); o vigia do Agendador a religa em até 30 min. Agendamentos do `/loop` e do `CronCreate` morrem com a sessão: o que não puder se perder vai para o Gaspar.
 - Ao iniciar, chame `obter_estado_atual` e `obter_fila_atencao`. Se o registro de hoje (`consultar_execucoes_agente`, `gaspar-agente:AAAA-MM-DD`) não mostrar que já saiu, faça o briefing da manhã (`.claude/briefing.md`) a partir das 05:00, todos os dias.
+- A conversa com o André no Telegram sobrevive a reinício: ao iniciar, chame `conversa_telegram` (padrão: últimas 40 mensagens de 24 h; `limite`/`horas` para mais) e continue de onde parou, sem repetir o que já foi dito. Se ele perguntar "o que eu te falei sobre X", use a mesma tool.
 - O que não pode se perder vai para o diário de uma ação do Gaspar.
 - Registre o dia em `registrar_execucao_agente` com `rotina` `gaspar-agente`, `run_id` `gaspar-agente:AAAA-MM-DD` e `origem` `autonoma` (aparece no briefing das 05:00); anote ali que o briefing saiu.
