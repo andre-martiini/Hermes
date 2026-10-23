@@ -148,6 +148,13 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
             r = ex.validar_extracao(m, _s(_i("promessa", obj, ev), _i(outro[0], outro[1], outro[2])))
             self.assertTrue(r[0].incerta, m)
 
+    def test_rodada13_anafora_nao_libera(self):
+        for m, outro in (("Te envio o relatório amanhã. Esquece isso.", ("cancelamento", "isso", "Esquece isso")),
+                         ("Te envio o relatório amanhã. Não vou mais enviar.", ("cancelamento", "enviar", "Não vou mais enviar")),
+                         ("Te envio o relatório amanhã. Mas não sei se vou conseguir.", ("intencao_vaga", "conseguir", "Mas não sei se vou conseguir"))):
+            r = ex.validar_extracao(m, _s(_i("promessa", "relatorio", "Te envio o relatório amanhã"), _i(*outro)))
+            self.assertTrue(r[0].incerta, m)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

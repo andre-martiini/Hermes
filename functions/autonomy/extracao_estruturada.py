@@ -18,6 +18,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from autonomy.cumprimento import _OBJETOS
 from autonomy.commitments import (
     CANCELAMENTO,
     CLASSES,
@@ -63,14 +64,19 @@ def _cautelosa(c: Classificacao) -> bool:
     return c.classe in _CAUTELA or c.incerta
 
 
+def _objeto_concreto(obj_n: str) -> bool:
+    """Objeto de entregável conhecido; anáfora/verbo ('isso', 'enviar') não vale."""
+    return any(p in _OBJETOS or p.rstrip("s") in _OBJETOS for p in re.findall(r"\w+", obj_n))
+
+
 def _explica(frase_n: str, gatilho_n: str, outras: list) -> bool:
     """Outro item explica a frase cautelosa se a evidência dele cobre a maior
     parte dela, inclui o gatilho da ressalva e o objeto dele consta nela
-    (evidência trivial como 'se' não)."""
+    (evidência trivial como 'se' não). Só objeto de entregável conhecido conta: ressalva por anáfora ('Esquece isso.') nunca é isolada."""
     nucleo = frase_n.strip(" .!?;\n")
     return any(
         ev in frase_n and len(ev) * 10 >= len(nucleo) * 6 and obj in frase_n
-        and (not gatilho_n or gatilho_n in ev)
+        and (not gatilho_n or gatilho_n in ev) and _objeto_concreto(obj)
         for ev, obj in outras
     )
 
