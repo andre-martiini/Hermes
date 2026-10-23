@@ -61,6 +61,8 @@ Ajustes do primeiro dia de uso (22/10):
 - **Avisos técnicos filtrados:** `e2e_notification`, `gp2` e semelhantes deixam de chegar.
 - **WhatsApp com um botão só:** `schedule_whatsapp_message` sai do "ask"; o botão fica no `confirmar_acao`.
 - **Apagar evento de agenda:** `delete_event` passa de proibido para "ask" (botão).
+- **Planilhas pelo Telegram:** a tool `ler_planilha` converte xlsx, xls, ods ou csv da pasta de anexos do bot em CSV, aba por aba. Usa a SheetJS 0.20.3 do CDN oficial: a versão do npm (0.18.5) tem falhas conhecidas. Tem a mesma trava de pasta do `transcrever_audio`.
+- **Drive e e-mail:** pesquisa e leitura no Google Drive liberadas; criar, alterar, copiar ou compartilhar arquivo pedem aval, e apagar é proibido. O pulso busca e-mail lido também, porque o André lê no celular antes.
 - **Memória do Telegram entre reinícios:** a tool `conversa_telegram` relê as transcrições do perfil do agente (`~/.claude-gaspar/projects`) e devolve só a conversa do Telegram (mensagens do André, áudios transcritos e respostas do agente), de todas as sessões das últimas 24 h. O agente a chama ao iniciar. Não grava nada novo: usa o histórico que o Claude Code já mantém.
 - **Menos turnos:** `awaySummaryEnabled` e `promptSuggestionEnabled` desligados (aqui e em `~/.claude-gaspar/settings.json`).
 - **`CLAUDE.md`:** ciclo da sessão, agenda "Ações Gaspar", parâmetros que costumam errar e bom-dia uma vez por dia.

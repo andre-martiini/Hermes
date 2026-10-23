@@ -7,6 +7,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, extname, sep } from 'node:path'
 import { createSign, createHash } from 'node:crypto'
+import * as XLSX from 'xlsx'
 
 // Só a sessão do agente (iniciar.ps1) liga o canal: outra sessão aberta na pasta adiantaria o cursor e perderia eventos.
 if (process.env.GASPAR_EVENTOS !== '1') process.exit(0)
@@ -98,6 +99,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   description: 'Liga ou desliga a vigilancia de um grupo de WhatsApp: com ela, as mensagens do grupo chegam como eventos. Sem argumentos, so lista os vigiados. Persiste entre reinicios.',
   inputSchema: { type: 'object', properties: { chat_id: { type: 'string', description: 'termina em @g.us' },
     nome: { type: 'string' }, ativo: { type: 'boolean' } } } }, {
+  name: 'ler_planilha',
+  description: 'Le uma planilha (xlsx, xls, ods, csv) que o Andre mandou pelo Telegram e devolve cada aba como CSV. Passe o caminho devolvido por download_attachment.',
+  inputSchema: { type: 'object', properties: { caminho: { type: 'string' }, aba: { type: 'string', description: 'so esta aba (opcional)' },
+    max_linhas: { type: 'number', description: 'linhas por aba (padrao 200, max 2000)' } }, required: ['caminho'] } }, {
   name: 'transcrever_audio',
   description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
   inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
@@ -116,6 +121,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       saveCursor()
     }
     return { content: [{ type: 'text', text: JSON.stringify(cursor.grupos) }] }
+  }
+  if (req.params.name === 'ler_planilha') {
+    const a = req.params.arguments as any
+    return { content: [{ type: 'text', text: lerPlanilha(String(a.caminho), a.aba ? String(a.aba) : undefined, Number(a.max_linhas) || 200) }] }
   }
   if (req.params.name === 'transcrever_audio')
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
@@ -139,6 +148,24 @@ async function transcrever(caminho: string): Promise<string> {
     throw new Error(`so transcrevo audio baixado do Telegram (pasta ${INBOX})`)
   return transcreverBytes(readFileSync(p), extname(p))
 }
+// Planilha mandada pelo Telegram: mesma trava de pasta do áudio (só a inbox do bot).
+const PLANILHA = new Set(['.xlsx', '.xlsm', '.xls', '.ods', '.csv'])
+function lerPlanilha(caminho: string, aba: string | undefined, maxLinhas: number): string {
+  const p = resolve(caminho)
+  if (!process.env.TELEGRAM_STATE_DIR || !p.toLowerCase().startsWith(INBOX.toLowerCase() + sep) || !PLANILHA.has(extname(p).toLowerCase()))
+    throw new Error(`so leio planilha baixada do Telegram (pasta ${INBOX})`)
+  const wb = XLSX.read(readFileSync(p), { type: 'buffer', cellDates: true })
+  const limite = Math.min(Math.max(maxLinhas, 1), 2000)
+  const partes: string[] = []
+  for (const nome of wb.SheetNames) {
+    if (aba && nome !== aba) continue
+    const linhas = XLSX.utils.sheet_to_csv(wb.Sheets[nome], { blankrows: false, dateNF: 'dd/mm/yyyy' }).split('\n')
+    partes.push(`=== aba "${nome}" (${linhas.length} linhas${linhas.length > limite ? `, mostrando ${limite}` : ''})\n` + linhas.slice(0, limite).join('\n'))
+  }
+  const texto = partes.join('\n\n') || `aba "${aba}" não existe; abas: ${wb.SheetNames.join(', ')}`
+  return texto.length > 60_000 ? texto.slice(0, 60_000) + '\n[... cortado em 60 mil caracteres; use aba ou max_linhas]' : texto
+}
+
 async function transcreverBytes(bytes: Uint8Array, extensao: string): Promise<string> {
   const r = await fetch(`${FS}/system/api_keys`, { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
   if (!r.ok) throw new Error(`api_keys ${r.status}`)
