@@ -448,6 +448,12 @@ def _processar_promessa(db, mensagem: dict) -> None:
 
     decisao = decidir_acao_mensagem_from_me(mensagem, promessa_atual, horas)
 
+    try:  # sombra do avaliador de cumprimento (P07): só mede, nunca altera o fluxo
+        import cumprimento_compromissos_sombra
+        cumprimento_compromissos_sombra.registrar(db, mensagem, promessa_atual, decisao["acao"])
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha na sombra de cumprimento: {exc}")
+
     if decisao["acao"] == "criar":
         nova = decisao["promessa"]
         doc_id = _promessa_doc_id(nova)

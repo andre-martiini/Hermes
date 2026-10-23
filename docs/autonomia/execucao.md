@@ -571,32 +571,6 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 ---
 
 ```yaml
-pacote: "P07 sub-entrega 8/N -- passo 2 (parte pura, sombra): functions/autonomy/extracao_estruturada.py. validar_extracao(mensagem, saida, hoje) valida a saída já decodificada de um modelo de extração ({compromissos:[{classe,objeto,evidencia}]}, máx. 5) contra a mensagem: evidência literal (normalizada) e com >=2 caracteres visíveis (NFC, sem preenchedores invisíveis), classe conhecida, duplicatas fundidas. O modelo nunca afrouxa a seleção barata: base cancelamento/vaga/pergunta prevalece com incerta=True; mesma classe herda base.incerta; promessa sobre base incerta vira intencao_vaga; qualquer outra divergência é incerta. comparar_sombra(base, extraidos) mede concordância (promessa firme modelo x base) para métricas em sombra. Só ValueError. Sem I/O, sem chamada de modelo e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-23T11:00:00Z"
-fim: "2026-10-23T12:30:00Z"
-decisoes:
-  - id: p07-sub8-triagem
-    motivo: "Nenhuma PR aberta no início do disparo; branches claude/* restantes são antigas/mescladas, nenhuma execução paralela."
-  - id: p07-sub8-arquivo-execucao
-    motivo: "execucao.md arquivado (bloco P07 sub 4 -> execucao-archive-p07sub4.md)."
-  - id: p07-sub8-limitacoes
-    motivo: "Aceitas por ser módulo puro em sombra, sem wiring: modelo que fabrica item consistente com a ressalva; ressalvas que o classificador barato não reconhece; entregável fora do vocabulário de cumprimento._OBJETOS; sobrecautela (itens independentes ficam incertos quando a dúvida não é identificável). Reabrir ao ligar o wiring."
-  - id: p07-sub8-marcas-combinantes
-    motivo: "Objeto/evidência só com marcas combinantes são recusados (conservador); aceito."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4556 OK (P07 sub 7); com a versão intermediária 4565 OK (284s); test_autonomy_extracao_estruturada 26 OK (novo); DEPOIS 4582 OK (280s, head final)."
-revisao_adversarial:
-  - "Rodada 1: evidência/objeto só invisível, comparar_sombra com entradas inválidas e iterador. Rodada 2: preenchedores Hangul, cautela só em promessa, base não validada. Rodada 3: incerteza da base descartada, preenchedor U+3164. Rodada 4: contagem de jamos Hangul (NFC). Rodada 5: incerteza herdada só em classes de cautela. Rodada 6: divergência da base perdia dúvida. Todos corrigidos. Rodada 7 (fuzz diferencial de 30 mil mensagens contra oráculo): não achou nada. Depois da PR, Codex P2 (base global contaminava cláusulas independentes) -> base por sentença; rodadas 8-17 sobre esse isolamento acharam, cada uma, ressalvas vizinhas órfãs, item espúrio de evidência curta, dedup dependente de ordem, anáfora, flexões/plural -ões, e-mail com hífen e abreviações (doc/mail), todas corrigidas (isolamento só com ressalva explicada por outro item de entregável conhecido, sem dúvida residual). Rodada 17 achou só abreviação doc (corrigida); não houve rodada final limpa após essa correção."
-pendencias:
-  - "P07: wiring em atencao_whatsapp somente com flag/sombra (chamar o modelo de extração, gravar comparar_sombra); suíte F02 com limiar de precisão da seção 11; revisão final do pacote para pacote_concluido: P07."
-```
-
-
----
-
-```yaml
 pacote: "P07 sub-entrega 9/N -- passo 2 (wiring em sombra): functions/extracao_compromissos_sombra.py, chamado no fim de on_whatsapp_message_atencao (isolado em try/except, depois de resposta_esperada). Atrás de system/settings.atencao.extracao_estruturada.enabled (padrão DESLIGADO = reversão). Só mensagem from_me de chat individual, fora do bot, em que a seleção barata (classificar_mensagem) achou candidato; chama o modelo leve, valida com validar_extracao e grava em extracao_compromissos_sombra apenas ids, classes e concordância (comparar_sombra) -- nunca o texto. Não altera promessas_abertas, fila de atenção nem A06. Custo contido por max_por_dia (padrão 200; contador incrementado antes de ler, dia em America/Sao_Paulo) e dedupe por doc já existente (reentrega do gatilho)."
 estado: validado
 inicio: "2026-10-23T13:45:00Z"
@@ -638,4 +612,27 @@ revisao_adversarial:
   - "Rodada 1: rótulo cumpre sem validação de tipo, limiar sem faixa, sem amostra mínima, entradas inválidas inconsistentes. Rodada 2: subclasse forjando cumpre, limiar abaixo de 98%, corpus só de positivos aprovando, exceções não-ValueError e campos sem validação. Todos corrigidos. Rodada 3: não achou nada."
 pendencias:
   - "P07: wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; medir precisão com dados reais da sombra antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 11/N -- wiring em sombra do avaliador de cumprimento: functions/cumprimento_compromissos_sombra.py, chamado em _processar_promessa (atencao_whatsapp.py) logo após decidir_acao_mensagem_from_me, isolado em try/except. Atrás de system/settings.atencao.cumprimento_sombra.enabled (padrão DESLIGADO, exige True booleano = reversão). Para toda mensagem from_me de chat individual com promessa aberta/vencida (decisão antiga cumprir ou nenhuma), compara o fechamento do A06 (comprimento) com autonomy.cumprimento.avaliar_cumprimento e grava em cumprimento_compromissos_sombra só ids, estado novo, incerta e divergencia (ambos_fecham | so_antigo_fecha | so_novo_fecha | ambos_mantem) -- nunca texto nem evidência. Contadores diários em cumprimento_compromissos_sombra_contadores. Sem chamada de modelo. Não altera promessas, fila de atenção nem A06."
+estado: validado
+inicio: "2026-10-23T19:45:00Z"
+fim: "2026-10-23T20:20:00Z"
+decisoes:
+  - id: p07-sub11-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 17h BRT; nenhuma execução paralela da linha de autonomia."
+  - id: p07-sub11-arquivo-execucao
+    motivo: "execucao.md arquivado (bloco P07 sub 8 -> execucao-archive-p07sub8.md)."
+  - id: p07-sub11-limitacoes
+    motivo: "Aceitas por ser sombra desligada por padrão: dedupe check-then-set não atômico (entregas simultâneas podem contar em dobro); contador gravado depois do documento (falha do contador subconta a amostra); ids com barra fariam o Firestore recusar o path (ids do WhatsApp não têm barra). Reabrir antes de ligar a flag."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4600 OK (P07 sub 10); test_cumprimento_compromissos_sombra 7 OK (novo); DEPOIS 4607 OK (275s, head final)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): não achou defeito que altere o fluxo antigo ou grave texto; só os três menores acima, aceitos. Mudança é módulo novo com I/O simples atrás de flag, sem correção posterior a revisar."
+pendencias:
+  - "P07: wiring de prazo/follow-up (revalidar_followup + atencao_compromisso) na fila de atenção somente com flag/sombra; medir precisão com dados reais da sombra antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
 ```
