@@ -58,14 +58,26 @@ def _texto(valor, campo: str) -> str:
     return valor
 
 
-def _base_do_item(mensagem: str, evidencia_n: str, hoje, base_global: Classificacao) -> Classificacao:
-    """Seleção barata na sentença que contém a evidência; sem sentença única
-    que a contenha (evidência atravessa sentenças), vale a mensagem inteira."""
+def _cautelosa(c: Classificacao) -> bool:
+    return c.classe in _CAUTELA or c.incerta
+
+
+def _base_do_item(mensagem: str, evidencia_n: str, outras_n: list, hoje, base_global: Classificacao) -> Classificacao:
+    """Seleção barata na sentença que contém a evidência. A sentença só isola
+    o item quando toda frase cautelosa vizinha é evidência de OUTRO compromisso
+    extraído; ressalva órfã ("E. Mas só se der.") mantém a base da mensagem
+    inteira. Evidência em zero ou várias sentenças: mensagem inteira."""
     sentencas = [t for t in re.split(r"(?<=[.!?;\n])\s+", mensagem) if t.strip()]
     achadas = [t for t in sentencas if evidencia_n in _normalizar(t)]
-    if len(achadas) == 1:
-        return classificar_mensagem(achadas[0], hoje)
-    return base_global
+    if len(achadas) != 1:
+        return base_global
+    propria = achadas[0]
+    for t in sentencas:
+        if t is propria or not _cautelosa(classificar_mensagem(t, hoje)):
+            continue
+        if not any(o in _normalizar(t) for o in outras_n):
+            return base_global
+    return classificar_mensagem(propria, hoje)
 
 
 def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, ...]:
@@ -80,8 +92,12 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
     base_global = classificar_mensagem(mensagem, hoje)
     texto_n = _normalizar(mensagem)
     vistos = set()
+    evidencias_n = [
+        _normalizar(it.get("evidencia")) if type(it) is dict and type(it.get("evidencia")) is str else ""
+        for it in itens
+    ]
     resultado = []
-    for item in itens:
+    for pos, item in enumerate(itens):
         if type(item) is not dict:
             raise ValueError("compromisso malformado")
         classe = item.get("classe")
@@ -92,7 +108,8 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
-        base = _base_do_item(mensagem, _normalizar(evidencia), hoje, base_global)
+        outras_n = [e for n, e in enumerate(evidencias_n) if n != pos and e]
+        base = _base_do_item(mensagem, _normalizar(evidencia), outras_n, hoje, base_global)
         if classe == base.classe:
             incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:

@@ -96,6 +96,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         self.assertEqual([(e.classe, e.objeto) for e in r], [("cancelamento", "relatorio"), ("promessa", "planilha")])
         self.assertFalse(r[1].incerta)
 
+    def test_ressalva_orfa_na_frase_vizinha_mantem_cautela(self):
+        for m in ("Vou te enviar o relatório amanhã. Mas só se der.", "Vou te enviar o relatório amanhã. Cancela, desisti."):
+            r = ex.validar_extracao(m, _s(_i("promessa", "relatorio", "Vou te enviar o relatório amanhã")))
+            self.assertTrue(r[0].incerta, m)
+            self.assertNotEqual((r[0].classe, r[0].incerta), (PROMESSA, False))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
