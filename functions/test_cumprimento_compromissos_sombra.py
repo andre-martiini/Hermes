@@ -61,8 +61,33 @@ class CumprimentoSombraTest(unittest.TestCase):
         db.dados[("system", "settings")] = {"atencao": {"cumprimento_sombra": {"enabled": "false"}}}
         self.assertIsNone(ccs.registrar(db, _msg(), PROMESSA, "nenhuma", AGORA))
 
-    def test_midia_sozinha_antigo_fecha_novo_nao(self):
+    def test_midia_com_nome_que_nao_confere_antigo_fecha_novo_nao(self):
         r = ccs.registrar(_db(), _msg(content="", media={"filename": "foto.jpg"}), PROMESSA, "cumprir", AGORA)
+        self.assertEqual(r["divergencia"], "so_antigo_fecha")
+        self.assertTrue(r["avaliavel"])
+
+    def test_midia_sem_nome_nao_avaliavel(self):
+        r = ccs.registrar(_db(), _msg(content="Segue a planilha", media={"mimeType": "image/jpeg"}), PROMESSA, "cumprir", AGORA)
+        self.assertEqual(r["divergencia"], "nao_avaliavel")
+        self.assertEqual(r["motivo_nao_avaliavel"], "midia_sem_nome")
+
+    def test_promessa_a06_sem_objeto_nao_avaliavel(self):
+        promessa = {"_doc_id": "c1_m1", "texto": "te retorno amanhã", "estado": "aberta"}
+        r = ccs.registrar(_db(), _msg(content="Segue a planilha"), promessa, "cumprir", AGORA)
+        self.assertEqual(r["divergencia"], "nao_avaliavel")
+        self.assertEqual(r["motivo_nao_avaliavel"], "promessa_sem_objeto")
+        self.assertFalse(r["avaliavel"])
+
+
+class VeredictoFirmeContinuaMedidoTest(unittest.TestCase):
+    def test_promessa_sem_objeto_com_nao_cumpre_firme_e_medida(self):
+        promessa = {"_doc_id": "c1_m1", "texto": "te retorno amanhã", "estado": "aberta"}
+        r = ccs.registrar(_db(), _msg(content="bom dia, tudo bem?"), promessa, "nenhuma", AGORA)
+        self.assertNotEqual(r["divergencia"], "nao_avaliavel")
+
+    def test_midia_sem_texto_com_nome_correto_continua_medida(self):
+        promessa = {"_doc_id": "c1_m1", "texto": "vou te enviar o relatório", "estado": "aberta"}
+        r = ccs.registrar(_db(), _msg(content="", media={"filename": "relatorio.pdf"}), promessa, "cumprir", AGORA)
         self.assertEqual(r["divergencia"], "so_antigo_fecha")
 
 

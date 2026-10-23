@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from autonomy.cumprimento import CUMPRIDO, avaliar_cumprimento
+from autonomy.commitments import _normalizar
+from autonomy.cumprimento import CUMPRIDO, INCERTO, _objetos, avaliar_cumprimento
 
 SOMBRA_COLLECTION = "cumprimento_compromissos_sombra"
 CONTADORES_COLLECTION = "cumprimento_compromissos_sombra_contadores"
@@ -37,6 +38,18 @@ def classificar(antigo_fecha: bool, novo_fecha: bool) -> str:
     return "ambos_mantem"
 
 
+def motivo_nao_avaliavel(promessa_texto, tem_midia: bool, nome: str) -> str | None:
+    """O avaliador só fecha com objeto documental prometido e, havendo mídia,
+    nome de anexo conferível. Promessa A06 típica ("te retorno amanhã") e mídia
+    do WhatsApp sem `filename` não têm isso: marcam-se à parte para o veredito
+    do avaliador não ser lido como discordância medida."""
+    if not _objetos(_normalizar(promessa_texto)):
+        return "promessa_sem_objeto"
+    if tem_midia and not nome:
+        return "midia_sem_nome"
+    return None
+
+
 def registrar(db, mensagem: dict, promessa: dict | None, acao_antiga: str, agora: datetime | None = None) -> dict | None:
     """Chamado após a decisão antiga. Devolve o resumo gravado ou None."""
     if promessa is None or acao_antiga not in ("cumprir", "nenhuma"):
@@ -56,6 +69,9 @@ def registrar(db, mensagem: dict, promessa: dict | None, acao_antiga: str, agora
         promessa.get("texto"), mensagem.get("content"), bool(media),
         nome if isinstance(nome, str) else "",
     )
+    motivo = motivo_nao_avaliavel(promessa.get("texto"), bool(media), nome if isinstance(nome, str) else "")
+    if r.estado != INCERTO or r.evidencia not in ("promessa_sem_objeto", "anexo_nao_confere"):
+        motivo = None  # veredito firme (ex.: não cumpre) ou incerteza real do conteúdo continua medido
     novo_fecha = r.estado == CUMPRIDO and not r.incerta
     resumo = {
         "promessa_doc_id": doc_promessa,
@@ -66,7 +82,9 @@ def registrar(db, mensagem: dict, promessa: dict | None, acao_antiga: str, agora
         "antigo_fecha": acao_antiga == "cumprir",
         "novo_estado": r.estado,
         "novo_incerta": r.incerta,
-        "divergencia": classificar(acao_antiga == "cumprir", novo_fecha),
+        "avaliavel": motivo is None,
+        "motivo_nao_avaliavel": motivo,
+        "divergencia": "nao_avaliavel" if motivo else classificar(acao_antiga == "cumprir", novo_fecha),
     }
     ref.set(resumo)
     from firebase_admin import firestore
