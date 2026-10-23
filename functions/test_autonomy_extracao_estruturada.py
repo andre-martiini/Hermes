@@ -37,6 +37,21 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ex.validar_extracao(m, _s(*[_i("promessa", f"o{n}", "Envio") for n in range(6)]))
 
+    def test_evidencia_so_invisivel_e_promessa_sem_base(self):
+        for ev in ("\u200b", "\u0301"):
+            with self.assertRaises(ValueError):
+                ex.validar_extracao("Bom dia", _s(_i("promessa", "x", ev)))
+        r = ex.validar_extracao("ok obrigado", _s(_i("promessa", "x", "ok")))
+        self.assertTrue(r[0].incerta)
+
+    def test_sombra_entradas_invalidas(self):
+        b = classificar_mensagem("Te envio a planilha amanhã")
+        for ruim in (None, 5, "abc", iter([]), [{"classe": "promessa"}],
+                     [ex.CompromissoExtraido("promessa", "a", "b", 0)],
+                     [ex.CompromissoExtraido(1, "a", "b", False)]):
+            with self.assertRaises(ValueError):
+                ex.comparar_sombra(b, ruim)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

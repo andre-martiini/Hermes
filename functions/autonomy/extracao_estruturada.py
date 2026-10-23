@@ -44,7 +44,7 @@ def _texto(valor, campo: str) -> str:
     if type(valor) is not str:
         raise ValueError(f"{campo} deve ser texto")
     valor = valor.strip()
-    if not valor or len(valor) > _MAX_CAMPO:
+    if not valor or len(valor) > _MAX_CAMPO or not _normalizar(valor):
         raise ValueError(f"{campo} vazio ou longo demais")
     return valor
 
@@ -75,6 +75,8 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         incerta = False
         if classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):
             classe, incerta = (base.classe if base.classe in _CAUTELA else INTENCAO_VAGA), True
+        elif classe == PROMESSA and base.classe != PROMESSA:
+            incerta = True  # a seleção barata não viu promessa: modelo sozinho não firma
         chave = (classe, _normalizar(objeto))
         if chave in vistos:
             continue
@@ -87,6 +89,17 @@ def comparar_sombra(base: Classificacao, extraidos) -> dict:
     """Concordância entre seleção barata e extração (para métricas em sombra)."""
     if not isinstance(base, Classificacao):
         raise ValueError("base inválida")
+    if not isinstance(extraidos, (tuple, list)):
+        raise ValueError("extraidos deve ser tupla ou lista")
+    extraidos = tuple(extraidos)
+    for e in extraidos:
+        if (
+            type(e) is not CompromissoExtraido
+            or type(e.classe) is not str
+            or e.classe not in CLASSES
+            or type(e.incerta) is not bool
+        ):
+            raise ValueError("extraído inválido")
     classes = {e.classe for e in extraidos}
     firme_modelo = any(e.classe == PROMESSA and not e.incerta for e in extraidos)
     firme_base = base.classe == PROMESSA and not base.incerta
