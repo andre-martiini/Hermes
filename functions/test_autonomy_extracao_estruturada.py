@@ -137,6 +137,17 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                                       _i("promessa", "planilha", "Te envio a planilha amanhã")))
         self.assertEqual((r[1].classe, r[1].incerta), ("promessa", False))
 
+    def test_rodada12_vizinha_nao_libera_mesmo_objeto_nem_duvida_residual(self):
+        casos = (
+            ("Te envio a planilha amanhã. Não vou enviar a planilha.", "Te envio a planilha amanhã", "planilha",
+             ("cancelamento", "planilha", "Não vou enviar a planilha")),
+            ("Te envio a planilha amanhã. Preciso do arquivo. Te envio o relatório se der.", "Te envio a planilha amanhã", "planilha",
+             ("promessa", "relatório", "Te envio o relatório se der")),
+        )
+        for m, ev, obj, outro in casos:
+            r = ex.validar_extracao(m, _s(_i("promessa", obj, ev), _i(outro[0], outro[1], outro[2])))
+            self.assertTrue(r[0].incerta, m)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

@@ -75,26 +75,28 @@ def _explica(frase_n: str, gatilho_n: str, outras: list) -> bool:
     )
 
 
-def _base_do_item(mensagem: str, evidencia_n: str, outras: list, hoje, base_global: Classificacao) -> Classificacao:
-    """Seleção barata na sentença que contém a evidência. A sentença só isola
-    o item quando toda frase cautelosa vizinha é evidência de OUTRO compromisso
-    extraído; ressalva órfã ("E. Mas só se der.") mantém a base da mensagem
-    inteira. Evidência em zero ou várias sentenças: mensagem inteira."""
+def _base_do_item(mensagem: str, evidencia_n: str, objeto_n: str, outras: list, hoje, base_global: Classificacao) -> Classificacao:
+    """Seleção barata na sentença que contém a evidência. Só isola o item
+    quando toda frase cautelosa vizinha é explicada por OUTRO item extraído, o
+    objeto do próprio item não consta nela, e o restante da mensagem (sem as
+    frases explicadas) deixa de ser cautelosa. Ressalva órfã ("E. Mas só se
+    der."), evidência em zero/várias sentenças: base da mensagem inteira."""
     sentencas = [t for t in re.split(r"(?<=[.!?;\n])\s+", mensagem) if t.strip()]
     achadas = [t for t in sentencas if evidencia_n in _normalizar(t)]
     if len(achadas) != 1:
         return base_global
     propria = achadas[0]
-    vizinhas = 0
+    resto = []
     for t in sentencas:
-        if t is propria:
-            continue
-        c = classificar_mensagem(t, hoje)
-        vizinhas += _cautelosa(c)
-        if _cautelosa(c) and not _explica(_normalizar(t), _normalizar(c.evidencia).strip(" .!?;\n"), outras):
-            return base_global
-    if _cautelosa(base_global) and not vizinhas:
-        return base_global  # a dúvida da mensagem não está numa frase vizinha identificável
+        c = classificar_mensagem(t, hoje) if t is not propria else None
+        if c is not None and _cautelosa(c):
+            frase_n = _normalizar(t)
+            if objeto_n in frase_n or not _explica(frase_n, _normalizar(c.evidencia).strip(" .!?;\n"), outras):
+                return base_global
+            continue  # frase cautelosa explicada por outro item: sai da conta
+        resto.append(t)
+    if _cautelosa(classificar_mensagem(" ".join(resto), hoje)):
+        return base_global  # a dúvida da mensagem não está só nas frases explicadas
     return classificar_mensagem(propria, hoje)
 
 
@@ -129,7 +131,7 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
             raise ValueError("evidência não consta na mensagem")
         incerta = False
         outras = [par for n, par in enumerate(pares_n) if n != pos and par[0] and par[1]]
-        base = _base_do_item(mensagem, _normalizar(evidencia), outras, hoje, base_global)
+        base = _base_do_item(mensagem, _normalizar(evidencia), _normalizar(objeto), outras, hoje, base_global)
         if classe == base.classe:
             incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:
