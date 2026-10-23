@@ -566,24 +566,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 7/N -- passo 5 (parte pura): functions/autonomy/correlacao_entregaveis.py. correlacionar(promessa, evidencias, ids_compromisso) liga um compromisso a evidências de entrega em WhatsApp, Gmail, tarefa ou documento: ID em comum = vínculo firme ('id', incerta=False); só objeto prometido (planilha, relatório...) no nome da evidência = vínculo 'semantico', sempre incerta=True; sem nenhum dos dois, nada. vinculo_firme(vinculos) só conta vínculo por ID. Nunca encerra compromisso sozinha. Só ValueError para entradas inválidas (tipos exatos, canal, ref imprimível sem espaço nas pontas, ids limitados, marcas combinantes). Sem I/O e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-22T19:45:00Z"
-fim: "2026-10-22T20:20:00Z"
-decisoes:
-  - id: p07-sub7-semantico-sempre-incerto
-    motivo: "Casar só por objeto prometido é heurística; precisão sobre revocação -- consumidor mantém o compromisso pendente."
-  - id: p07-sub7-triagem
-    motivo: "Nenhuma PR aberta no início do disparo de 17h BRT; nenhuma execução paralela da linha de autonomia."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4552 OK (conforme P07 sub 6); test_autonomy_correlacao_entregaveis 4 OK (novo); DEPOIS 4556 OK (226s, head final)."
-revisao_adversarial:
-  - "Rodada 1: docstring de vinculo_firme incoerente, vinculo_firme com entrada ruim levantava TypeError/AttributeError, canal subclasse de str com __eq__ hostil, ref com caractere não imprimível/espaços. Corrigido. Rodada 2: não achou nada. Codex + rodada 3: vinculo_firme revalida campos do Vinculo; __eq__ hostil e atributo removido viram ValueError; corrigido. Rodada 4: não achou nada. Observação: objetos genéricos como "arquivo" geram ruído semântico, sempre incerto."
-pendencias:
-  - "P07 passo 2 (extração estruturada, sombra); wiring em atencao_whatsapp somente com flag/sombra."
-```
+# (Em 2026-10-23 o bloco "P07 sub-entrega 7/N" foi movido para docs/autonomia/execucao-archive-p07sub7.md, sem alteração de conteúdo.)
 
 ---
 
@@ -632,4 +615,27 @@ revisao_adversarial:
   - "Rodada 1: contador lido-depois-incrementado (limite furável), reentrega duplicando chamada/métrica, bloco antes de resposta_esperada, dia UTC no contador. Corrigido (incremento antes de ler, dedupe por documento, bloco por último, fuso local). Rodada 2: prazos relativos usavam data UTC (dia errado entre 21h e 24h) -> corrigido com hoje local; dedupe concorrente não atômico aceito (ver limitações). Não houve rodada 3 sobre a correção do fuso (troca de uma linha, coberta pela suíte). Codex (P2) na PR: mensagem antiga do bot restaurada por backfill escapava da marca de 6h -> só mensagens com timestamp entre -5min e 1h são avaliadas (IDADE_MAX); teste novo."
 pendencias:
   - "P07: suíte F02 com limiar de precisão da seção 11 (medir com dados da sombra); wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; revisão final do pacote para pacote_concluido: P07."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 10/N -- suíte de avaliação F02: functions/autonomy/avaliacao_f02.py. medir_precisao_cumprimento(casos) roda avaliar_cumprimento sobre corpus sintético (CASOS_F02, 16 casos: 4 cumprimentos reais, 12 negativos -- mensagem longa sobre almoço, negação, objeto diferente/incompleto, mídia sem nome conferível, anexo sem mídia, hedge, futuro, nova promessa, cancelamento, parcial) e mede a precisão de fechamento da seção 11 (corretos/fechados automaticamente; limiar 98%). aprovado exige >=3 fechamentos, ao menos 1 caso negativo e precisão >= limiar; limiar só aceita 0.98..1; casos de tipo exato, senão ValueError. Cobre os aceites F02: arquivo por e-mail encerra promessa do WhatsApp (vínculo por ID), só semântico não fecha. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
+estado: validado
+inicio: "2026-10-23T16:45:00Z"
+fim: "2026-10-23T17:50:00Z"
+decisoes:
+  - id: p07-sub10-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 17h BRT; nenhuma execução paralela da linha de autonomia."
+  - id: p07-sub10-arquivo-execucao
+    motivo: "execucao.md arquivado (bloco P07 sub 7 -> execucao-archive-p07sub7.md)."
+  - id: p07-sub10-corpus-pequeno
+    motivo: "Corpus sintético de 16 casos é piso de regressão, não a medição de produção: a precisão real vem dos dados da sombra (sub 9). Corpus não é deduplicado (exige má-fé do chamador)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4589 OK (P07 sub 9); test_autonomy_avaliacao_f02 11 OK (novo); DEPOIS 4600 OK (head final)."
+revisao_adversarial:
+  - "Rodada 1: rótulo cumpre sem validação de tipo, limiar sem faixa, sem amostra mínima, entradas inválidas inconsistentes. Rodada 2: subclasse forjando cumpre, limiar abaixo de 98%, corpus só de positivos aprovando, exceções não-ValueError e campos sem validação. Todos corrigidos. Rodada 3: não achou nada."
+pendencias:
+  - "P07: wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; medir precisão com dados reais da sombra antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
 ```
