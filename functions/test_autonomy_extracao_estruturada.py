@@ -63,6 +63,16 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ex.comparar_sombra(ruim, ())
 
+    def test_rodada3_preenchedor_e_incerteza_da_base(self):
+        with self.assertRaises(ValueError):
+            ex.validar_extracao("\u3164\u3164 te envio o relatorio", _s(_i("promessa", "\u3164\u3164", "\u3164\u3164")))
+        with self.assertRaises(ValueError):
+            ex.validar_extracao("te envio o relatorio", _s(_i("promessa", "\u00b2\u00b2", "re")))
+        m = "Quem sabe te envio o relatorio"
+        base = classificar_mensagem(m)
+        r = ex.validar_extracao(m, _s(_i(base.classe, "relatorio", "te envio")))
+        self.assertEqual((r[0].classe, r[0].incerta), (base.classe, base.incerta))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))

@@ -40,11 +40,18 @@ class CompromissoExtraido:
     incerta: bool
 
 
+_PREENCHEDORES = frozenset("\u115f\u1160\u3164\uffa0")
+
+
+def _visivel(c: str) -> bool:
+    return (c.isalpha() or c.isdecimal()) and c not in _PREENCHEDORES
+
+
 def _texto(valor, campo: str) -> str:
     if type(valor) is not str:
         raise ValueError(f"{campo} deve ser texto")
     valor = valor.strip()
-    if not valor or len(valor) > _MAX_CAMPO or sum(c.isalnum() for c in _normalizar(valor)) < 2:
+    if not valor or len(valor) > _MAX_CAMPO or sum(_visivel(c) for c in _normalizar(valor)) < 2:
         raise ValueError(f"{campo} vazio ou longo demais")
     return valor
 
@@ -73,7 +80,9 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
-        if base.classe in _CAUTELA and classe != base.classe:
+        if base.classe in _CAUTELA and classe == base.classe:
+            incerta = base.incerta
+        elif base.classe in _CAUTELA:
             classe, incerta = base.classe, True  # modelo não afrouxa cautela em nenhuma classe
         elif classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):
             classe, incerta = (base.classe if base.classe in _CAUTELA else INTENCAO_VAGA), True
