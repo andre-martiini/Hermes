@@ -14,6 +14,7 @@ Saída malformada vira só ValueError (quem consome cai na seleção barata).
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 from autonomy.commitments import (
@@ -51,7 +52,7 @@ def _texto(valor, campo: str) -> str:
     if type(valor) is not str:
         raise ValueError(f"{campo} deve ser texto")
     valor = valor.strip()
-    if not valor or len(valor) > _MAX_CAMPO or sum(_visivel(c) for c in _normalizar(valor)) < 2:
+    if not valor or len(valor) > _MAX_CAMPO or sum(_visivel(c) for c in unicodedata.normalize("NFC", _normalizar(valor))) < 2:
         raise ValueError(f"{campo} vazio ou longo demais")
     return valor
 

@@ -73,6 +73,10 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         r = ex.validar_extracao(m, _s(_i(base.classe, "relatorio", "te envio")))
         self.assertEqual((r[0].classe, r[0].incerta), (base.classe, base.incerta))
 
+    def test_hangul_uma_silaba_nao_conta_como_dois(self):
+        with self.assertRaises(ValueError):
+            ex.validar_extracao("te envio \uac00", _s(_i("promessa", "\uac01", "\uac00")))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
