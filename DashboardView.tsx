@@ -10,6 +10,7 @@ import {
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
 import { contarSubtarefas, estaFeita, estadoDaSubtarefa, ROTULO_ESTADO, textoDaSubtarefa } from './src/utils/subtarefas';
+import { isStandbyStatus } from './src/utils/helpers';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -928,6 +929,84 @@ const EmailLinkSuggestionsPanel: React.FC<{
 // Exportado -- também usado fora do Dashboard desktop, na visão mobile
 // (index.tsx renderiza este card acima da MobileShortcutsView), já que
 // abaixo do breakpoint `sm` o DashboardView inteiro não é montado.
+// Quadro compacto das ações em stand-by, abaixo de "Ações de hoje". Vem
+// fechado; o cabeçalho mostra só a contagem.
+const AcoesStandbyCard: React.FC<{
+    tarefas: Tarefa[];
+    isDark?: boolean;
+    onOpenTask?: (taskId: string) => void;
+}> = ({ tarefas, isDark = false, onOpenTask }) => {
+    const [aberto, setAberto] = useState(false);
+    const standby = useMemo(() => tarefas
+        .filter(t => isStandbyStatus(t.status))
+        .sort((a, b) => String(a.titulo || '').localeCompare(String(b.titulo || ''), 'pt-BR')),
+    [tarefas]);
+
+    if (standby.length === 0) return null;
+
+    return (
+        <div
+            style={{
+                boxShadow: isDark
+                    ? '0 6px 12px rgba(0, 0, 0, 0.4), 0 4px 4px rgba(0, 0, 0, 0.2)'
+                    : '0 6px 12px rgba(21, 28, 39, 0.05), 0 4px 4px rgba(21, 28, 39, 0.03)',
+            }}
+            className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}
+        >
+            <button
+                type="button"
+                onClick={() => setAberto(v => !v)}
+                aria-expanded={aberto}
+                className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left"
+            >
+                <span className={`text-xs font-bold uppercase tracking-[0.05em] ${isDark ? 'text-[#ebf1ff]' : 'text-[#151c27]'}`}>
+                    Ações em stand-by
+                    <span className={`ml-2 text-[11px] font-bold normal-case tracking-normal ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                        {standby.length}
+                    </span>
+                </span>
+                <svg
+                    width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+                    className="flex-shrink-0 transition-transform"
+                    style={{ transform: aberto ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                >
+                    <path d="m6 9 6 6 6-6" />
+                </svg>
+            </button>
+            {aberto && (
+                <div className="flex flex-col gap-2 px-5 pb-4">
+                    {standby.map(t => {
+                        const plano = Array.isArray(t.plano_acao) ? t.plano_acao : [];
+                        const [feitas, totais] = contarSubtarefas(plano);
+                        const data = String(t.data_limite || '').slice(0, 10);
+                        return (
+                            <button
+                                key={t.id}
+                                type="button"
+                                title={t.titulo}
+                                onClick={() => onOpenTask?.(t.id)}
+                                disabled={!onOpenTask}
+                                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border text-left transition-colors ${
+                                    isDark ? 'bg-[#1e293b] border-[#2a313d] hover:border-[#9333ea]/40' : 'bg-[#f8f9fc] border-[#eef0f4] hover:border-[#9333ea]/40'
+                                }`}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                                    <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
+                                </svg>
+                                <span className={`flex-1 min-w-0 text-[13px] font-semibold truncate ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{t.titulo}</span>
+                                <span className={`text-[11px] font-bold tabular-nums whitespace-nowrap ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                    {totais > 0 ? `${feitas}/${totais}` : ''}{totais > 0 && data ? ' · ' : ''}{data}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
     const [resumo, setResumo] = useState<ResumoMatinal | null>(null);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -1571,6 +1650,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             <EmailLinkSuggestionsPanel isDark={isDark} onOpenTask={onOpenTask} onAskCopiloto={onAskCopiloto} />
 
             <AcoesDoDiaCard isDark={isDark} />
+
+            <AcoesStandbyCard tarefas={tarefas} isDark={isDark} onOpenTask={onOpenTask} />
 
             <div className="flex flex-col gap-6 w-full">
 
