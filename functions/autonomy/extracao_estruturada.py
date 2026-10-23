@@ -85,10 +85,10 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
             incerta = base.incerta  # modelo concorda com a base: herda a dúvida dela
         elif base.classe in _CAUTELA:
             classe, incerta = base.classe, True  # modelo não afrouxa cautela em nenhuma classe
-        elif classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):
-            classe, incerta = (base.classe if base.classe in _CAUTELA else INTENCAO_VAGA), True
-        elif classe == PROMESSA and base.classe != PROMESSA:
-            incerta = True  # a seleção barata não viu promessa: modelo sozinho não firma
+        elif classe == PROMESSA and base.incerta:
+            classe, incerta = INTENCAO_VAGA, True
+        else:
+            incerta = True  # divergiu da seleção barata: modelo sozinho não firma nem apaga dúvida
         chave = (classe, _normalizar(objeto))
         if chave in vistos:
             continue

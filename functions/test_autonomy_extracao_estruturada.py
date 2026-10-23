@@ -83,6 +83,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         r = ex.validar_extracao(m, _s(_i(base.classe, "relatorio", "primeira parte")))
         self.assertEqual((r[0].classe, r[0].incerta), (base.classe, base.incerta))
 
+    def test_divergencia_da_base_e_sempre_incerta(self):
+        for m, cls, ev in (("Te envio o relatório amanhã ontem", "entrega_parcial", "te envio"),
+                           ("Segue a primeira parte, o resto te mando amanhã", "nao_relacionada", "primeira parte")):
+            r = ex.validar_extracao(m, _s(_i(cls, "relatorio", ev)))
+            self.assertTrue(r[0].incerta, m)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
