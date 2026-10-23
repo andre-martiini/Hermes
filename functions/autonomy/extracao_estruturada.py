@@ -79,6 +79,7 @@ def _singulares(p: str) -> set:
 
 
 def _termos(texto_n: str) -> set:
+    texto_n = re.sub(r"\be[\W_]*mail", "email", texto_n)  # e-mail / e mail
     return {t for p in re.findall(r"\w+", texto_n) for t in _singulares(p) & set(_OBJETOS)}
 
 

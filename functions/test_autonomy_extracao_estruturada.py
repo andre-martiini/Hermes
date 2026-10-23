@@ -170,6 +170,12 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                                       _i("cancelamento", "planilha", "Não vou enviar a planilha nem as versões")))
         self.assertTrue(r[0].incerta)
 
+    def test_rodada16_email_com_hifen(self):
+        m = "Vou te enviar o email amanhã. Não vou mais enviar o e-mail e o contrato."
+        r = ex.validar_extracao(m, _s(_i("promessa", "email", "Vou te enviar o email amanhã"),
+                                      _i("cancelamento", "contrato", "Não vou mais enviar o e-mail e o contrato")))
+        self.assertTrue(r[0].incerta)
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
