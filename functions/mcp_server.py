@@ -159,6 +159,10 @@ _access_cache: dict[str, object] | None = None
 # notebook para a lixeira, e a volta e manual, fora do Gaspar. A previa mostra
 # o titulo; as outras nove do Live Ideas ficam fora.
 #
+# Rascunho de e-mail (23/10/2026, decisao explicita do dono): `criar_rascunho_email`
+# SAI do piso. O rascunho fica na caixa de rascunhos e nao chega a ninguem; o
+# efeito em terceiro e o envio, que esta tool nunca faz.
+#
 # ESTE CONJUNTO NAO CRESCE POR HABITO (condicao do dono, 02/09/2026). Uma
 # candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
 # e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o
