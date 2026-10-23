@@ -69,6 +69,10 @@ def _objeto_concreto(obj_n: str) -> bool:
     return any(p in _OBJETOS or p.rstrip("s") in _OBJETOS for p in re.findall(r"\w+", obj_n))
 
 
+def _termos(texto_n: str) -> set:
+    return {p.rstrip("s") if p.rstrip("s") in _OBJETOS else p for p in re.findall(r"\w+", texto_n)} & set(_OBJETOS)
+
+
 def _explica(frase_n: str, gatilho_n: str, outras: list) -> bool:
     """Outro item explica a frase cautelosa se a evidência dele cobre a maior
     parte dela, inclui o gatilho da ressalva e o objeto dele consta nela
@@ -93,11 +97,12 @@ def _base_do_item(mensagem: str, evidencia_n: str, objeto_n: str, outras: list, 
         return base_global
     propria = achadas[0]
     resto = []
+    proprios = _termos(objeto_n) | _termos(_normalizar(propria))  # mesmo entregável, qualquer flexão
     for t in sentencas:
         c = classificar_mensagem(t, hoje) if t is not propria else None
         if c is not None and _cautelosa(c):
             frase_n = _normalizar(t)
-            if objeto_n in frase_n or not _explica(frase_n, _normalizar(c.evidencia).strip(" .!?;\n"), outras):
+            if objeto_n in frase_n or (proprios & _termos(frase_n)) or not _explica(frase_n, _normalizar(c.evidencia).strip(" .!?;\n"), outras):
                 return base_global
             continue  # frase cautelosa explicada por outro item: sai da conta
         resto.append(t)

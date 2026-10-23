@@ -155,6 +155,15 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
             r = ex.validar_extracao(m, _s(_i("promessa", "relatorio", "Te envio o relatório amanhã"), _i(*outro)))
             self.assertTrue(r[0].incerta, m)
 
+    def test_rodada14_mesmo_entregavel_em_outra_flexao(self):
+        for m, obj in (("Te envio o relatório amanhã. Não vou mais enviar o relatório.", "relatórios"),
+                       ("Te envio o relatório amanhã. Não vou mais enviar o relatório.", "relatório mensal"),
+                       ("Te envio os relatórios amanhã. Não vou mais enviar o relatório.", "relatórios")):
+            ev = "Te envio os relatórios amanhã" if "os relat" in m else "Te envio o relatório amanhã"
+            r = ex.validar_extracao(m, _s(_i("promessa", obj, ev),
+                                          _i("cancelamento", "relatório", "Não vou mais enviar o relatório")))
+            self.assertTrue(r[0].incerta, (m, obj))
+
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
         r = ex.validar_extracao(m, _s(_i("promessa", "planilha", "Te envio a planilha")))
