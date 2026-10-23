@@ -44,7 +44,7 @@ def _texto(valor, campo: str) -> str:
     if type(valor) is not str:
         raise ValueError(f"{campo} deve ser texto")
     valor = valor.strip()
-    if not valor or len(valor) > _MAX_CAMPO or not _normalizar(valor):
+    if not valor or len(valor) > _MAX_CAMPO or sum(c.isalnum() for c in _normalizar(valor)) < 2:
         raise ValueError(f"{campo} vazio ou longo demais")
     return valor
 
@@ -73,7 +73,9 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
         if _normalizar(evidencia) not in texto_n:
             raise ValueError("evidência não consta na mensagem")
         incerta = False
-        if classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):
+        if base.classe in _CAUTELA and classe != base.classe:
+            classe, incerta = base.classe, True  # modelo não afrouxa cautela em nenhuma classe
+        elif classe == PROMESSA and (base.classe in _CAUTELA or base.incerta):
             classe, incerta = (base.classe if base.classe in _CAUTELA else INTENCAO_VAGA), True
         elif classe == PROMESSA and base.classe != PROMESSA:
             incerta = True  # a seleção barata não viu promessa: modelo sozinho não firma
@@ -87,7 +89,12 @@ def validar_extracao(mensagem, saida, hoje=None) -> tuple[CompromissoExtraido, .
 
 def comparar_sombra(base: Classificacao, extraidos) -> dict:
     """Concordância entre seleção barata e extração (para métricas em sombra)."""
-    if not isinstance(base, Classificacao):
+    if (
+        type(base) is not Classificacao
+        or type(base.classe) is not str
+        or base.classe not in CLASSES
+        or type(base.incerta) is not bool
+    ):
         raise ValueError("base inválida")
     if not isinstance(extraidos, (tuple, list)):
         raise ValueError("extraidos deve ser tupla ou lista")

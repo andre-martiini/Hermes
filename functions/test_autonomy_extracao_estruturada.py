@@ -41,7 +41,7 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
         for ev in ("\u200b", "\u0301"):
             with self.assertRaises(ValueError):
                 ex.validar_extracao("Bom dia", _s(_i("promessa", "x", ev)))
-        r = ex.validar_extracao("ok obrigado", _s(_i("promessa", "x", "ok")))
+        r = ex.validar_extracao("ok obrigado", _s(_i("promessa", "ok", "ok")))
         self.assertTrue(r[0].incerta)
 
     def test_sombra_entradas_invalidas(self):
@@ -51,6 +51,17 @@ class ExtracaoEstruturadaTest(unittest.TestCase):
                      [ex.CompromissoExtraido(1, "a", "b", False)]):
             with self.assertRaises(ValueError):
                 ex.comparar_sombra(b, ruim)
+
+    def test_invisiveis_e_cautela_em_toda_classe(self):
+        for ev in ("\u3164", ".", "\x00", "a"):
+            with self.assertRaises(ValueError):
+                ex.validar_extracao("Te envio o relatório " + ev, _s(_i("promessa", "relatório", ev)))
+        r = ex.validar_extracao("Posso te mandar amanhã?", _s(_i("entrega_parcial", "envio", "te mandar")))
+        self.assertEqual((r[0].classe, r[0].incerta), ("pergunta", True))
+        from autonomy.commitments import Classificacao
+        for ruim in (Classificacao("zzz", "", False), Classificacao(PROMESSA, "", None)):
+            with self.assertRaises(ValueError):
+                ex.comparar_sombra(ruim, ())
 
     def test_sombra(self):
         m = "Te envio a planilha amanhã"
