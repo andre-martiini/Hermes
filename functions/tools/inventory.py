@@ -530,10 +530,28 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum — ao contrário de registrar_saude, não é idempotente por dia",
         dados_sensiveis_categoria="financeiro pessoal",
         idempotencia=_I.NAO_IDEMPOTENTE,
-        nota="sempre cria doc novo; nenhuma tool deste catálogo edita/exclui um lançamento. Não idempotente "
+        nota="sempre cria doc novo (editar/excluir: editar_item_financeiro_v2 e excluir_item_financeiro_v2). Não idempotente "
         "(P03 sub-entrega 17/N): as 3 ramificações de `tipo` (renda/obrigacao_fixa/transacao_avulsa) em "
         "tools/telegram_extended.py::execute usam `db.collection(...).document()` com ID automático + `.set()` "
         "incondicional, mesmo padrão nas três -- repetir cria um lançamento novo em vez de devolver o existente.",
+    ),
+    "editar_item_financeiro_v2": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `alterado` com antes e depois; o chamador pode reler com consultar_financas_v2",
+        dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
+        nota="tools/financas_itens.py::editar: `update` só dos campos enviados; repetir grava o mesmo valor.",
+    ),
+    "excluir_item_financeiro_v2": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `reversivel`; renda e transação ficam com status 'deleted', conta fixa sai de vez (como a tela)",
+        dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
+        nota="tools/financas_itens.py::excluir: repetir em item já excluído devolve 'não encontrado'.",
+    ),
+    "editar_parcela_servico": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `alterado` e `rendas_atualizadas`; reler com consultar_rendas_servico",
+        dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
+        nota="tools/financas_itens.py::editar_parcela_servico: regrava o array `parcelas` do serviço e a renda ligada.",
     ),
     "calculadora": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,

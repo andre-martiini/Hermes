@@ -1,0 +1,26 @@
+{
+    "name": "excluir_item_financeiro_v2",
+    "description": "Exclui um lançamento do financeiro interno pelo id. Renda e transação avulsa ficam com status 'deleted' (recuperáveis pela tela); conta fixa é apagada de vez, como a tela faz. Peça o sim do André antes.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tipo": {
+                "type": "string",
+                "enum": [
+                    "renda",
+                    "obrigacao_fixa",
+                    "transacao_avulsa"
+                ],
+                "description": "Tipo do lançamento, como em consultar_financas_v2."
+            },
+            "id": {
+                "type": "string",
+                "description": "Id do lançamento."
+            }
+        },
+        "required": [
+            "tipo",
+            "id"
+        ]
+    }
+}

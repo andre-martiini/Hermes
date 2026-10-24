@@ -1,0 +1,40 @@
+{
+    "name": "editar_item_financeiro_v2",
+    "description": "Corrige um lançamento já existente do financeiro interno, pelo id que consultar_financas_v2 devolve: descrição, valor, mês (competencia) e recebido/pago. Só os campos enviados mudam. Devolve o antes e o depois.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tipo": {
+                "type": "string",
+                "enum": [
+                    "renda",
+                    "obrigacao_fixa",
+                    "transacao_avulsa"
+                ],
+                "description": "Tipo do lançamento, como em consultar_financas_v2."
+            },
+            "id": {
+                "type": "string",
+                "description": "Id do lançamento."
+            },
+            "descricao": {
+                "type": "string"
+            },
+            "valor": {
+                "type": "number"
+            },
+            "competencia": {
+                "type": "string",
+                "description": "Novo mês, YYYY-MM com o mês de 1 a 12 (ex.: '2026-11'). Não vale para transacao_avulsa."
+            },
+            "quitado": {
+                "type": "boolean",
+                "description": "Renda recebida / conta paga (true) ou não (false)."
+            }
+        },
+        "required": [
+            "tipo",
+            "id"
+        ]
+    }
+}

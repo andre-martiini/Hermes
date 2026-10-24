@@ -1,0 +1,33 @@
+{
+    "name": "editar_parcela_servico",
+    "description": "Ajusta uma parcela de renda de serviço (ids em consultar_rendas_servico): marca como paga ou pendente (não recebida), adia a data prevista ou corrige o valor. Atualiza também a renda do mês ligada à parcela.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "service_id": {
+                "type": "string"
+            },
+            "parcela_id": {
+                "type": "string"
+            },
+            "data_prevista": {
+                "type": "string",
+                "description": "Nova data prevista, YYYY-MM-DD (para adiar)."
+            },
+            "status": {
+                "type": "string",
+                "enum": [
+                    "pago",
+                    "pendente"
+                ]
+            },
+            "valor": {
+                "type": "number"
+            }
+        },
+        "required": [
+            "service_id",
+            "parcela_id"
+        ]
+    }
+}
