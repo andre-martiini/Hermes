@@ -74,10 +74,13 @@ def resumir_contrato(servico: dict, hoje: date) -> dict:
         "parcelas_pagas": len(pagas),
         "parcelas_restantes": len(pendentes),
         "valor_restante": round(sum(_num(p.get("valor")) for p in pendentes), 2),
-        "proxima": ({"data": str(proxima.get("data_prevista"))[:10], "valor": _num(proxima.get("valor")),
-                     "descricao": proxima.get("descricao")} if proxima else None),
-        "atrasadas": [{"data": str(p.get("data_prevista"))[:10], "valor": _num(p.get("valor")),
+        "proxima": ({"id": proxima.get("id"), "data": str(proxima.get("data_prevista"))[:10],
+                     "valor": _num(proxima.get("valor")), "descricao": proxima.get("descricao")} if proxima else None),
+        "atrasadas": [{"id": p.get("id"), "data": str(p.get("data_prevista"))[:10], "valor": _num(p.get("valor")),
                        "descricao": p.get("descricao")} for p in atrasadas],
+        # ids para editar_parcela_servico (adiar, marcar paga/pendente).
+        "pendentes": [{"id": p.get("id"), "data": str(p.get("data_prevista"))[:10], "valor": _num(p.get("valor"))}
+                      for p in pendentes],
         "termina_em": ultima.isoformat() if ultima else None,
         "tipo_contrato": servico.get("tipo_contrato"),
         "acabando": mensal and 0 < len(pendentes) <= LIMITE_ACABANDO,

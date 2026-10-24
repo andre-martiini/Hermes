@@ -81,6 +81,10 @@ def _via_telegram(nome: str):
         from tools.telegram_extended import execute as _execute
 
         slots = dict(args)
+        if nome == "consultar_financas_v2":
+            erro = _mes_ambiguo(slots)
+            if erro:
+                return erro
         # `gerar_relatorio`, `editar_plano_acao` e `obter_contexto_tela` operam
         # sobre uma acao; quando o canal ja tem uma em contexto, evita exigir o id.
         if "task_id" in slots and not slots.get("task_id") and ctx.task_id:
@@ -90,13 +94,60 @@ def _via_telegram(nome: str):
     return handler
 
 
+def _mes_ambiguo(args: dict) -> dict | None:
+    """No MCP o mes vai so como `competencia` ("2026-11" = novembro).
+
+    O `mes` cru e 0-11 (padrao do JavaScript) e foi lido como 1-12 em 23/10/2026:
+    a remuneracao de novembro foi gravada em dezembro. Os callers internos
+    (main.py, bot do Telegram) seguem passando `mes` 0-11 direto a
+    `telegram_extended.execute`, sem passar por aqui.
+    """
+    if args.get("mes") is not None and not args.get("competencia"):
+        return {"erro": "Use competencia 'YYYY-MM' com o mês de 1 a 12 (ex.: '2026-11' = novembro). "
+                        "O campo mes (0-11) não é aceito por aqui."}
+    return None
+
+
 def _registrar_item_financeiro_v2(ctx: ToolContext, args: dict):
     from tools.telegram_extended import execute as _execute
+    import competencia as _competencia
+    from tools import financas_itens
 
+    erro = _mes_ambiguo(args)
+    if erro:
+        return erro
+    # Duplicata: mesmo tipo, mes e descricao ja lancados. Repetir com o id de um
+    # existente criava OUTRO lancamento (23/10); agora avisa e aponta o editar.
+    if args.get("competencia") and not args.get("confirmar_duplicata"):
+        try:
+            mes0, ano = _competencia.ler(args["competencia"])
+        except ValueError as exc:
+            return {"erro": str(exc)}
+        existentes = financas_itens.duplicatas(ctx.db, args.get("tipo"), args.get("descricao"), mes0, ano)
+        if existentes:
+            return {"status": "possivel_duplicata", "existentes": existentes,
+                    "como_seguir": "Para corrigir um existente use editar_item_financeiro_v2 com o id; "
+                                   "para criar outro mesmo assim, repita com confirmar_duplicata=true."}
     # A categoria nao e inferida nem pedida ao usuario por decisao de produto;
     # o copiloto web e o Telegram gravam "Geral" fixo. Mesmo contrato aqui.
-    slots = {**args, "categoria": "Geral"}
+    slots = {k: v for k, v in args.items() if k != "confirmar_duplicata"}
+    slots["categoria"] = "Geral"
     return _execute("registrar_item_financeiro_v2", slots, ctx.db)
+
+
+def editar_item_financeiro_v2(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.editar(ctx.db, args)
+
+
+def excluir_item_financeiro_v2(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.excluir(ctx.db, args)
+
+
+def editar_parcela_servico(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.editar_parcela_servico(ctx.db, args)
 
 
 def _consultar_lista_compras(ctx: ToolContext, args: dict):
@@ -3113,6 +3164,9 @@ _HANDLERS: dict = {
     # Delegadas a telegram_extended
     **{nome: _via_telegram(nome) for nome in _TELEGRAM_TOOLS},
     "registrar_item_financeiro_v2": _registrar_item_financeiro_v2,
+    "editar_item_financeiro_v2": editar_item_financeiro_v2,
+    "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
+    "editar_parcela_servico": editar_parcela_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 
     # Delegadas a modulos dedicados

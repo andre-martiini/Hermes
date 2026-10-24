@@ -57,7 +57,8 @@ class TestContrato(unittest.TestCase):
     def test_pacote_fechado_nao_acaba(self):
         r = rs.resumir_contrato(WORKSHOP, HOJE)
         self.assertFalse(r["acabando"])
-        self.assertEqual(r["atrasadas"], [{"data": "2026-10-05", "valor": 3105.85, "descricao": "Parcela 1"}])
+        self.assertEqual(r["atrasadas"], [{"id": "p1", "data": "2026-10-05", "valor": 3105.85, "descricao": "Parcela 1"}])
+        self.assertEqual(r["pendentes"], [{"id": "p1", "data": "2026-10-05", "valor": 3105.85}])
         self.assertEqual(r["inconsistencias"], [])
 
     def test_inconsistencias_do_pls_mec(self):

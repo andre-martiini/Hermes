@@ -1,12 +1,12 @@
 {
     "name": "registrar_item_financeiro_v2",
-    "description": "Registra uma nova movimentação financeira no sistema principal (Renda, Obrigação fixa ou Transação diária).",
+    "description": "Registra uma nova movimentação financeira no sistema principal (Renda, Obrigação fixa ou Transação diária). Para corrigir ou apagar um lançamento já existente use editar_item_financeiro_v2 ou excluir_item_financeiro_v2 (passar o id aqui cria OUTRO lançamento).",
     "parameters": {
         "type": "object",
         "properties": {
             "competencia": {
                 "type": "string",
-                "description": "Mês de referência no formato YYYY-MM (ex.: '2026-10'). Tem precedência sobre mes/ano"
+                "description": "Mês de referência no formato YYYY-MM, com o mês de 1 a 12 (ex.: '2026-11' = novembro de 2026). Se omitido, usa o mês atual."
             },
             "tipo": {
                 "type": "string",
@@ -25,17 +25,13 @@
                 "type": "number",
                 "description": "Valor monetário do item."
             },
-            "mes": {
-                "type": "integer",
-                "description": "Mês de referência (0-11). Relevante para rendas e obrigações fixas. Prefira competencia."
-            },
-            "ano": {
-                "type": "integer",
-                "description": "Ano de referência. Relevante para rendas e obrigações fixas."
-            },
             "data": {
                 "type": "string",
                 "description": "Data ISO (YYYY-MM-DD) para transações avulsas. Se não fornecido, usa hoje."
+            },
+            "confirmar_duplicata": {
+                "type": "boolean",
+                "description": "Só use true depois de um aviso 'possivel_duplicata', quando o André quiser mesmo um segundo lançamento igual no mês."
             }
         },
         "required": [
