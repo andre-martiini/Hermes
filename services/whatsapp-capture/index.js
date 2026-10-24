@@ -13,6 +13,7 @@ import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes
 import { criarInicializador } from './inicializacao.js';
 import { ehPaginaQuebrada, criarRecuperadorDePagina, jaFoiEnviada } from './pagina_quebrada.js';
 import { montarReacao } from './reacoes.js';
+import { nomeArquivoMidia } from './nome_arquivo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -500,6 +501,10 @@ async function captureMedia(message, chatId) {
     // use undefined as a Firestore value"), perdendo a mensagem por completo.
     const mimeType = media.mimetype || 'application/octet-stream';
     const result = { mimeType, sizeBytes: buffer.length };
+    // Nome do documento (só existe em documentos): necessário para conferir o
+    // objeto prometido no avaliador de cumprimento (P07).
+    const filename = nomeArquivoMidia(media.filename);
+    if (filename) result.filename = filename;
     const ext = (mimeType.split('/')[1] || 'bin').split(';')[0];
     const storagePath = `whatsapp_media/${chatId}/${message.id.id}.${ext}`;
     for (let attempt = 1; attempt <= STORAGE_UPLOAD_ATTEMPTS; attempt++) {
