@@ -574,26 +574,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 10/N -- suíte de avaliação F02: functions/autonomy/avaliacao_f02.py. medir_precisao_cumprimento(casos) roda avaliar_cumprimento sobre corpus sintético (CASOS_F02, 16 casos: 4 cumprimentos reais, 12 negativos -- mensagem longa sobre almoço, negação, objeto diferente/incompleto, mídia sem nome conferível, anexo sem mídia, hedge, futuro, nova promessa, cancelamento, parcial) e mede a precisão de fechamento da seção 11 (corretos/fechados automaticamente; limiar 98%). aprovado exige >=3 fechamentos, ao menos 1 caso negativo e precisão >= limiar; limiar só aceita 0.98..1; casos de tipo exato, senão ValueError. Cobre os aceites F02: arquivo por e-mail encerra promessa do WhatsApp (vínculo por ID), só semântico não fecha. Sem I/O e sem wiring; fila antiga e A06 não alteradas."
-estado: validado
-inicio: "2026-10-23T16:45:00Z"
-fim: "2026-10-23T17:50:00Z"
-decisoes:
-  - id: p07-sub10-triagem
-    motivo: "Nenhuma PR aberta no início do disparo das 17h BRT; nenhuma execução paralela da linha de autonomia."
-  - id: p07-sub10-arquivo-execucao
-    motivo: "execucao.md arquivado (bloco P07 sub 7 -> execucao-archive-p07sub7.md)."
-  - id: p07-sub10-corpus-pequeno
-    motivo: "Corpus sintético de 16 casos é piso de regressão, não a medição de produção: a precisão real vem dos dados da sombra (sub 9). Corpus não é deduplicado (exige má-fé do chamador)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4589 OK (P07 sub 9); test_autonomy_avaliacao_f02 11 OK (novo); DEPOIS 4600 OK (head final)."
-revisao_adversarial:
-  - "Rodada 1: rótulo cumpre sem validação de tipo, limiar sem faixa, sem amostra mínima, entradas inválidas inconsistentes. Rodada 2: subclasse forjando cumpre, limiar abaixo de 98%, corpus só de positivos aprovando, exceções não-ValueError e campos sem validação. Todos corrigidos. Rodada 3: não achou nada."
-pendencias:
-  - "P07: wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; medir precisão com dados reais da sombra antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
-```
+# (Em 2026-10-24 o bloco "P07 sub-entrega 10/N" foi movido para docs/autonomia/execucao-archive-p07sub10.md, sem alteração de conteúdo.)
 
 ---
 
@@ -640,4 +621,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): sem defeito grave; corrigidos (a) item de atenção já fechado pelo dono distorcia a métrica -> divergencia nenhum_alerta e (b) respostas do bot contavam como intervenção humana -> filtradas com eh_mensagem_do_bot; 1 teste novo e 1 ajustado. Rodada 2 (focada nas correções): não achou nada que bloqueie; apenas as limitações acima. Codex (P2) na PR: a query de mensagens (igualdade + intervalo) pedia timestamp ascendente, mas o índice composto implantado é chat_id ASC, timestamp DESC -> order_by timestamp DESC explícito (o guarda reordena sozinho); teste ajustado."
 pendencias:
   - "P07: capturar media.filename (services/whatsapp-capture) ou usar a extração estruturada para a sombra de cumprimento medir o A06 real; ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 13/N -- captura de media.filename: services/whatsapp-capture/nome_arquivo.js (nomeArquivoMidia) e captureMedia (index.js) passam a gravar media.filename (nome do documento do whatsapp-web.js; aparado, sem controles C0/C1, marcas bidi e invisíveis, substituto solto -> U+FFFD, máx. 255 pontos de código; vazio/ausente = campo omitido). Permite à sombra de cumprimento (sub 11) conferir o objeto prometido contra o nome do anexo e medir o A06 real. Só novas capturas e o reparo de mídia; sem mudança Python, sem flag nova (campo aditivo)."
+estado: validado
+inicio: "2026-10-24T17:00:00Z"
+fim: "2026-10-24T17:40:00Z"
+decisoes:
+  - id: p07-sub13-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia."
+  - id: p07-sub13-arquivo-execucao
+    motivo: "execucao.md arquivado (bloco P07 sub 10 -> execucao-archive-p07sub10.md)."
+  - id: p07-sub13-limitacoes
+    motivo: "Aceitas: mensagens de documento já gravadas com storage_path não ganham filename (reparo só olha as sem storage_path; backfill do histórico não coberto); truncamento por ponto de código pode cortar combinante (>255 chars, cosmético)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4636 OK (main atual; Python intocado); DEPOIS 4636 OK. services/whatsapp-capture: nome_arquivo_test 5 OK (novo)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): sem defeito de escrita no Firestore, perda de mensagem ou regressão no reparo; apontou higiene (substituto solto, marcas bidi/invisíveis fora de C0) -> corrigido com 1 teste novo. Rodada 2 não feita (correção de uma regex pura, coberta por teste)."
+pendencias:
+  - "P07: ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão com dados reais antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
 ```
