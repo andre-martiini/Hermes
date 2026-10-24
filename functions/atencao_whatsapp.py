@@ -769,4 +769,9 @@ def vencer_promessas(event: scheduler_fn.ScheduledEvent = None) -> None:
     for p in promessas:
         chave = f"{TIPO_PROMESSA_SEM_RETORNO}:{p.get('chat_id')}:{p.get('mensagem_id')}"
         if chave in chaves_vencidas:
+            try:  # sombra da revalidação de follow-up (P07): só mede, nunca altera o fluxo
+                import followup_compromissos_sombra
+                followup_compromissos_sombra.registrar(db, p, chave, agora)
+            except Exception as exc:
+                print(f"[AtencaoWhatsApp] Falha na sombra de follow-up: {exc}")
             promessas_ref.document(p["_doc_id"]).update({"estado": ESTADO_PROMESSA_VENCIDA})
