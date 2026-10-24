@@ -1,0 +1,50 @@
+{
+  "name": "decidir_objetivo_whatsapp",
+  "description": "Para o agente residente: decide o próximo passo de um objetivo de WhatsApp em andamento (o mesmo que o Gemini decidia). Leia antes a conversa (ler_mensagens_whatsapp) e o objetivo (consultar_objetivos_whatsapp). acao: responder (texto ao contato, em primeira pessoa, dentro de pode_informar/limites_decisao), aguardar (sem mandar nada), pedir_ao_dono (pergunta ao André), concluir (resultado e, se quiser, mensagem_final) ou travar (motivo). Resposta barrada pela validação volta com os motivos para reescrever.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {
+        "type": "string"
+      },
+      "acao": {
+        "type": "string",
+        "enum": [
+          "responder",
+          "aguardar",
+          "pedir_ao_dono",
+          "concluir",
+          "travar"
+        ]
+      },
+      "texto": {
+        "type": "string",
+        "description": "Para responder: a mensagem exata ao contato."
+      },
+      "informacao_nova": {
+        "type": "boolean",
+        "description": "Para responder: false quando a conversa não avançou (3 rodadas assim chamam o André)."
+      },
+      "pergunta": {
+        "type": "string",
+        "description": "Para pedir_ao_dono."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Para pedir_ao_dono (ex.: perguntou_se_robo, fora_do_mandato), aguardar ou travar."
+      },
+      "resultado": {
+        "type": "string",
+        "description": "Para concluir: o que ficou acertado."
+      },
+      "mensagem_final": {
+        "type": "string",
+        "description": "Para concluir: última mensagem ao contato (opcional)."
+      }
+    },
+    "required": [
+      "objetivo_id",
+      "acao"
+    ]
+  }
+}

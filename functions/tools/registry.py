@@ -198,6 +198,7 @@ _CATALOG: dict[str, str] = {
     "consultar_objetivos_whatsapp": "Andamento dos objetivos de WhatsApp: estado, prazo, pergunta pendente ao André e resultado",
     "responder_objetivo_whatsapp": "Responde a pergunta do Modo Objetivo ou retoma/estende um objetivo; o Gaspar segue a conversa",
     "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",
+    "decidir_objetivo_whatsapp": "Modo Objetivo conduzido pelo agente residente: aplica a decisão dele (responder, aguardar, pedir ao dono, concluir, travar) com as mesmas travas do Gemini",
     # Live Ideas (18/10/2026): processos BPMN, fluxos e mapas de ideias no notebook, pelo canal /gaspar.
     "liveideas_gerar": "Pede ao Live Ideas um processo BPMN, fluxo ou mapa de ideias de um texto ou de uma reuniao gravada; acompanhe com liveideas_consultar",
     "liveideas_consultar": "Estado de um pedido do Live Ideas (gerando, pronto ou falhou), com custo, texto, link e propostas de ajuste; anexa na acao uma vez so",
@@ -241,6 +242,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "criar_objetivo_whatsapp",
     "responder_objetivo_whatsapp",
     "encerrar_objetivo_whatsapp",
+    "decidir_objetivo_whatsapp",
     "criar_rascunho_email",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",

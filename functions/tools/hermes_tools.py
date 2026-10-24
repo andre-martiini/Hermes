@@ -935,6 +935,16 @@ def responder_objetivo_whatsapp(ctx: ToolContext, args: dict):
         ctx.db, objetivo_id, resposta=args.get("resposta"), estender_min=args.get("estender_min"))
 
 
+def decidir_objetivo_whatsapp(ctx: ToolContext, args: dict):
+    import objetivos_whatsapp
+
+    objetivo_id = str(args.get("objetivo_id") or "").strip()
+    if not objetivo_id:
+        return {"erro": "objetivo_id é obrigatório."}
+    decisao = {k: v for k, v in args.items() if k != "objetivo_id"}
+    return objetivos_whatsapp.decidir_pelo_agente(ctx.db, objetivo_id, decisao)
+
+
 def encerrar_objetivo_whatsapp(ctx: ToolContext, args: dict):
     import objetivos_whatsapp
 
@@ -3208,6 +3218,7 @@ _HANDLERS: dict = {
     "consultar_objetivos_whatsapp": consultar_objetivos_whatsapp,
     "responder_objetivo_whatsapp": responder_objetivo_whatsapp,
     "encerrar_objetivo_whatsapp": encerrar_objetivo_whatsapp,
+    "decidir_objetivo_whatsapp": decidir_objetivo_whatsapp,
     "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,

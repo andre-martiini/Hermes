@@ -18,6 +18,13 @@ Fluxo:
    por `validacao_mensagem` antes de sair.
 3. Mensagem do André no chat (que não seja eco do Gaspar) pausa o objetivo.
 4. `varrer` (a cada 5 min) expira o que passou do prazo.
+
+Agente residente (services/gaspar-agente, 24/10/2026, decisão do André): enquanto ele
+está ligado (sinal em system/agente_residente, ver atencao.agente_residente_ativo), o
+Gemini fica de reserva. A mensagem do contato chega ao agente pelo canal gaspar-eventos,
+e ele devolve a decisão por `decidir_pelo_agente`, que passa pelas mesmas travas
+(`_barrada`, prazo, sem progresso, rascunho para aprovação). Os avisos pelo bot antigo
+do Telegram também ficam com ele, salvo o de prazo vencido.
 """
 
 from __future__ import annotations
@@ -72,6 +79,16 @@ def _como_data(valor) -> datetime.datetime | None:
             return None
         return data if data.tzinfo else data.replace(tzinfo=timezone.utc)
     return None
+
+
+def _agente_assume(db) -> bool:
+    """O agente residente está ligado e decide no lugar do Gemini."""
+    try:
+        import atencao
+        return atencao.agente_residente_ativo(db, _agora())
+    except Exception as exc:  # noqa: BLE001 -- na dúvida, o Gemini segue
+        print(f"[ObjetivoWhatsApp] Falha ao ler o sinal do agente residente: {exc}")
+        return False
 
 
 def _ref(db, objetivo_id: str):
@@ -287,6 +304,8 @@ def processar_mensagem(db, mensagem: dict, *, dormir=time.sleep, decidir=None) -
     marca = str(mensagem.get("wa_message_id") or mensagem.get("id") or _agora().isoformat())
     ref = _ref(db, objetivo["id"])
     ref.update({"ultima_recebida_id": marca, "ultima_recebida_em": _agora()})
+    if decidir is None and _agente_assume(db):
+        return {"status": "delegado_agente", "objetivo_id": objetivo["id"]}
     # O contato costuma mandar várias mensagens seguidas: só a última do bloco responde.
     dormir(ESPERA_SILENCIO_S)
     atual = _ler(db, objetivo["id"]) or {}
@@ -317,7 +336,7 @@ def _tratar_from_me(db, mensagem: dict) -> dict | None:
         "restante_s": _restante_s(objetivo),
         "eventos": firestore.ArrayUnion([{"em": _agora().isoformat(), "tipo": "pausado_pelo_dono"}]),
     })
-    _avisar(db, objetivo,
+    _avisar_dono(db, objetivo,
             f"✋ Você escreveu para <b>{html.escape(objetivo['contato_nome'])}</b>. Pausei o objetivo "
             f"<i>{html.escape(objetivo['objetivo'])}</i> para não atropelar você.",
             [("▶️ Retomar", "retomar"), ("⏹️ Encerrar", "fim")])
@@ -363,6 +382,8 @@ def executar_ciclo(db, objetivo_id: str, *, decidir=None, dormir=time.sleep) -> 
         if _vencido(objetivo):
             _expirar(db, objetivo)
             return {"status": EXPIRADO}
+        if decidir is None and _agente_assume(db):
+            return {"status": "delegado_agente", "objetivo_id": objetivo_id}
         conversa = _ler_conversa(db, objetivo)
         agenda = _agenda(db)
         decidir = decidir or _decidir_com_gemini
@@ -376,6 +397,40 @@ def executar_ciclo(db, objetivo_id: str, *, decidir=None, dormir=time.sleep) -> 
                     decisao = {"acao": "pedir_ao_dono", "motivo": "resposta_barrada",
                                "pergunta": (f"Minha resposta foi barrada ({motivos}). Rascunho: "
                                             f"\"{decisao.get('texto')}\". O que eu respondo?")}
+        return _aplicar(db, objetivo, decisao, dormir=dormir)
+    finally:
+        _soltar_trava(ref)
+
+
+def decidir_pelo_agente(db, objetivo_id: str, decisao: dict, *, dormir=time.sleep) -> dict:
+    """Decisão do agente residente para um objetivo: mesmo formato e mesmas travas do Gemini.
+
+    Diferente do ciclo do Gemini, resposta barrada não vira pergunta ao André: volta ao
+    agente com os motivos, para ele reescrever.
+    """
+    ref = _ref(db, objetivo_id)
+    if not _adquirir_trava(db, ref):
+        return {"erro": "O objetivo está sendo processado agora; tente de novo em alguns segundos."}
+    try:
+        objetivo = _ler(db, objetivo_id)
+        if not objetivo:
+            return {"erro": f"Objetivo '{objetivo_id}' não encontrado."}
+        if objetivo.get("estado") != EM_ANDAMENTO:
+            return {"erro": f"O objetivo está {objetivo.get('estado')}; só objetivo em andamento recebe decisão. "
+                            "Para retomar, use responder_objetivo_whatsapp."}
+        if _vencido(objetivo):
+            _expirar(db, objetivo)
+            return {"status": EXPIRADO, "objetivo_id": objetivo_id}
+        if not isinstance(decisao, dict) or decisao.get("acao") not in ACOES:
+            return {"erro": f"acao deve ser uma de: {', '.join(ACOES)}."}
+        for campo, acao in (("texto", "responder"), ("resultado", "concluir")):
+            if decisao["acao"] == acao and not str(decisao.get(campo) or "").strip():
+                return {"erro": f"Informe {campo} para a ação {acao}."}
+        if decisao["acao"] == "responder":
+            barrada = _barrada(objetivo, decisao.get("texto"))
+            if barrada:
+                return {"erro": "resposta_barrada", "motivos": barrada,
+                        "como_seguir": "Reescreva sem esses problemas, ou use pedir_ao_dono."}
         return _aplicar(db, objetivo, decisao, dormir=dormir)
     finally:
         _soltar_trava(ref)
@@ -505,7 +560,7 @@ def _pedir(db, objetivo: dict, pergunta: str, motivo: str) -> dict:
         "eventos": firestore.ArrayUnion([{"em": agora.isoformat(), "tipo": "pedir_ao_dono", "motivo": motivo}]),
     })
     titulo = "🤖 Perguntaram se é robô" if motivo == "perguntou_se_robo" else "🙋 Preciso de você"
-    _avisar(db, objetivo,
+    _avisar_dono(db, objetivo,
             f"{titulo} — conversa com <b>{html.escape(objetivo['contato_nome'])}</b>\n"
             f"Objetivo: <i>{html.escape(objetivo['objetivo'])}</i>\n\n{html.escape(pergunta)}",
             [("✍️ Responder", "resp"), ("⏹️ Encerrar", "fim")])
@@ -525,7 +580,7 @@ def _concluir(db, objetivo: dict, resultado: str) -> dict:
     _soltar_ponteiros(db, objetivo)
     if objetivo.get("acao_id") and objetivo.get("etapa_id"):
         _concluir_etapa(db, objetivo, resultado)
-    _avisar(db, objetivo,
+    _avisar_dono(db, objetivo,
             f"✅ Objetivo concluído com <b>{html.escape(objetivo['contato_nome'])}</b>\n"
             f"<i>{html.escape(objetivo['objetivo'])}</i>\n\n{html.escape(resultado or '(sem resumo)')}", [])
     _anotar(db, objetivo, f"Objetivo concluído com {objetivo['contato_nome']}: {resultado[:500]}")
@@ -852,6 +907,14 @@ def _decidir_com_gemini(db, objetivo: dict, conversa: list[dict], agenda: str | 
 # ---------------------------------------------------------------------------
 # Avisos, diário, etapa e registro de atividade
 # ---------------------------------------------------------------------------
+
+def _avisar_dono(db, objetivo: dict, texto: str, botoes: list[tuple[str, str]]) -> None:
+    """Pausa, pergunta e conclusão: com o agente residente ligado, quem fala com o André é
+    ele (pelo Telegram novo); o bot antigo fica calado para não chegar em dobro."""
+    if _agente_assume(db):
+        return
+    _avisar(db, objetivo, texto, botoes)
+
 
 def _avisar(db, objetivo: dict, texto: str, botoes: list[tuple[str, str]]) -> None:
     """Aviso direto no Telegram, fora do teto diário do planejador (decisão do dono: qualquer horário)."""

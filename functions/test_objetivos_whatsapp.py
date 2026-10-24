@@ -552,3 +552,58 @@ class TestCapturaDaResposta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAgenteResidente(_Base):
+    """24/10/2026: com o agente residente ligado, ele decide no lugar do Gemini."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(ow, "_agente_assume", return_value=True)
+        p.start()
+
+    def test_mensagem_do_contato_nao_chama_o_gemini(self):
+        oid = self._criar()
+        with mock.patch.object(ow, "_decidir_com_gemini") as gemini:
+            res = ow.processar_mensagem(self.db, self._guardar(self._mensagem("Temos quinta às 9h")), dormir=mock.Mock())
+        gemini.assert_not_called()
+        self.assertEqual(res, {"status": "delegado_agente", "objetivo_id": oid})
+        self.assertEqual(len(self.enfileiradas), 1)  # só a abertura
+
+    def test_resposta_do_dono_retoma_sem_gemini(self):
+        oid = self._criar()
+        self._objetivo(oid)["estado"] = ow.AGUARDANDO_DONO
+        with mock.patch.object(ow, "_decidir_com_gemini") as gemini:
+            res = ow.responder_do_dono(self.db, oid, resposta="Pode ser quinta")
+        gemini.assert_not_called()
+        self.assertEqual(res["ciclo"]["status"], "delegado_agente")
+        self.assertEqual(self._objetivo(oid)["estado"], ow.EM_ANDAMENTO)
+
+    def test_decisao_do_agente_responde_pelo_mesmo_caminho(self):
+        oid = self._criar()
+        res = ow.decidir_pelo_agente(self.db, oid, {"acao": "responder", "texto": "Quinta às 9h serve, pode marcar?"},
+                                     dormir=mock.Mock())
+        self.assertEqual(res["status"], "respondido")
+        self.assertEqual(self.enfileiradas[-1]["texto"], "Quinta às 9h serve, pode marcar?")
+
+    def test_resposta_barrada_volta_com_os_motivos_sem_enviar(self):
+        oid = self._criar()
+        antes = len(self.enfileiradas)
+        res = ow.decidir_pelo_agente(self.db, oid, {"acao": "responder", "texto": "Meu CPF é 123.456.789-00"})
+        self.assertEqual(res["erro"], "resposta_barrada")
+        self.assertTrue(res["motivos"])
+        self.assertEqual(len(self.enfileiradas), antes)
+
+    def test_pedir_ao_dono_nao_avisa_pelo_bot_antigo(self):
+        oid = self._criar()
+        avisos_antes = len(self.avisos)
+        res = ow.decidir_pelo_agente(self.db, oid, {"acao": "pedir_ao_dono", "pergunta": "Aceita sexta?", "motivo": "outro"})
+        self.assertEqual(res["status"], ow.AGUARDANDO_DONO)
+        self.assertEqual(len(self.avisos), avisos_antes)
+
+    def test_recusa_objetivo_parado_e_acao_invalida(self):
+        oid = self._criar()
+        self.assertIn("erro", ow.decidir_pelo_agente(self.db, oid, {"acao": "voar"}))
+        self.assertIn("erro", ow.decidir_pelo_agente(self.db, oid, {"acao": "responder", "texto": " "}))
+        self._objetivo(oid)["estado"] = ow.PAUSADO
+        self.assertIn("erro", ow.decidir_pelo_agente(self.db, oid, {"acao": "aguardar"}))
