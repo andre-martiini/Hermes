@@ -1376,6 +1376,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     onAskCopiloto
 }) => {
     const [isFinanceVisible, setIsFinanceVisible] = useState(false);
+    const [showNextActions, setShowNextActions] = useState(false);
 
     // --- ACTIONS LOGIC ---
     const inProgressActions = useMemo(() => tarefas.filter(t => t.status !== 'concluído' && t.status !== 'excluído' as any), [tarefas]);
@@ -1389,7 +1390,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         if (totais > 0 && feitas >= totais) return [];
         const corrente = plano.find(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
         const emEspera = !!corrente && estadoDaSubtarefa(corrente) === 'aguardando_terceiro';
-        return [{ dataLimite: String(t.data_limite || '').slice(0, 10), emEspera }];
+        return [{ id: t.id, titulo: t.titulo, dataLimite: String(t.data_limite || '').slice(0, 10), emEspera }];
     }), [inProgressActions]);
 
     const actionsByDay = useMemo(() => {
@@ -1410,6 +1411,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 dayNum: d.getDate(),
                 monthName: ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][d.getMonth()],
                 count: doDia.length,
+                // Em andamento primeiro, em espera depois -- mesma ordem visual da barra.
+                acoes: [...doDia].sort((a, b) => Number(a.emEspera) - Number(b.emEspera)),
                 active: doDia.length - waiting,
                 waiting,
                 isToday: i === 0
@@ -1734,6 +1737,57 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#9333ea]" />Em andamento</span>
                                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#f59e0b]" />Em espera</span>
                             </div>
+
+                            {/* Próximas ações (D+1 a D+6): hoje já está no card "Ações de hoje".
+                                stopPropagation porque o cartão inteiro navega para a galeria. */}
+                            {actionsByDay.slice(1).some(day => day.count > 0) && (
+                                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowNextActions(v => !v)}
+                                        aria-expanded={showNextActions}
+                                        className={`flex items-center gap-1.5 text-[11px] font-bold ${isDark ? 'text-[#ddb8ff]' : 'text-[#7800ce]'}`}
+                                    >
+                                        {showNextActions ? 'Ocultar próximas ações' : 'Ver próximas ações'}
+                                        <svg
+                                            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                            strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                                            className="transition-transform"
+                                            style={{ transform: showNextActions ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                        >
+                                            <path d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </button>
+                                    {showNextActions && (
+                                        <div className="mt-3 flex flex-col gap-3">
+                                            {actionsByDay.slice(1).filter(day => day.count > 0).map(day => (
+                                                <div key={day.dateStr}>
+                                                    <p className="m-0 mb-1 text-[10px] font-bold uppercase tracking-widest font-mono text-slate-400">
+                                                        {String(day.dayNum).padStart(2, '0')} {day.monthName} · {day.count}
+                                                    </p>
+                                                    <div className="flex flex-col">
+                                                        {day.acoes.map(acao => (
+                                                            <button
+                                                                key={acao.id}
+                                                                type="button"
+                                                                title={acao.titulo}
+                                                                onClick={() => onOpenTask?.(acao.id)}
+                                                                disabled={!onOpenTask}
+                                                                className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] ${
+                                                                    isDark ? 'text-slate-300 hover:bg-white/5' : 'text-[#4d4354] hover:bg-[#f5f3ff]'
+                                                                }`}
+                                                            >
+                                                                <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${acao.emEspera ? 'bg-[#f59e0b]' : 'bg-[#9333ea]'}`} />
+                                                                <span className="min-w-0 flex-1 truncate">{acao.titulo}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </DashboardCard>
 
