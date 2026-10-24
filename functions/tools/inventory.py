@@ -733,6 +733,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="retoma um objetivo cuja abertura o dono já confirmou (criar_objetivo_whatsapp, no piso); o "
         "ciclo seguinte pode mandar mensagem ao contato dentro dos limites aprovados.",
     ),
+    "decidir_objetivo_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
+        "consultar_objetivos_whatsapp",
+        dados_sensiveis_categoria="conversa com terceiro em nome do dono",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="objetivos_whatsapp.decidir_pelo_agente: a decisão do agente residente entra no mesmo _aplicar do "
+        "Gemini (validacao_mensagem, prazo, sem progresso, rascunho se aprovar_cada_mensagem); só vale para "
+        "objetivo em andamento cuja abertura o dono aprovou. Repetir 'responder' manda outra mensagem.",
+    ),
     "encerrar_objetivo_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "consultar_objetivos_whatsapp",

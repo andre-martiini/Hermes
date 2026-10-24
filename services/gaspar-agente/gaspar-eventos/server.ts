@@ -392,7 +392,16 @@ async function tick() {
     if (!(chat.endsWith('@lid') || chat.endsWith('@c.us') || grupo)) continue
     // Avisos técnicos do WhatsApp (criptografia, mudança de grupo etc.): não são mensagem de ninguém.
     if (TIPOS_TECNICOS.has(tipo)) continue
+    // Conversa com Modo Objetivo ativo: o agente conduz (objetivos_whatsapp.decidir_pelo_agente).
+    const ponteiro = grupo ? null : await lerDoc(`objetivos_whatsapp_ativos/${encodeURIComponent(chat)}`)
+    const objetivoId = ponteiro ? String(str(ponteiro.objetivo_id) || '') : ''
+    const objetivo = objetivoId ? await lerDoc(`objetivos_whatsapp/${encodeURIComponent(objetivoId)}`) : null
+    const estadoObjetivo = objetivo ? String(str(objetivo.estado) || '') : ''
+    const comObjetivo = ['em_andamento', 'aguardando_dono', 'pausado'].includes(estadoObjetivo)
     if (str(f.from_me) === true) {
+      // No Modo Objetivo as mensagens do próprio objetivo também saem como do André; o backend
+      // separa o eco e pausa o objetivo quando ele escreve de verdade.
+      if (comObjetivo) continue
       // O André respondeu direto no celular: só avisa se o agente recebeu algo desse chat nas últimas
       // 48 h (senão cada mensagem dele gastaria tokens), e tira da fila o que estava pendente do chat.
       const ultimo = cursor.recebidos[chat]
@@ -409,9 +418,13 @@ async function tick() {
       if (Date.now() - Date.parse(t) > 7 * 86400e3) delete cursor.recebidos[k]
     const texto = str(f.content) || str(f.transcription_text)
       || (tipo === 'ptt' || tipo === 'audio' ? await transcreverAudioWhatsapp(f) : `[${tipo}]`)
+    const prefixo = comObjetivo
+      ? `[MODO OBJETIVO ${estadoObjetivo} | objetivo_id ${objetivoId} | ${String(str(objetivo!.objetivo) || '').slice(0, 200)} | concluir quando: ${String(str(objetivo!.criterio_conclusao) || '').slice(0, 200)}]\n`
+      : ''
     await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: chat, chat_name: str(f.chat_name),
-      autor: str(f.author_name), message_type: tipo, message_id: str(f.wa_message_id), ...(grupo ? { grupo } : {}) },
-      texto)
+      autor: str(f.author_name), message_type: tipo, message_id: str(f.wa_message_id), ...(grupo ? { grupo } : {}),
+      ...(comObjetivo ? { objetivo_id: objetivoId, objetivo_estado: estadoObjetivo } : {}) },
+      prefixo + texto)
   }
   // 3. promessas vencidas
   for (const d of await runQuery('promessas_abertas', [eq('estado', 'vencida'), gt('vence_em', cursor.promessas)], 'vence_em')) {
