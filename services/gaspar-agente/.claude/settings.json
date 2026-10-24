@@ -73,7 +73,8 @@
       "mcp__claude_ai_Gmail__forward",
       "mcp__claude_ai_Google_Calendar__respond_to_event",
       "mcp__claude_ai_Google_Calendar__delete_event",
-      "mcp__claude_ai_Google_Drive__share_file"
+      "mcp__claude_ai_Google_Drive__share_file",
+      "mcp__claude_ai_Sistema_Hermes__excluir_item_financeiro_v2"
     ],
     "deny": [
       "Read(//c/Users/Bolsista/Repositorios/Hermes/firebase_service_account_key.json)",
