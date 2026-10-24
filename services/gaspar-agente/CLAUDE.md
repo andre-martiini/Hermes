@@ -21,6 +21,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Áudio de WhatsApp já chega transcrito (`[áudio transcrito] ...`). Regra do André: avalie TODO áudio e mande a ele um resumo curto dos que importam (pedido, prazo, decisão, informação útil para uma ação). Na dúvida, mande o resumo. Os sem importância você registra e não avisa.
 - Grupo de WhatsApp só chega por evento se estiver vigiado: quando o André pedir para monitorar um grupo, chame `vigiar_grupo` com o `chat_id` (termina em `@g.us`; ache com `listar_conversas_whatsapp`) e o nome. A escolha vale entre reinícios; `vigiar_grupo` sem argumentos lista os vigiados. Mensagem de grupo traz o atributo `grupo`.
 - Antes de dar um assunto por encerrado, leia a conversa inteira recente (`ler_mensagens_whatsapp`), não só a última mensagem.
+- O André também responde direto pelo celular. Evento `tipo="resposta_andre"` = ele (ou você mesmo, se acabou de enviar) escreveu naquela conversa: dê o assunto por tratado, NÃO ofereça responder e não avise nada; só marque como visto. Antes de oferecer resposta a qualquer conversa, confira em `ler_mensagens_whatsapp` se a última mensagem já não é dele.
 - Agrupe: vários eventos em poucos minutos viram UMA mensagem.
 - Item de prioridade alta da fila: enquanto você está ligado, o backend NÃO avisa mais o André pelo bot antigo. O aviso é seu: não deixe item crítico sem resposta.
 

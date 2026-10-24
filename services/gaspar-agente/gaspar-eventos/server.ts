@@ -50,9 +50,9 @@ const CURSOR_FILE = join(STATE, 'cursor.json')
 // pendentes: eventos entregues e ainda não marcados como vistos; voltam para a sessão depois de um reinício.
 type Pendente = { meta: Record<string, string>; content: string }
 // grupos: grupos de WhatsApp que o agente pediu para vigiar (chat_id -> nome), via tool vigiar_grupo.
-type Cursor = { atencao: string; whatsapp: string; promessas: string; reacoes: string; vistos: string[]; pendentes: Record<string, Pendente>; grupos: Record<string, string> }
+type Cursor = { atencao: string; whatsapp: string; promessas: string; reacoes: string; vistos: string[]; pendentes: Record<string, Pendente>; grupos: Record<string, string>; recebidos: Record<string, string> }
 const cursor: Cursor = { atencao: new Date(Date.now() - 6 * 3600e3).toISOString(), whatsapp: new Date().toISOString(),
-  promessas: new Date().toISOString(), reacoes: new Date().toISOString(), vistos: [], pendentes: {}, grupos: {},
+  promessas: new Date().toISOString(), reacoes: new Date().toISOString(), vistos: [], pendentes: {}, grupos: {}, recebidos: {},
   ...(existsSync(CURSOR_FILE) ? JSON.parse(readFileSync(CURSOR_FILE, 'utf8')) : {}) }
 const saveCursor = () => writeFileSync(CURSOR_FILE, JSON.stringify(cursor, null, 2))
 
@@ -389,9 +389,24 @@ async function tick() {
     // Canais (@newsletter) -- nas 400 mensagens mais recentes, 90% eram desses três e só gastariam tokens.
     const chat = String(str(f.chat_id)), tipo = String(str(f.message_type))
     const grupo = cursor.grupos[chat]
-    if (str(f.from_me) === true || !(chat.endsWith('@lid') || chat.endsWith('@c.us') || grupo)) continue
+    if (!(chat.endsWith('@lid') || chat.endsWith('@c.us') || grupo)) continue
     // Avisos técnicos do WhatsApp (criptografia, mudança de grupo etc.): não são mensagem de ninguém.
     if (TIPOS_TECNICOS.has(tipo)) continue
+    if (str(f.from_me) === true) {
+      // O André respondeu direto no celular: só avisa se o agente recebeu algo desse chat nas últimas
+      // 48 h (senão cada mensagem dele gastaria tokens), e tira da fila o que estava pendente do chat.
+      const ultimo = cursor.recebidos[chat]
+      if (!ultimo || Date.now() - Date.parse(ultimo) > 48 * 3600e3) continue
+      for (const [k, p] of Object.entries(cursor.pendentes))
+        if (k.startsWith('wa:') && p.meta.chat_id === chat) delete cursor.pendentes[k]
+      const dele = String(str(f.content) || str(f.transcription_text) || `[${tipo}]`)
+      await emit(`andre:${d.id}`, { tipo: 'resposta_andre', chat_id: chat, chat_name: str(f.chat_name), message_id: str(f.wa_message_id) },
+        `André respondeu nesta conversa (pelo celular ou por você): ${dele.length > 300 ? dele.slice(0, 300) + ' [...]' : dele}`)
+      continue
+    }
+    cursor.recebidos[chat] = new Date().toISOString()
+    for (const [k, t] of Object.entries(cursor.recebidos))
+      if (Date.now() - Date.parse(t) > 7 * 86400e3) delete cursor.recebidos[k]
     const texto = str(f.content) || str(f.transcription_text)
       || (tipo === 'ptt' || tipo === 'audio' ? await transcreverAudioWhatsapp(f) : `[${tipo}]`)
     await emit(`wa:${d.id}`, { tipo: 'whatsapp', chat_id: chat, chat_name: str(f.chat_name),
