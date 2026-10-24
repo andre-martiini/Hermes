@@ -66,6 +66,7 @@ Ajustes do primeiro dia de uso (22/10):
 - **Drive e e-mail:** pesquisa e leitura no Google Drive liberadas; criar, alterar, copiar ou compartilhar arquivo pedem aval, e apagar é proibido. O pulso busca e-mail lido também, porque o André lê no celular antes.
 - **Memória do Telegram entre reinícios:** a tool `conversa_telegram` relê as transcrições do perfil do agente (`~/.claude-gaspar/projects`) e devolve só a conversa do Telegram (mensagens do André, áudios transcritos e respostas do agente), de todas as sessões das últimas 24 h. O agente a chama ao iniciar. Não grava nada novo: usa o histórico que o Claude Code já mantém.
 - **Menos turnos:** `awaySummaryEnabled` e `promptSuggestionEnabled` desligados (aqui e em `~/.claude-gaspar/settings.json`).
+- **Imagem de WhatsApp:** o canal baixa a imagem do Storage (`media.storage_path`, até 10 MB) para a inbox do agente e o evento traz o caminho; o agente abre com Read e avisa o André só das importantes.
 - **`CLAUDE.md`:** ciclo da sessão, agenda "Ações Gaspar", parâmetros que costumam errar e bom-dia uma vez por dia.
 
 Diferenças em relação ao plano:

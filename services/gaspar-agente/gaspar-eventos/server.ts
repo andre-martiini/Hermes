@@ -271,6 +271,29 @@ async function transcreverAudioWhatsapp(f: any): Promise<string> {
   }
 }
 
+// Imagem de WhatsApp: baixa do Storage para a inbox do agente, que abre o arquivo com a tool Read
+// (a descrição do consolidar_whatsapp leva minutos). Só imagem comum, até 10 MB.
+async function baixarImagemWhatsapp(f: any, docId: string): Promise<string> {
+  const m = f.media?.mapValue?.fields
+  const caminho = str(m?.storage_path)
+  if (!caminho) return '[imagem sem arquivo no Storage; peça a descrição ao Gaspar]'
+  if (Number(str(m?.sizeBytes)) > 10e6) return '[imagem grande demais para baixar aqui]'
+  const ext = extname(caminho).toLowerCase()
+  if (!['.jpeg', '.jpg', '.png', '.webp', '.gif'].includes(ext)) return `[imagem em formato ${ext || 'desconhecido'}; peça a descrição ao Gaspar]`
+  try {
+    const r = await fetch(`https://storage.googleapis.com/storage/v1/b/${BUCKET}/o/${encodeURIComponent(caminho)}?alt=media`,
+      { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
+    if (!r.ok) throw new Error(`storage ${r.status}`)
+    mkdirSync(INBOX, { recursive: true })
+    const destino = join(INBOX, `whatsapp-${docId.replace(/[^\w-]/g, '_')}${ext}`)
+    writeFileSync(destino, new Uint8Array(await r.arrayBuffer()))
+    return `[imagem: abra com a tool Read em ${destino}]`
+  } catch (e) {
+    log(`imagem ${caminho}: ${e}`)
+    return `[imagem sem arquivo (${String(e).slice(0, 80)}); peça a descrição ao Gaspar]`
+  }
+}
+
 // ---------- telemetria: soma o usage das transcricoes de hoje do perfil do agente ----------
 // O Claude Code grava uma linha por bloco de conteudo com o mesmo usage: deduplica por message.id.
 function consumoHoje() {
@@ -416,8 +439,9 @@ async function tick() {
     cursor.recebidos[chat] = new Date().toISOString()
     for (const [k, t] of Object.entries(cursor.recebidos))
       if (Date.now() - Date.parse(t) > 7 * 86400e3) delete cursor.recebidos[k]
-    const texto = str(f.content) || str(f.transcription_text)
-      || (tipo === 'ptt' || tipo === 'audio' ? await transcreverAudioWhatsapp(f) : `[${tipo}]`)
+    const legenda = str(f.content) || str(f.transcription_text)
+    const texto = tipo === 'image' ? [legenda, await baixarImagemWhatsapp(f, d.id)].filter(Boolean).join('\n')
+      : legenda || (tipo === 'ptt' || tipo === 'audio' ? await transcreverAudioWhatsapp(f) : `[${tipo}]`)
     const prefixo = comObjetivo
       ? `[MODO OBJETIVO ${estadoObjetivo} | objetivo_id ${objetivoId} | ${String(str(objetivo!.objetivo) || '').slice(0, 200)} | concluir quando: ${String(str(objetivo!.criterio_conclusao) || '').slice(0, 200)}]\n`
       : ''
