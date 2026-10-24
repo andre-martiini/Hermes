@@ -570,26 +570,7 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 9/N -- passo 2 (wiring em sombra): functions/extracao_compromissos_sombra.py, chamado no fim de on_whatsapp_message_atencao (isolado em try/except, depois de resposta_esperada). Atrás de system/settings.atencao.extracao_estruturada.enabled (padrão DESLIGADO = reversão). Só mensagem from_me de chat individual, fora do bot, em que a seleção barata (classificar_mensagem) achou candidato; chama o modelo leve, valida com validar_extracao e grava em extracao_compromissos_sombra apenas ids, classes e concordância (comparar_sombra) -- nunca o texto. Não altera promessas_abertas, fila de atenção nem A06. Custo contido por max_por_dia (padrão 200; contador incrementado antes de ler, dia em America/Sao_Paulo) e dedupe por doc já existente (reentrega do gatilho)."
-estado: validado
-inicio: "2026-10-23T13:45:00Z"
-fim: "2026-10-23T14:40:00Z"
-decisoes:
-  - id: p07-sub9-triagem
-    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia."
-  - id: p07-sub9-arquivo-execucao
-    motivo: "execucao.md arquivado (blocos P07 sub 5 e 6 -> execucao-archive-p07sub5-sub6.md)."
-  - id: p07-sub9-limitacoes
-    motivo: "Aceitas por ser sombra desligada por padrão: dedupe não atômico (duas entregas simultâneas do mesmo evento podem contar em dobro avaliadas/concordam); client Gemini sem timeout próprio (bloco roda por último no gatilho, após os demais detectores); ValueError do SDK conta como saida_invalida; cerca ```JSON em maiúsculas conta como saida_invalida. Reabrir antes de ligar a flag."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4582 OK (P07 sub 8); test_extracao_compromissos_sombra 7 OK (novo); DEPOIS 4589 OK (head final, após o ajuste do Codex; teste novo de idade da mensagem)."
-revisao_adversarial:
-  - "Rodada 1: contador lido-depois-incrementado (limite furável), reentrega duplicando chamada/métrica, bloco antes de resposta_esperada, dia UTC no contador. Corrigido (incremento antes de ler, dedupe por documento, bloco por último, fuso local). Rodada 2: prazos relativos usavam data UTC (dia errado entre 21h e 24h) -> corrigido com hoje local; dedupe concorrente não atômico aceito (ver limitações). Não houve rodada 3 sobre a correção do fuso (troca de uma linha, coberta pela suíte). Codex (P2) na PR: mensagem antiga do bot restaurada por backfill escapava da marca de 6h -> só mensagens com timestamp entre -5min e 1h são avaliadas (IDADE_MAX); teste novo."
-pendencias:
-  - "P07: suíte F02 com limiar de precisão da seção 11 (medir com dados da sombra); wiring de correlação/cumprimento/prazo na fila de atenção somente com flag/sombra; revisão final do pacote para pacote_concluido: P07."
-```
+# (Em 2026-10-24 o bloco "P07 sub-entrega 9/N" foi movido para docs/autonomia/execucao-archive-p07sub9.md, sem alteração de conteúdo.)
 
 ---
 
@@ -635,4 +616,28 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): não achou defeito que altere o fluxo antigo ou grave texto; só os três menores acima, aceitos. Codex na PR: (P1) promessas do A06 ("te retorno amanhã") não têm objeto documental e (P2) a captura do WhatsApp não grava media.filename, então o veredito novo nunca fecharia e a métrica não mediria nada -> campos avaliavel/motivo_nao_avaliavel (promessa_sem_objeto | midia_sem_nome) e divergencia nao_avaliavel à parte; 2 testes novos. Rodada 2 (focada): mídia só com nome correto sem texto e vereditos firmes em promessa sem objeto eram classificados como nao_avaliavel indevidamente ou enviesavam a métrica -> nao_avaliavel só quando o veredito é incerto por promessa_sem_objeto/anexo_nao_confere; 2 testes novos. Rodada 3 não feita (correção de uma condição, coberta por testes)."
 pendencias:
   - "P07: a sombra de cumprimento só mede promessas com objeto documental e mídia nomeada; para medir o A06 real é preciso capturar media.filename (services/whatsapp-capture) ou usar a extração estruturada da sub 9; wiring de prazo/follow-up (revalidar_followup + atencao_compromisso) na fila de atenção somente com flag/sombra; medir precisão com dados reais da sombra antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
+```
+
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 12/N -- wiring em sombra da revalidação de follow-up: functions/followup_compromissos_sombra.py, chamado em vencer_promessas (atencao_whatsapp.py) para cada promessa que vai virar vencida, isolado em try/except. Atrás de system/settings.atencao.followup_sombra.enabled (padrão DESLIGADO, exige True booleano = reversão). Monta o contexto real (mensagens do chat desde a promessa sem as do bot, rascunho pendente no outbox por item_atencao_id, estado do item de atenção), roda autonomy.followup_guard.revalidar_followup e grava em followup_compromissos_sombra só ids, ação nova, motivo, próxima avaliação e divergencia (ambos_alertam | so_novo_adia | so_novo_suprime | nenhum_alerta) -- nunca texto. Contadores diários em followup_compromissos_sombra_contadores. Sem modelo, sem envio; promessas, fila de atenção e A07 não alteradas."
+estado: validado
+inicio: "2026-10-24T13:00:00Z"
+fim: "2026-10-24T14:00:00Z"
+decisoes:
+  - id: p07-sub12-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 8h BRT; nenhuma execução paralela da linha de autonomia."
+  - id: p07-sub12-arquivo-execucao
+    motivo: "execucao.md arquivado (bloco P07 sub 9 -> execucao-archive-p07sub9.md)."
+  - id: p07-sub12-limitacoes
+    motivo: "Aceitas por ser sombra desligada por padrão: contador gravado depois do documento (falha subconta; os documentos são a fonte); até ~200 leituras seriais de mensagem do bot por promessa; registro do Gaspar vale 6h (eco antigo conta como intervenção e só aumenta so_novo_adia); flag lida por promessa. Reabrir antes de ligar a flag."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4611 OK (P07 sub 11); test_followup_compromissos_sombra 13 OK (novo); DEPOIS 4624 OK (head final)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): sem defeito grave; corrigidos (a) item de atenção já fechado pelo dono distorcia a métrica -> divergencia nenhum_alerta e (b) respostas do bot contavam como intervenção humana -> filtradas com eh_mensagem_do_bot; 1 teste novo e 1 ajustado. Rodada 2 (focada nas correções): não achou nada que bloqueie; apenas as limitações acima."
+pendencias:
+  - "P07: capturar media.filename (services/whatsapp-capture) ou usar a extração estruturada para a sombra de cumprimento medir o A06 real; ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
 ```
