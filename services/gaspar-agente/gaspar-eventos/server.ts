@@ -170,9 +170,33 @@ function githubLer(caminho: string): string {
   const arquivo = /\/contents\/[^?]*\.[\w]+(\?|$)/.test(rota) || /\/readme(\?|$)/.test(rota)
   const args = ['api', '-X', 'GET', ...(arquivo ? ['-H', 'Accept: application/vnd.github.raw'] : []), rota]
   const r = Bun.spawnSync(['gh', ...args], { timeout: 30_000 })
-  const saida = r.stdout.toString()
+  let saida = r.stdout.toString()
   if (r.exitCode !== 0) throw new Error(`gh: ${(r.stderr.toString() || saida).slice(0, 300)}`)
+  if (!arquivo) saida = compactarGithub(saida)
   return saida.length > 60_000 ? saida.slice(0, 60_000) + '\n[... cortado em 60 mil caracteres]' : saida
+}
+
+// Listas da API do GitHub repetem dezenas de campos (urls, ids, avatar) em cada item: uma linha
+// por item com o que importa. Item que não é PR, issue, commit, repo ou arquivo vai como JSON.
+function compactarGithub(json: string): string {
+  let dados: any
+  try { dados = JSON.parse(json) } catch { return json }
+  const dia = (s: any) => String(s ?? '').slice(0, 10)
+  const linha = (x: any): string => {
+    if (x?.sha && x?.commit) return `${x.sha.slice(0, 7)} ${dia(x.commit.author?.date)} ${x.commit.author?.name ?? ''}: ${String(x.commit.message ?? '').split('\n')[0]}`
+    if (x?.number !== undefined && x?.title !== undefined) {
+      const estado = x.merged_at ? 'merged' : x.state
+      const tipo = x.pull_request || x.head ? 'PR' : 'issue'
+      return `${tipo} #${x.number} [${estado}] ${dia(x.created_at)} ${x.user?.login ?? ''}: ${x.title}`
+    }
+    if (x?.full_name) return `${x.full_name}${x.private ? ' (privado)' : ''} push ${dia(x.pushed_at)}${x.description ? ` - ${x.description}` : ''}`
+    if (x?.type && x?.path !== undefined && x?.name) return `${x.type === 'dir' ? 'pasta' : 'arquivo'} ${x.path}${x.type === 'file' ? ` (${x.size} bytes)` : ''}`
+    return JSON.stringify(x)
+  }
+  if (Array.isArray(dados)) return `${dados.length} itens\n` + dados.map(linha).join('\n')
+  if (dados?.number !== undefined && dados?.title !== undefined)
+    return linha(dados) + (dados.body ? `\n\n${String(dados.body).slice(0, 4000)}` : '')
+  return json
 }
 
 // Imagem do Drive: o download_file_content devolve base64 em JSON; grande demais, o Claude Code
