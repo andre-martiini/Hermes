@@ -37,6 +37,7 @@ def _mensagens(db, chat_id: str, desde: datetime) -> list[dict]:
         db.collection("whatsapp_messages")
         .where("chat_id", "==", chat_id)
         .where("timestamp", ">=", desde)
+        .order_by("timestamp", direction="DESCENDING")  # direção do índice composto implantado
         .limit(LIMITE_MENSAGENS)
         .stream()
     )

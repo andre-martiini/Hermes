@@ -95,7 +95,7 @@ class FollowupSombraTest(unittest.TestCase):
         fcs._mensagens(db, "c1", PROMETIDO)
         fcs._rascunho_pendente(db, CHAVE)
         chamadas = str(db.mock_calls)
-        for esperado in ("'chat_id', '==', 'c1'", "'item_atencao_id', '==', 'promessa_sem_retorno:c1:m1'"):
+        for esperado in ("'chat_id', '==', 'c1'", "order_by('timestamp', direction='DESCENDING')", "'item_atencao_id', '==', 'promessa_sem_retorno:c1:m1'"):
             self.assertIn(esperado, chamadas)
 
 

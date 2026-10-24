@@ -637,7 +637,7 @@ testes:
   resultados:
     - "functions/ completo ANTES 4611 OK (P07 sub 11); test_followup_compromissos_sombra 13 OK (novo); DEPOIS 4624 OK (head final)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): sem defeito grave; corrigidos (a) item de atenção já fechado pelo dono distorcia a métrica -> divergencia nenhum_alerta e (b) respostas do bot contavam como intervenção humana -> filtradas com eh_mensagem_do_bot; 1 teste novo e 1 ajustado. Rodada 2 (focada nas correções): não achou nada que bloqueie; apenas as limitações acima."
+  - "Rodada 1 (agente sem contexto): sem defeito grave; corrigidos (a) item de atenção já fechado pelo dono distorcia a métrica -> divergencia nenhum_alerta e (b) respostas do bot contavam como intervenção humana -> filtradas com eh_mensagem_do_bot; 1 teste novo e 1 ajustado. Rodada 2 (focada nas correções): não achou nada que bloqueie; apenas as limitações acima. Codex (P2) na PR: a query de mensagens (igualdade + intervalo) pedia timestamp ascendente, mas o índice composto implantado é chat_id ASC, timestamp DESC -> order_by timestamp DESC explícito (o guarda reordena sozinho); teste ajustado."
 pendencias:
   - "P07: capturar media.filename (services/whatsapp-capture) ou usar a extração estruturada para a sombra de cumprimento medir o A06 real; ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
 ```
