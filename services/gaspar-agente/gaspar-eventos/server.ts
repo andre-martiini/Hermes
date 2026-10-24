@@ -99,6 +99,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   description: 'Liga ou desliga a vigilancia de um grupo de WhatsApp: com ela, as mensagens do grupo chegam como eventos. Sem argumentos, so lista os vigiados. Persiste entre reinicios.',
   inputSchema: { type: 'object', properties: { chat_id: { type: 'string', description: 'termina em @g.us' },
     nome: { type: 'string' }, ativo: { type: 'boolean' } } } }, {
+  name: 'github_ler',
+  description: 'Le (so leitura) os repositorios do Andre no GitHub pela API. caminho relativo a api.github.com, ex.: "user/repos?per_page=100", "repos/andre-martiini/eco/contents/README.md", "repos/andre-martiini/eco/contents/src" (lista pasta), "repos/andre-martiini/eco/pulls?state=all", "repos/andre-martiini/eco/issues", "repos/andre-martiini/eco/commits?per_page=10". Arquivo vem em texto puro.',
+  inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }, {
+  name: 'abrir_imagem_drive',
+  description: 'Quando download_file_content do Google Drive estoura e o resultado vai para um arquivo .txt em tool-results, passe esse caminho aqui: a imagem e decodificada e salva na pasta de anexos; depois abra o caminho devolvido com a tool Read.',
+  inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }, {
   name: 'ler_planilha',
   description: 'Le uma planilha (xlsx, xls, ods, csv) que o Andre mandou pelo Telegram e devolve cada aba como CSV. Passe o caminho devolvido por download_attachment.',
   inputSchema: { type: 'object', properties: { caminho: { type: 'string' }, aba: { type: 'string', description: 'so esta aba (opcional)' },
@@ -122,6 +128,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     }
     return { content: [{ type: 'text', text: JSON.stringify(cursor.grupos) }] }
   }
+  if (req.params.name === 'github_ler')
+    return { content: [{ type: 'text', text: githubLer(String((req.params.arguments as any).caminho)) }] }
+  if (req.params.name === 'abrir_imagem_drive')
+    return { content: [{ type: 'text', text: abrirImagemDrive(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name === 'ler_planilha') {
     const a = req.params.arguments as any
     return { content: [{ type: 'text', text: lerPlanilha(String(a.caminho), a.aba ? String(a.aba) : undefined, Number(a.max_linhas) || 200) }] }
@@ -150,6 +160,42 @@ async function transcrever(caminho: string): Promise<string> {
 }
 // Planilha mandada pelo Telegram: mesma trava de pasta do áudio (só a inbox do bot).
 const PLANILHA = new Set(['.xlsx', '.xlsm', '.xls', '.ods', '.csv'])
+// GitHub, só leitura: usa o `gh` já autenticado neste notebook, sempre com GET, e só aceita
+// rotas dos repositórios do André (e a listagem dele). Escrever continua pelo fluxo do Argos.
+const ROTA_GITHUB = /^(user\/repos|repos\/andre-martiini\/[\w.-]+(\/(contents|pulls|issues|commits|branches|readme|languages|releases|compare|git\/trees)(\/[^\s?]*)?)?)(\?[^\s]*)?$/
+function githubLer(caminho: string): string {
+  const rota = caminho.trim().replace(/^\/+/, '').replace(/^https:\/\/api\.github\.com\//, '')
+  if (!ROTA_GITHUB.test(rota) || rota.includes('..')) throw new Error('rota fora do permitido (só leitura dos repositórios andre-martiini)')
+  // Arquivo (não pasta) vem em texto puro, em vez de JSON com base64.
+  const arquivo = /\/contents\/[^?]*\.[\w]+(\?|$)/.test(rota) || /\/readme(\?|$)/.test(rota)
+  const args = ['api', '-X', 'GET', ...(arquivo ? ['-H', 'Accept: application/vnd.github.raw'] : []), rota]
+  const r = Bun.spawnSync(['gh', ...args], { timeout: 30_000 })
+  const saida = r.stdout.toString()
+  if (r.exitCode !== 0) throw new Error(`gh: ${(r.stderr.toString() || saida).slice(0, 300)}`)
+  return saida.length > 60_000 ? saida.slice(0, 60_000) + '\n[... cortado em 60 mil caracteres]' : saida
+}
+
+// Imagem do Drive: o download_file_content devolve base64 em JSON; grande demais, o Claude Code
+// grava em tool-results/*.txt. Só lê desses arquivos do perfil do agente e só grava na inbox.
+const MAGICOS: [string, string][] = [['89504e47', '.png'], ['ffd8ff', '.jpg'], ['47494638', '.gif'], ['52494646', '.webp']]
+function abrirImagemDrive(caminho: string): string {
+  const p = resolve(caminho)
+  const projetos = resolve(process.env.CLAUDE_CONFIG_DIR ?? '', 'projects').toLowerCase() + sep
+  if (!p.toLowerCase().startsWith(projetos) || !p.toLowerCase().includes(sep + 'tool-results' + sep) || !/google_drive/i.test(p))
+    throw new Error('só abro resultado do Google Drive gravado em tool-results do agente')
+  const bruto = readFileSync(p, 'utf8')
+  let b64 = ''
+  try { b64 = String(JSON.parse(bruto).content ?? '') } catch { b64 = bruto }
+  const bytes = Buffer.from(b64.replace(/\s/g, ''), 'base64')
+  const cabeca = bytes.subarray(0, 4).toString('hex')
+  const ext = MAGICOS.find(([m]) => cabeca.startsWith(m))?.[1]
+  if (!ext) throw new Error('o conteúdo não é PNG, JPEG, GIF nem WebP')
+  mkdirSync(INBOX, { recursive: true })
+  const destino = join(INBOX, `drive-${Date.now()}${ext}`)
+  writeFileSync(destino, bytes)
+  return destino
+}
+
 function lerPlanilha(caminho: string, aba: string | undefined, maxLinhas: number): string {
   const p = resolve(caminho)
   if (!process.env.TELEGRAM_STATE_DIR || !p.toLowerCase().startsWith(INBOX.toLowerCase() + sep) || !PLANILHA.has(extname(p).toLowerCase()))
