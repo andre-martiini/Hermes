@@ -1154,8 +1154,13 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
 
     // Painel de etapas restantes, usado pelas ações ativas e pelas em espera.
     const painelEtapas = (a: ResumoAcao) => {
+        // Etapa sem data herda a data da ação; a lista segue a data efetiva, e o
+        // empate mantém a ordem do plano (sort estável).
+        const dataDaAcao = String(a.data_limite || '').slice(0, 10);
+        const dataEfetiva = (etapa: ActionPlanItem) => String(etapa.data_prevista || '').slice(0, 10) || dataDaAcao;
         const etapasAbertas = (acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [])
-            .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
+            .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa))
+            .sort((x, y) => (dataEfetiva(x) || '9999').localeCompare(dataEfetiva(y) || '9999'));
         return (
             <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
                 {carregandoPlanos[a.id] ? (
@@ -1169,7 +1174,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                         </p>
                         {etapasAbertas.map(etapa => {
                             const estado = estadoDaSubtarefa(etapa);
-                            const dataPrevista = String(etapa.data_prevista || '').slice(0, 10);
+                            const dataPrevista = dataEfetiva(etapa);
                             return (
                                 <div key={etapa.id} className="flex items-start gap-2 text-xs leading-relaxed">
                                     <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
