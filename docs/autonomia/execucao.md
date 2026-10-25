@@ -584,29 +584,6 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 
 ```yaml
-pacote: "P07 sub-entrega 13/N -- captura de media.filename: services/whatsapp-capture/nome_arquivo.js (nomeArquivoMidia) e captureMedia (index.js) passam a gravar media.filename (nome do documento do whatsapp-web.js; aparado, sem controles C0/C1, marcas bidi e invisíveis, substituto solto -> U+FFFD, máx. 255 pontos de código; vazio/ausente = campo omitido). Permite à sombra de cumprimento (sub 11) conferir o objeto prometido contra o nome do anexo e medir o A06 real. Só novas capturas e o reparo de mídia; sem mudança Python, sem flag nova (campo aditivo)."
-estado: validado
-inicio: "2026-10-24T17:00:00Z"
-fim: "2026-10-24T17:40:00Z"
-decisoes:
-  - id: p07-sub13-triagem
-    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia."
-  - id: p07-sub13-arquivo-execucao
-    motivo: "execucao.md arquivado (bloco P07 sub 10 -> execucao-archive-p07sub10.md)."
-  - id: p07-sub13-limitacoes
-    motivo: "Aceitas: mensagens de documento já gravadas com storage_path não ganham filename (reparo só olha as sem storage_path; backfill do histórico não coberto); truncamento por ponto de código pode cortar combinante (>255 chars, cosmético)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4636 OK (main atual; Python intocado); DEPOIS 4636 OK. services/whatsapp-capture: nome_arquivo_test 5 OK (novo)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): sem defeito de escrita no Firestore, perda de mensagem ou regressão no reparo; apontou higiene (substituto solto, marcas bidi/invisíveis fora de C0) -> corrigido com 1 teste novo. Rodada 2 não feita (correção de uma regex pura, coberta por teste)."
-pendencias:
-  - "P07: ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão com dados reais antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
-```
-
----
-
-```yaml
 pacote: "P07 revisão final do pacote -- só documentação (sem mudança de código). Conferência dos 8 passos do plano contra main: 1 exemplos sintéticos + 2 regras baratas (autonomy/commitments.py), 3 múltiplos compromissos/substituição, 4 prazo expresso x estimativa (prazo_followup.py), 5 correlação entre canais (correlacao_entregaveis.py), 6 avaliador de cumprimento parcial/completo com negação (cumprimento.py), 7 revalidação antes do follow-up (followup_guard.py), 8 escrita na atenção por chave/versão (atencao_compromisso.py); suíte F02 (avaliacao_f02.py). Extração, cumprimento e follow-up ligados à fila SÓ em sombra, flags desligadas por padrão (atencao.extracao_sombra / cumprimento_sombra / followup_sombra.enabled)."
 estado: validado
 inicio: "2026-10-24T20:00:00Z"
@@ -692,4 +669,29 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): não achou bug; apenas a limitação de reentrega acima, de projeto."
 pendencias:
   - "P07: passo 8 agora tem wiring em sombra. Falta a revisão final do pacote (pacote_concluido: P07) conferindo os 8 passos com chamadores; ativação das sombras só com aval do André."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 16/N -- wiring em sombra do passo 4 (prazo expresso x estimativa de acompanhamento): followup_compromissos_sombra.registrar passa a chamar autonomy.prazo_followup.planejar_acompanhamento (que não tinha chamador em produção) e grava no resumo acompanhamento_origem/verificar_em/amostra e acompanhamento_delta_horas contra o vence_em fixo do fluxo antigo. Histórico de horas de resposta do dono derivado das últimas 200 mensagens do chat (horas_de_resposta). Mesma flag da sombra de follow-up (padrão DESLIGADO); só números e datas, nunca texto; falha vira acompanhamento_erro sem derrubar a sombra."
+estado: validado
+inicio: "2026-10-25T16:45:00Z"
+fim: "2026-10-25T17:30:00Z"
+decisoes:
+  - id: p07-sub16-triagem
+    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia. Revisão final do P07 achou o passo 4 (prazo_followup) sem chamador: a revisão final anterior (revogada) não cobria isso; pacote_concluido: P07 segue pendente."
+  - id: p07-sub16-sem-prazo-expresso
+    motivo: "A sombra planeja com prazo=None (estimativa); o prazo expresso da extração estruturada ainda não é lido aqui. Limitação declarada."
+  - id: p07-sub16-bot-no-historico
+    motivo: "Respostas do bot saem como from_me e o registro que as identifica expira em 6h, então não dá para filtrá-las no histórico (e filtrar geraria até 200 leituras por promessa). Latências < 2 min são tratadas como automáticas; respostas do bot mais lentas contaminam a amostra para baixo (piso de 1 h limita)."
+  - id: p07-sub16-arquivo
+    motivo: "execucao.md em 49523 bytes: bloco P07 sub 13 arquivado em execucao-archive-p07sub13.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4652 OK (diário); DEPOIS 4657 OK (+5 em test_followup_compromissos_sombra)."
+revisao_adversarial:
+  - "Rodada 1: 1 achado real (respostas do bot contavam como do dono) -> correção. Rodada 2 sobre a correção: 2 achados reais (filtro só vale 6h; leituras sequenciais por mensagem) -> filtro trocado por piso de latência, sem leituras. Rodada 3: não achou nada."
+pendencias:
+  - "P07: ler prazo expresso da extração na sombra de acompanhamento; ativação das sombras só com aval do André; depois, nova revisão final do pacote (pacote_concluido: P07)."
 ```
