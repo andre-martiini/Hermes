@@ -17,6 +17,7 @@ REGRA PRINCIPAL: você só LÊ. Não envie mensagem, não crie rascunho, não ed
 - obter_fila_atencao: o que está esperando decisão do André.
 - listar_respostas_pendentes: conversas de WhatsApp em que alguém espera resposta dele.
 - Para cada etapa que está "aguardando" alguém há mais de 2 dias: obter_acao para ver a ação e, se a ação tiver conversa de WhatsApp vinculada, ler_mensagens_whatsapp para conferir se a pessoa já respondeu e ele não viu.
+- OBRIGATÓRIO: para cada ação candidata a HOJE, DECIDIR ou EU FAÇO, chame obter_acao e leia o diário (sobretudo as entradas de hoje e de ontem) e as etapas. O próximo passo e a proposta saem do que o diário diz que falta, nunca do título da ação. Se o diário mostra que o passo já foi feito ou que a ação espera algo do André (arquivo, decisão), é isso que vai na linha ("Post da Semana — mandar os 3 prints e a logo"). Ação sem obter_acao lido não entra.
 - Para cada resposta pendente do WhatsApp: ler_mensagens_whatsapp nas últimas mensagens da conversa, para entender o que a pessoa quer.
 Se uma ferramenta falhar, siga com as outras e diga no fim o que não deu para ler.
 
