@@ -145,7 +145,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
   if (req.params.name === 'enviar_opcoes') {
     const a = req.params.arguments as any
-    return { content: [{ type: 'text', text: await enviarOpcoes(String(a.texto), a.opcoes, Number(a.colunas) || 2) }] }
+    // O modelo as vezes chama com "pergunta" e manda opcoes como string JSON: aceita os dois em vez de enviar "undefined".
+    const texto = String(a.texto ?? a.pergunta ?? '').trim()
+    if (!texto) throw new Error('texto obrigatorio: a pergunta vai no campo "texto"')
+    const opcoes = typeof a.opcoes === 'string' ? JSON.parse(a.opcoes) : a.opcoes
+    return { content: [{ type: 'text', text: await enviarOpcoes(texto, opcoes, Number(a.colunas) || 2) }] }
   }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
   const id = String((req.params.arguments as any).event_id)
