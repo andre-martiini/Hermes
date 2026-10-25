@@ -24,11 +24,12 @@ def _db(ligada=True, estado_atencao=None):
     return db
 
 
-def _rodar(db, mensagens=(PROPRIA,), rascunho=False):
+def _rodar(db, mensagens=(PROPRIA,), rascunho=False, historico=(), promessa=PROMESSA):
     with mock.patch.object(fcs, "_mensagens", return_value=list(mensagens)), \
+         mock.patch.object(fcs, "_historico", return_value=list(historico)), \
          mock.patch("secretario_whatsapp.eh_mensagem_do_bot", side_effect=lambda m, _db: m.get("bot", False)), \
          mock.patch.object(fcs, "_rascunho_pendente", return_value=rascunho):
-        return fcs.registrar(db, PROMESSA, CHAVE, AGORA)
+        return fcs.registrar(db, promessa, CHAVE, AGORA)
 
 
 class FollowupSombraTest(unittest.TestCase):
@@ -72,6 +73,48 @@ class FollowupSombraTest(unittest.TestCase):
                  "content": "Segue a planilha"}
         r = _rodar(_db(), mensagens=[PROPRIA, envio])
         self.assertEqual(r["motivo"], "ja_cumprido")
+
+    def test_acompanhamento_padrao_sem_historico(self):
+        promessa = {**PROMESSA, "vence_em": PROMETIDO + timedelta(hours=48)}
+        r = _rodar(_db(), promessa=promessa)
+        self.assertEqual(r["acompanhamento_origem"], "padrao")
+        self.assertEqual(r["acompanhamento_amostra"], 0)
+        self.assertEqual(r["acompanhamento_delta_horas"], -24.0)
+
+    def test_acompanhamento_usa_historico_do_contato(self):
+        hist = []
+        for i in range(6):
+            base = PROMETIDO - timedelta(days=i + 1)
+            hist.append({"from_me": False, "timestamp": base})
+            hist.append({"from_me": True, "timestamp": base + timedelta(hours=3)})
+        r = _rodar(_db(), historico=hist)
+        self.assertEqual((r["acompanhamento_origem"], r["acompanhamento_amostra"]), ("historico_contato", 6))
+        self.assertNotIn("acompanhamento_delta_horas", r)  # promessa sem vence_em
+
+    def test_respostas_automaticas_rapidas_nao_entram_no_historico(self):
+        hist = []
+        for i in range(6):
+            base = PROMETIDO - timedelta(days=i + 1)
+            hist.append({"from_me": False, "timestamp": base})
+            hist.append({"from_me": True, "timestamp": base + timedelta(seconds=30)})
+        r = _rodar(_db(), historico=hist)
+        self.assertEqual((r["acompanhamento_origem"], r["acompanhamento_amostra"]), ("padrao", 0))
+
+    def test_falha_do_acompanhamento_nao_derruba_o_resumo(self):
+        with mock.patch.object(fcs, "planejar_acompanhamento", side_effect=RuntimeError("x")):
+            r = _rodar(_db())
+        self.assertTrue(r["acompanhamento_erro"])
+        self.assertEqual(r["divergencia"], "ambos_alertam")
+
+    def test_horas_de_resposta(self):
+        t0 = PROMETIDO
+        msgs = [
+            {"from_me": False, "timestamp": t0}, {"from_me": False, "timestamp": t0 + timedelta(hours=1)},
+            {"from_me": True, "timestamp": t0 + timedelta(hours=4)}, {"from_me": True, "timestamp": t0 + timedelta(hours=5)},
+            {"from_me": False, "timestamp": t0 + timedelta(days=30)}, {"from_me": True, "timestamp": t0 + timedelta(days=40)},
+            {"from_me": True, "timestamp": None},
+        ]
+        self.assertEqual(fcs.horas_de_resposta(msgs), [4.0])
 
     def test_nunca_grava_texto(self):
         db = _db()
