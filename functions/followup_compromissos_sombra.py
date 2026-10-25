@@ -15,11 +15,14 @@ troca. Sem chamada de modelo.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
+from autonomy.commitments import extrair_prazo_expresso
 from autonomy.atencao_compromisso import deve_gravar, montar_item_atencao
 from autonomy.prazo_followup import planejar_acompanhamento
 from autonomy.followup_guard import ADIAR, ENVIAR, ESTADOS_ATENCAO_FECHADOS, SUPRIMIR, revalidar_followup
 
+_FUSO = ZoneInfo("America/Sao_Paulo")
 SOMBRA_COLLECTION = "followup_compromissos_sombra"
 CONTADORES_COLLECTION = "followup_compromissos_sombra_contadores"
 ITENS_COLLECTION = "atencao_compromissos_sombra"  # item por chave+versão (passo 8), fora da fila real
@@ -84,10 +87,20 @@ def horas_de_resposta(mensagens: list[dict]) -> list[float]:
 
 def _acompanhamento(db, promessa: dict, chat_id: str, prometido_em: datetime) -> dict:
     """Passo 4: quando o planejador novo olharia de novo, contra o `vence_em` fixo
-    do fluxo antigo. Sem prazo expresso (a extração ainda roda à parte, em sombra)."""
+    do fluxo antigo. O prazo expresso vem da seleção barata sobre o texto da promessa
+    (`extrair_prazo_expresso`, determinístico, sem modelo); prazo inutilizável
+    (anterior à promessa) cai na estimativa e é contado em `acompanhamento_prazo_descartado`."""
+    descartado = False
     try:
         horas = horas_de_resposta(_historico(db, chat_id, prometido_em))
-        plano = planejar_acompanhamento(None, prometido_em, horas)
+        prazo = extrair_prazo_expresso(promessa.get("texto") or "", prometido_em.astimezone(_FUSO).date())
+        try:
+            plano = planejar_acompanhamento(prazo, prometido_em, horas)
+        except ValueError:
+            if prazo is None:
+                raise
+            descartado = True
+            plano = planejar_acompanhamento(None, prometido_em, horas)
     except Exception:  # medição auxiliar nunca derruba a sombra
         return {"acompanhamento_erro": True}
     saida = {
@@ -95,6 +108,8 @@ def _acompanhamento(db, promessa: dict, chat_id: str, prometido_em: datetime) ->
         "acompanhamento_verificar_em": plano.verificar_em.isoformat(),
         "acompanhamento_amostra": plano.amostra,
     }
+    if descartado:
+        saida["acompanhamento_prazo_descartado"] = True
     vence_em = promessa.get("vence_em")
     if isinstance(vence_em, datetime) and vence_em.utcoffset() is not None:
         saida["acompanhamento_delta_horas"] = round((plano.verificar_em - vence_em).total_seconds() / 3600, 2)

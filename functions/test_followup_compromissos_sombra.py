@@ -12,7 +12,7 @@ PROMETIDO = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
 AGORA = PROMETIDO + timedelta(hours=30)
 CHAVE = "promessa_sem_retorno:c1:m1"
 PROMESSA = {"_doc_id": "c1_m1", "chat_id": "c1", "mensagem_id": "m1",
-            "texto": "Vou te enviar a planilha amanhã", "prometido_em": PROMETIDO, "estado": "aberta"}
+            "texto": "Vou te enviar a planilha", "prometido_em": PROMETIDO, "estado": "aberta"}
 PROPRIA = {"from_me": True, "wa_message_id": "m1", "timestamp": PROMETIDO, "content": PROMESSA["texto"]}
 
 
@@ -80,6 +80,30 @@ class FollowupSombraTest(unittest.TestCase):
         self.assertEqual(r["acompanhamento_origem"], "padrao")
         self.assertEqual(r["acompanhamento_amostra"], 0)
         self.assertEqual(r["acompanhamento_delta_horas"], -24.0)
+
+    def test_acompanhamento_usa_prazo_expresso_do_texto(self):
+        promessa = {**PROMESSA, "texto": "Vou te enviar a planilha amanhã", "vence_em": PROMETIDO + timedelta(hours=48)}
+        r = _rodar(_db(), promessa=promessa)
+        self.assertEqual(r["acompanhamento_origem"], "prazo_expresso")
+        # amanhã = 23/10 (dia local); olha 24/10 00:00 -03 = 03:00Z; vence_em era 24/10 12:00Z
+        self.assertEqual(r["acompanhamento_verificar_em"], "2026-10-24T03:00:00+00:00")
+        self.assertEqual(r["acompanhamento_delta_horas"], -9.0)
+        self.assertNotIn("acompanhamento_prazo_descartado", r)
+
+    def test_prazo_expresso_sem_data_cai_na_estimativa(self):
+        promessa = {**PROMESSA, "texto": "Vou te enviar a planilha dia 22"}
+        r = _rodar(_db(), promessa=promessa)
+        self.assertEqual(r["acompanhamento_origem"], "padrao")
+
+    def test_prazo_inutilizavel_e_descartado_e_contado(self):
+        promessa = {**PROMESSA, "texto": "Vou te enviar a planilha hoje"}
+        with mock.patch.object(fcs, "extrair_prazo_expresso") as ex:
+            from datetime import date
+            from autonomy.commitments import Prazo
+            ex.return_value = Prazo("expresso", "ontem", date(2026, 10, 20))
+            r = _rodar(_db(), promessa=promessa)
+        self.assertEqual(r["acompanhamento_origem"], "padrao")
+        self.assertTrue(r["acompanhamento_prazo_descartado"])
 
     def test_acompanhamento_usa_historico_do_contato(self):
         hist = []
