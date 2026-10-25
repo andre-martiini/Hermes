@@ -454,6 +454,12 @@ def _processar_promessa(db, mensagem: dict) -> None:
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha na sombra de cumprimento: {exc}")
 
+    try:  # sombra da correlação de entregáveis (P07): só mede, nunca altera o fluxo
+        import correlacao_compromissos_sombra
+        correlacao_compromissos_sombra.registrar(db, mensagem, promessa_atual, decisao["acao"])
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha na sombra de correlação: {exc}")
+
     if decisao["acao"] == "criar":
         nova = decisao["promessa"]
         doc_id = _promessa_doc_id(nova)
