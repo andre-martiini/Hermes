@@ -78,11 +78,37 @@ class FollowupSombraTest(unittest.TestCase):
         _rodar(db)
         self.assertNotIn("planilha", str(db.em(fcs.SOMBRA_COLLECTION)))
 
+    def test_grava_item_por_chave_e_versao_em_colecao_propria(self):
+        db = _db()
+        _rodar(db)
+        itens = db.em(fcs.ITENS_COLLECTION)
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(itens[0][1], "c1_m1__v1")
+        item = itens[0][2]
+        self.assertEqual((item["acao"], item["estado"], item["modo"]), ("enviar", "aberto", "sombra"))
+        self.assertNotIn("planilha", str(item))
+        self.assertEqual(db.em("atencao"), [])  # nunca toca a fila real
+
+    def test_item_suprimido_nasce_encerrado(self):
+        db = _db(estado_atencao="resolvido")
+        _rodar(db)
+        item = db.em(fcs.ITENS_COLLECTION)[0][2]
+        self.assertEqual((item["estado"], item["proxima_avaliacao"]), ("encerrado", None))
+
+    def test_item_existente_terminal_nao_e_reaberto(self):
+        db = _db()
+        db.dados[(fcs.ITENS_COLLECTION, "c1_m1__v1")] = {
+            "id": "c1_m1__v1", "chave_compromisso": "c1_m1", "versao": 1, "acao": "enviar",
+            "motivo": "x", "estado": "enviado", "avaliado_em": AGORA.isoformat(), "proxima_avaliacao": None}
+        _rodar(db)
+        self.assertEqual(db.em(fcs.ITENS_COLLECTION), [])
+
     def test_reentrega_nao_duplica(self):
         db = _db()
         _rodar(db)
         self.assertIsNone(_rodar(db))
         self.assertEqual(len(db.em(fcs.SOMBRA_COLLECTION)), 1)
+        self.assertEqual(len(db.em(fcs.ITENS_COLLECTION)), 1)
 
     def test_promessa_sem_identidade_ignorada(self):
         db = _db()

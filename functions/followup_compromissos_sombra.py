@@ -6,7 +6,8 @@ ligada, roda `autonomy.followup_guard.revalidar_followup` sobre o contexto real
 do chat (mensagens posteriores, rascunho pendente no outbox, estado do item de
 atenção) e grava em `followup_compromissos_sombra` só ids, a decisão nova e a
 divergência em relação ao fluxo antigo (que sempre alerta o dono). Nunca grava
-texto, nunca altera promessas nem a fila de atenção, nunca envia nada: mede
+texto, nunca altera promessas nem a fila de atenção (o item por chave/versão
+do passo 8 vai para `atencao_compromissos_sombra`, coleção própria), nunca envia nada: mede
 quantos alertas do A07 o guarda novo suprimiria ou adiaria antes de qualquer
 troca. Sem chamada de modelo.
 """
@@ -15,11 +16,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from autonomy.atencao_compromisso import montar_item_atencao
+from autonomy.atencao_compromisso import deve_gravar, montar_item_atencao
 from autonomy.followup_guard import ADIAR, ENVIAR, ESTADOS_ATENCAO_FECHADOS, SUPRIMIR, revalidar_followup
 
 SOMBRA_COLLECTION = "followup_compromissos_sombra"
 CONTADORES_COLLECTION = "followup_compromissos_sombra_contadores"
+ITENS_COLLECTION = "atencao_compromissos_sombra"  # item por chave+versão (passo 8), fora da fila real
 LIMITE_MENSAGENS = 200
 STATUS_RASCUNHO_PENDENTE = ["aguardando_aprovacao", "aguardando_janela"]
 DIVERGENCIAS = {ENVIAR: "ambos_alertam", ADIAR: "so_novo_adia", SUPRIMIR: "so_novo_suprime"}
@@ -89,7 +91,8 @@ def registrar(db, promessa: dict, chave_atencao: str, agora: datetime | None = N
         "mensagem_id": promessa.get("mensagem_id"),
     }
     decisao = revalidar_followup(compromisso, contexto)
-    proxima = montar_item_atencao(doc_id, 1, decisao, agora)["proxima_avaliacao"]
+    item = montar_item_atencao(doc_id, 1, decisao, agora)
+    proxima = item["proxima_avaliacao"]
     resumo = {
         "promessa_doc_id": doc_id,
         "chat_id": chat_id,
@@ -108,4 +111,9 @@ def registrar(db, promessa: dict, chave_atencao: str, agora: datetime | None = N
         {"avaliadas": firestore.Increment(1), resumo["divergencia"]: firestore.Increment(1)},
         merge=True,
     )
+    # por último: se falhar, o resumo e os contadores (que a reentrega não refaz) já estão gravados
+    item_ref = db.collection(ITENS_COLLECTION).document(item["id"])
+    existente = item_ref.get()
+    if deve_gravar((existente.to_dict() or None) if existente.exists else None, item):
+        item_ref.set({**item, "modo": "sombra"})
     return resumo
