@@ -681,7 +681,13 @@ def _build_suggestion_keyboard(msg_id: str, reativar_sugerido: bool, tem_mutacoe
 
 
 def _send_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_fn) -> bool:
-    text = _build_suggestion_message(data)
+    from atencao import agente_residente_ativo
+
+    # Com o agente residente ligado, ele vê o e-mail e a conversa e registra no diário sozinho;
+    # a sugestão fica pendente e só vira cartão se o agente cair antes de expirar.
+    if agente_residente_ativo(db, datetime.now(timezone.utc)):
+        return False
+    text =_build_suggestion_message(data)
     keyboard = _build_suggestion_keyboard(
         msg_id,
         bool(data.get("reativar_sugerido")),

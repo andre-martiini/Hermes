@@ -577,8 +577,11 @@ def _alert_pending_media_window(db, telegram_chat_id, wa_chat_id: str, chat_name
     pôde ser recuperado e a janela não tem texto para análise — sem isso, o descarte
     seria silencioso e uma mensagem potencialmente importante passaria despercebida."""
     from main import _send_telegram_message_raw
+    from atencao import agente_residente_ativo
 
-    digest_id = _window_digest_id(wa_chat_id, messages)
+    if agente_residente_ativo(db, datetime.now(timezone.utc)):
+        return  # o agente recebe a mídia como evento e avisa se importar
+    digest_id =_window_digest_id(wa_chat_id, messages)
     marker_ref = db.collection("whatsapp_ingest_alerts").document(digest_id)
     try:
         if marker_ref.get().exists:

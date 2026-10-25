@@ -199,6 +199,10 @@ def avaliar(db, mensagem: dict, resultado: dict, entradas: list[dict], *,
 
 
 def _avisar_no_telegram(db, aviso_id: str, aviso: dict, texto: str) -> None:
+    from atencao import agente_residente_ativo
+
+    if agente_residente_ativo(db, datetime.now(timezone.utc)):
+        return  # o agente recebe a mesma mensagem do WhatsApp como evento e decide se avisa
     try:
         from main import _resolve_default_telegram_chat_id
         from telegram_utils import _get_telegram_token, _send_telegram_message_with_keyboard
