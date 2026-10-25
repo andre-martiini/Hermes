@@ -582,28 +582,6 @@ base_commit: 27d41c2c4b544650d97fd77758b0d1cd44be685f
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 12/N -- wiring em sombra da revalidação de follow-up: functions/followup_compromissos_sombra.py, chamado em vencer_promessas (atencao_whatsapp.py) para cada promessa que vai virar vencida, isolado em try/except. Atrás de system/settings.atencao.followup_sombra.enabled (padrão DESLIGADO, exige True booleano = reversão). Monta o contexto real (mensagens do chat desde a promessa sem as do bot, rascunho pendente no outbox por item_atencao_id, estado do item de atenção), roda autonomy.followup_guard.revalidar_followup e grava em followup_compromissos_sombra só ids, ação nova, motivo, próxima avaliação e divergencia (ambos_alertam | so_novo_adia | so_novo_suprime | nenhum_alerta) -- nunca texto. Contadores diários em followup_compromissos_sombra_contadores. Sem modelo, sem envio; promessas, fila de atenção e A07 não alteradas."
-estado: validado
-inicio: "2026-10-24T13:00:00Z"
-fim: "2026-10-24T14:00:00Z"
-decisoes:
-  - id: p07-sub12-triagem
-    motivo: "Nenhuma PR aberta no início do disparo das 8h BRT; nenhuma execução paralela da linha de autonomia."
-  - id: p07-sub12-arquivo-execucao
-    motivo: "execucao.md arquivado (bloco P07 sub 9 -> execucao-archive-p07sub9.md)."
-  - id: p07-sub12-limitacoes
-    motivo: "Aceitas por ser sombra desligada por padrão: contador gravado depois do documento (falha subconta; os documentos são a fonte); até ~200 leituras seriais de mensagem do bot por promessa; registro do Gaspar vale 6h (eco antigo conta como intervenção e só aumenta so_novo_adia); flag lida por promessa. Reabrir antes de ligar a flag."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4611 OK (P07 sub 11); test_followup_compromissos_sombra 13 OK (novo); DEPOIS 4624 OK (head final)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): sem defeito grave; corrigidos (a) item de atenção já fechado pelo dono distorcia a métrica -> divergencia nenhum_alerta e (b) respostas do bot contavam como intervenção humana -> filtradas com eh_mensagem_do_bot; 1 teste novo e 1 ajustado. Rodada 2 (focada nas correções): não achou nada que bloqueie; apenas as limitações acima. Codex (P2) na PR: a query de mensagens (igualdade + intervalo) pedia timestamp ascendente, mas o índice composto implantado é chat_id ASC, timestamp DESC -> order_by timestamp DESC explícito (o guarda reordena sozinho); teste ajustado."
-pendencias:
-  - "P07: capturar media.filename (services/whatsapp-capture) ou usar a extração estruturada para a sombra de cumprimento medir o A06 real; ligar as 3 sombras (extração, cumprimento, follow-up) só com aval do André e medir precisão antes de qualquer fechamento automático; revisão final do pacote para pacote_concluido: P07."
-```
-
----
 
 ```yaml
 pacote: "P07 sub-entrega 13/N -- captura de media.filename: services/whatsapp-capture/nome_arquivo.js (nomeArquivoMidia) e captureMedia (index.js) passam a gravar media.filename (nome do documento do whatsapp-web.js; aparado, sem controles C0/C1, marcas bidi e invisíveis, substituto solto -> U+FFFD, máx. 255 pontos de código; vazio/ausente = campo omitido). Permite à sombra de cumprimento (sub 11) conferir o objeto prometido contra o nome do anexo e medir o A06 real. Só novas capturas e o reparo de mídia; sem mudança Python, sem flag nova (campo aditivo)."
@@ -691,4 +669,27 @@ revisao_adversarial:
 pendencias:
   - "P07 sub 15: gravação do item de atenção por chave/versão (passo 8) em sombra. Depois, nova revisão final; ativação das sombras só com aval do André."
   - "Limitação conhecida (Codex, PR #524): mídia restaurada depois por repairMissingMedia atualiza o doc e não dispara on_document_created, então as sombras de cumprimento e correlação não medem esse caminho (viés amostral). Mesma limitação da sombra de cumprimento; corrigir exige gatilho de update idempotente, fora do escopo de uma sombra. Considerar antes de ler as medições."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 15/N -- gravação em sombra do item de atenção por chave/versão (passo 8): followup_compromissos_sombra.registrar passa a gravar também o item de autonomy.atencao_compromisso (montar_item_atencao + deve_gravar) na coleção própria atencao_compromissos_sombra, id <promessa>__v1, com modo=sombra. Mesma flag da sombra de follow-up (system/settings.atencao.followup_sombra.enabled, padrão DESLIGADO). Só ids, ação, motivo constante, estado e datas -- nunca texto. A fila real (atencao) não é escrita."
+estado: validado
+inicio: "2026-10-25T14:00:00Z"
+fim: "2026-10-25T14:25:00Z"
+decisoes:
+  - id: p07-sub15-colecao-propria
+    motivo: "Gravar na fila real `atencao` mudaria comportamento de produção; coleção própria permite comparar o item novo com a fila antiga antes de qualquer troca."
+  - id: p07-sub15-ordem
+    motivo: "O item é gravado por último (depois do resumo e dos contadores). Limitação de projeto apontada na revisão: falha transitória na gravação do item não é refeita na reentrega (o resumo já existe) e gera perda esporádica de itens na medição."
+  - id: p07-sub15-arquivo
+    motivo: "execucao.md em 50487 bytes: bloco P07 sub 12 arquivado em execucao-archive-p07sub12.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4645 OK (diário); DEPOIS 4652 OK (+7 sobre o diário: 3 novos em test_followup_compromissos_sombra; o restante veio de PRs já mescladas em main)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): não achou bug; apenas a limitação de reentrega acima, de projeto."
+pendencias:
+  - "P07: passo 8 agora tem wiring em sombra. Falta a revisão final do pacote (pacote_concluido: P07) conferindo os 8 passos com chamadores; ativação das sombras só com aval do André."
 ```
