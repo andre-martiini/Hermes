@@ -111,7 +111,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
     max_linhas: { type: 'number', description: 'linhas por aba (padrao 200, max 2000)' } }, required: ['caminho'] } }, {
   name: 'transcrever_audio',
   description: 'Transcreve (pt-BR) um audio que o Andre mandou pelo Telegram. Passe o caminho devolvido por download_attachment.',
-  inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }] }))
+  inputSchema: { type: 'object', properties: { caminho: { type: 'string' } }, required: ['caminho'] } }, {
+  name: 'enviar_opcoes',
+  description: 'Manda ao Andre no Telegram uma mensagem com botoes de resposta (teclado do Telegram). O toque num botao chega como mensagem normal dele com o texto do botao; ele tambem pode digitar outra coisa. Use para perguntas de escolha: sim/nao, opcoes de horario, "faco eu?". Texto puro, sem markdown.',
+  inputSchema: { type: 'object', properties: { texto: { type: 'string' },
+    opcoes: { type: 'array', items: { type: 'string' }, description: '2 a 8 rotulos curtos (ate 40 caracteres), ex.: ["Sim, pode fazer", "Alterar", "Nao"]' },
+    colunas: { type: 'number', description: 'botoes por linha (padrao 2)' } }, required: ['texto', 'opcoes'] } }] }))
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   if (req.params.name === 'agora')
     return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
@@ -138,6 +143,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   }
   if (req.params.name === 'transcrever_audio')
     return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
+  if (req.params.name === 'enviar_opcoes') {
+    const a = req.params.arguments as any
+    return { content: [{ type: 'text', text: await enviarOpcoes(String(a.texto), a.opcoes, Number(a.colunas) || 2) }] }
+  }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
   const id = String((req.params.arguments as any).event_id)
   delete cursor.pendentes[id]
@@ -146,6 +155,29 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   return { content: [{ type: 'text', text: 'ok' }] }
 })
 await mcp.connect(new StdioServerTransport())
+
+// ---------- botoes no Telegram ----------
+// Teclado de resposta (ReplyKeyboardMarkup): o toque vira mensagem de texto comum, que o plugin
+// Telegram ja entrega a sessao. Botao inline exigiria mudar o plugin, que so trata callbacks perm:*.
+// O destino e sempre o allowFrom (o Andre) e o token fica neste processo, fora do alcance do modelo.
+async function enviarOpcoes(texto: string, opcoes: unknown, colunas: number): Promise<string> {
+  if (!Array.isArray(opcoes) || opcoes.length < 2 || opcoes.length > 8) throw new Error('opcoes: de 2 a 8 rotulos')
+  const rotulos = opcoes.map(o => String(o).trim().slice(0, 40)).filter(Boolean)
+  const dir = process.env.TELEGRAM_STATE_DIR
+  if (!dir) throw new Error('TELEGRAM_STATE_DIR ausente')
+  const token = /^TELEGRAM_BOT_TOKEN=(.+)$/m.exec(readFileSync(join(dir, '.env'), 'utf8'))?.[1]?.trim()
+  const chat = (JSON.parse(readFileSync(join(dir, 'access.json'), 'utf8')).allowFrom ?? [])[0]
+  if (!token || !chat) throw new Error('token ou chat do Telegram nao encontrado')
+  const linhas: { text: string }[][] = []
+  for (let i = 0; i < rotulos.length; i += Math.max(1, colunas)) linhas.push(rotulos.slice(i, i + Math.max(1, colunas)).map(text => ({ text })))
+  const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chat, text: texto.slice(0, 4000), reply_markup: { keyboard: linhas,
+      one_time_keyboard: true, resize_keyboard: true, input_field_placeholder: 'Ou escreva outra coisa' } }) })
+  const j = await r.json() as any
+  if (!j.ok) throw new Error(`telegram ${r.status}: ${j.description ?? ''}`)
+  return `enviado (message_id ${j.result.message_id})`
+}
 
 // ---------- transcricao (Groq Whisper, a mesma do Gaspar em functions/telegram_utils.py) ----------
 // So aceita arquivos de audio da pasta onde o plugin Telegram salva anexos: uma mensagem maliciosa
