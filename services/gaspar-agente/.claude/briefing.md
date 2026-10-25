@@ -2,9 +2,9 @@ Briefing da manhã (todos os dias, às 05:00). Veio da tarefa agendada "Briefing
 
 COMO FAZER: o levantamento tem dezenas de leituras. Para elas não ficarem no seu contexto o dia todo, chame a tool `Agent` (subagent_type `general-purpose`) com o bloco PROMPT DO SUBAGENTE abaixo, inteiro. Ele devolve o texto pronto. Você manda pelo `reply` do Telegram em texto simples (`format` padrão), numa mensagem só (o plugin divide se passar do limite), e anota no registro do dia que o briefing saiu. Se o subagente falhar, mande um bom-dia curto com no máximo 3 pontos e diga que o briefing completo falhou.
 
-Logo depois do briefing, se ele trouxer a seção EU FAÇO POR VOCÊ, mande a primeira proposta com `enviar_opcoes` ("André, consigo fazer isto por você: <proposta>. Quer que eu faça?", opções "Sim, faz", "Alterar", "Não"). Com "Sim, faz", execute e conte o resultado; com "Alterar", pergunte o que mudar; depois ofereça a próxima, uma por vez.
+Mande ao André só a parte antes de "=== TEXTOS ==="; guarde os textos para quando ele escolher o item. Logo depois do briefing, se houver a seção EU FAÇO, mande a proposta com `enviar_opcoes` (formato do CLAUDE.md, opções "Sim, faz", "Alterar", "Não").
 
-Quando o André responder com os números ("1 e 3 manda, 2 reagenda para sexta, 5 já resolvi"), execute só o que ele aprovou, item por item. Texto a terceiros que já veio exato no briefing e foi aprovado pelo número conta como aprovado. Depois de cada gravação, confirme pelo resultado da ferramenta; se der errado, diga qual item e por quê. Nunca pague, assine ou aceite termos em nome dele.
+Quando o André responder com os números ("1 cobra, 3 reagenda sexta, 5 já resolvi"), execute o que não envia nada a terceiros. Para cada item que manda mensagem, mostre o texto exato e o destinatário com `enviar_opcoes` ("Envia", "Alterar", "Não"): só o "Envia" autoriza. Depois de cada gravação, confirme pelo resultado da ferramenta; se der errado, diga qual item e por quê. Nunca pague, assine ou aceite termos em nome dele.
 
 === PROMPT DO SUBAGENTE ===
 Prepare o briefing da manhã do André a partir do Gaspar (tools `mcp__claude_ai_Sistema_Hermes__*`). Português do Brasil, frases curtas, sem jargão. Chame o sistema de Gaspar. Use a tool `agora` para a data.
@@ -20,33 +20,28 @@ REGRA PRINCIPAL: você só LÊ. Não envie mensagem, não crie rascunho, não ed
 - Para cada resposta pendente do WhatsApp: ler_mensagens_whatsapp nas últimas mensagens da conversa, para entender o que a pessoa quer.
 Se uma ferramenta falhar, siga com as outras e diga no fim o que não deu para ler.
 
-2. MONTE O BRIEFING NESTA ORDEM (texto simples para Telegram: sem asteriscos, sem tabelas, títulos em MAIÚSCULAS):
+2. MONTE O BRIEFING CURTO (diretriz do André, 25/10: cabe numa tela de celular, até uns 1.200 caracteres). Texto simples para Telegram: sem asteriscos, sem tabelas, títulos em MAIÚSCULAS. Cada item é UMA linha. Corte tudo que não pede nada dele hoje.
 
 Bom dia, André — <dia da semana>, <dd/mm>
 
-AS 3 PRIORIDADES DE HOJE
-No máximo 3 ações. Para cada uma: o título, POR QUE é prioridade hoje (prazo, alguém esperando, compromisso que depende dela, ação que destrava outras) e o próximo passo concreto, em uma linha. Escolha pelo impacto e pelo prazo, não pela ordem da lista.
+HOJE
+No máximo 3 prioridades, uma linha cada: "<título> — <próximo passo>". O porquê só se não for óbvio, em 3 a 5 palavras.
 
 AGENDA
-Os compromissos de hoje com horário e o que ele precisa preparar antes, se houver. Depois, em uma linha, o que tem de importante nos próximos 7 dias.
+Uma linha com os horários de hoje. Uma linha com até 3 itens dos próximos dias que pedem preparo antes (o resto ele vê na agenda).
 
-PARA ENCAMINHAR (a parte mais importante)
-Lista numerada (1, 2, 3... contínua até o fim) com TODAS as pendências: respostas do WhatsApp, etapas esperando terceiros, itens da fila de atenção. Não corte a lista. Para cada item:
-- quem, sobre o quê e há quanto tempo;
-- o que você encontrou (ex.: "ela respondeu ontem às 18h e ninguém viu", "sem resposta há 5 dias");
-- o encaminhamento proposto, de um destes tipos: responder (com o texto exato, na voz do André, em primeira pessoa), cobrar (com o texto exato), reagendar (com a data sugerida), marcar como feito (com o motivo) ou deixar como está (com o motivo).
-Agrupe por tipo de encaminhamento quando a lista for grande. Itens repetidos ou já resolvidos: diga isso em vez de repetir.
-Textos para terceiros: primeira pessoa, como se fosse o André; nunca sugerir ligação ou videochamada; a esposa dele é Alnínive (Amor, Gatinha ou Fofinha), nunca "Tininha".
+DECIDIR
+Lista numerada, no máximo 6 itens, só o que pede decisão ou ação dele: "<n>. <quem/assunto>, <situação em poucas palavras> → <proposta: cobrar segunda, responder, reagendar para X, marcar feito>". NÃO escreva aqui o texto para terceiros; ele sai quando o André escolher o item. Fora da lista: tudo que é "deixar como está", depende de outro item ou de terceiro, ou já foi decidido. Se houver mais de 6, junte o resto numa linha "e mais N menores (peça 'resto')".
 
-EU FAÇO POR VOCÊ
-De 1 a 3 ações prioritárias (de hoje, atrasadas ou com prazo na semana) que o agente consegue adiantar sozinho com o que tem: redigir rascunho de e-mail ou de WhatsApp, criar evento ou lembrete, pesquisar no Drive, no e-mail ou no acervo e resumir, montar um documento no Drive, organizar etapas da ação, conduzir uma conversa no Modo Objetivo (marcar horário, cobrar, confirmar). Para cada uma: "<título da ação>: eu <o que exatamente vou fazer, com o resultado que ele recebe>". Proposta concreta, não genérica ("eu redijo o e-mail ao Fulano pedindo o termo assinado até sexta", não "posso ajudar com isso"). Nada que pague, assine, aceite termos ou decida por ele. Se não houver nenhuma, omita a seção.
-
-O RESTO DO DIA
-As demais ações de hoje em uma linha cada, agrupadas por área (trabalho no Ifes, projetos, pessoal), sem explicação.
+EU FAÇO
+Uma linha, a melhor proposta do que o agente consegue adiantar sozinho (rascunho, evento, pesquisa e resumo, documento no Drive, etapas, conversa no Modo Objetivo): "<ação>: eu <o que faço e o que ele recebe>". Nada que pague, assine, aceite termos ou decida por ele. Sem proposta boa, omita.
 
 ATENÇÃO
-Só se houver: prazo vencendo em até 3 dias, ação atrasada há mais de uma semana, ou algo que parece errado nos dados (data incoerente, ação duplicada). No máximo 5 linhas.
+Só prazo que vence em até 3 dias ou dado que parece errado. No máximo 2 linhas. O que não deu para ler vai numa linha final curta ("Não li: SIGFAPES, e-mail").
 
-3. FECHE COM:
-"Me responda com os números, por exemplo: '1 e 3 manda, 2 reagenda para sexta, 5 já resolvi'. Eu executo na hora e confirmo cada um."
+Não inclua: o resto das ações do dia, rotinas pessoais (check-ins, pesagem, refeições), itens repetidos.
+
+3. FECHE COM uma linha: "Responda com os números (ex.: '1 cobra, 3 reagenda sexta')."
+
+Devolva também, DEPOIS do briefing e separado pela linha "=== TEXTOS ===", o texto exato proposto para cada item do DECIDIR que envolve mensagem a terceiro (número do item e texto; primeira pessoa, como se fosse o André; nunca sugerir ligação ou videochamada; a esposa dele é Alnínive, Amor, Gatinha ou Fofinha, nunca "Tininha"). Essa parte não vai para o André.
 === FIM DO PROMPT DO SUBAGENTE ===
