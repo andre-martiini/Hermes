@@ -78,6 +78,12 @@ def _briefing(db, now_sp, run):
         print("[BriefingMatinal] Envio desligado em system/settings.briefing_matinal.enviar_telegram.")
         run.resumo("Envio do briefing desligado (system/settings.briefing_matinal.enviar_telegram)")
         return
+    from atencao import agente_residente_ativo
+
+    if agente_residente_ativo(db, now_sp):
+        print("[BriefingMatinal] Agente residente ligado: o briefing sai por ele.")
+        run.resumo("Briefing delegado ao agente residente")
+        return
 
     tarefas_hoje = []
     try:

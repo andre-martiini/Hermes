@@ -71,7 +71,9 @@ def dispatch_pending_ai_notifications(db, now) -> None:
     o mesmo motor determinístico que já despacha os demais lembretes.
     """
     from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
+    from atencao import agente_residente_ativo
 
+    delegar = agente_residente_ativo(db, now)
     try:
         pending = (
             db.collection("scheduled_notifications")
@@ -84,8 +86,12 @@ def dispatch_pending_ai_notifications(db, now) -> None:
         return
 
     for doc_snap in pending:
+        if delegar:
+            # O agente residente faz esse papel; marcar evita uma rajada atrasada quando ele cair.
+            doc_snap.reference.update({"status": "delegado_agente", "sent_at": now.isoformat()})
+            continue
         data = doc_snap.to_dict() or {}
-        title = str(data.get("title") or "Gaspar IA").strip()
+        title =str(data.get("title") or "Gaspar IA").strip()
         message = str(data.get("message") or "").strip()
         category = str(data.get("category") or "geral").strip()
         icon = _CATEGORY_ICONS.get(category, "🤖")
