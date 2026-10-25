@@ -25,6 +25,9 @@ CONTADORES_COLLECTION = "followup_compromissos_sombra_contadores"
 ITENS_COLLECTION = "atencao_compromissos_sombra"  # item por chave+versão (passo 8), fora da fila real
 LIMITE_MENSAGENS = 200
 LIMITE_HISTORICO = 200
+# Respostas do bot saem pela conta do dono (from_me) e o registro que as identifica expira em 6h,
+# então não dá para separá-las no histórico: latências abaixo disto são tratadas como automáticas.
+MIN_HORAS_RESPOSTA = 2 / 60
 MAX_HORAS_RESPOSTA = 168.0  # respostas mais lentas que uma semana não são "resposta" do mesmo assunto
 STATUS_RASCUNHO_PENDENTE = ["aguardando_aprovacao", "aguardando_janela"]
 DIVERGENCIAS = {ENVIAR: "ambos_alertam", ADIAR: "so_novo_adia", SUPRIMIR: "so_novo_suprime"}
@@ -71,7 +74,7 @@ def horas_de_resposta(mensagens: list[dict]) -> list[float]:
         if m.get("from_me") is True:
             if pendente is not None:
                 horas = (m["timestamp"] - pendente).total_seconds() / 3600
-                if 0 < horas <= MAX_HORAS_RESPOSTA:
+                if MIN_HORAS_RESPOSTA <= horas <= MAX_HORAS_RESPOSTA:
                     saida.append(horas)
                 pendente = None
         elif pendente is None:
@@ -83,11 +86,7 @@ def _acompanhamento(db, promessa: dict, chat_id: str, prometido_em: datetime) ->
     """Passo 4: quando o planejador novo olharia de novo, contra o `vence_em` fixo
     do fluxo antigo. Sem prazo expresso (a extração ainda roda à parte, em sombra)."""
     try:
-        from secretario_whatsapp import eh_mensagem_do_bot
-
-        # respostas do bot saem pela conta do dono (from_me): não são resposta humana
-        historico = [m for m in _historico(db, chat_id, prometido_em) if not (m.get("from_me") is True and eh_mensagem_do_bot(m, db))]
-        horas = horas_de_resposta(historico)
+        horas = horas_de_resposta(_historico(db, chat_id, prometido_em))
         plano = planejar_acompanhamento(None, prometido_em, horas)
     except Exception:  # medição auxiliar nunca derruba a sombra
         return {"acompanhamento_erro": True}

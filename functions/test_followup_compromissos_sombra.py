@@ -91,12 +91,12 @@ class FollowupSombraTest(unittest.TestCase):
         self.assertEqual((r["acompanhamento_origem"], r["acompanhamento_amostra"]), ("historico_contato", 6))
         self.assertNotIn("acompanhamento_delta_horas", r)  # promessa sem vence_em
 
-    def test_respostas_do_bot_nao_entram_no_historico(self):
+    def test_respostas_automaticas_rapidas_nao_entram_no_historico(self):
         hist = []
         for i in range(6):
             base = PROMETIDO - timedelta(days=i + 1)
             hist.append({"from_me": False, "timestamp": base})
-            hist.append({"from_me": True, "bot": True, "timestamp": base + timedelta(minutes=1)})
+            hist.append({"from_me": True, "timestamp": base + timedelta(seconds=30)})
         r = _rodar(_db(), historico=hist)
         self.assertEqual((r["acompanhamento_origem"], r["acompanhamento_amostra"]), ("padrao", 0))
 
