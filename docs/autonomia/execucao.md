@@ -690,4 +690,5 @@ revisao_adversarial:
   - "Rodada 1: 3 achados reais (acima), corrigidos. Rodada 2 sobre a correção: não achou nada. Limitações iguais às das sombras irmãs (get-then-set não transacional)."
 pendencias:
   - "P07 sub 15: gravação do item de atenção por chave/versão (passo 8) em sombra. Depois, nova revisão final; ativação das sombras só com aval do André."
+  - "Limitação conhecida (Codex, PR #524): mídia restaurada depois por repairMissingMedia atualiza o doc e não dispara on_document_created, então as sombras de cumprimento e correlação não medem esse caminho (viés amostral). Mesma limitação da sombra de cumprimento; corrigir exige gatilho de update idempotente, fora do escopo de uma sombra. Considerar antes de ler as medições."
 ```
