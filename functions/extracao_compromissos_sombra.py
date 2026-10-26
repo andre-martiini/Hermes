@@ -18,7 +18,8 @@ from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
 
-from autonomy.commitments import NAO_RELACIONADA, classificar_mensagem
+from autonomy import compromissos_chat
+from autonomy.commitments import NAO_RELACIONADA, PROMESSA, classificar_mensagem
 from autonomy.extracao_estruturada import MAX_MENSAGEM, comparar_sombra, validar_extracao
 
 SOMBRA_COLLECTION = "extracao_compromissos_sombra"
@@ -74,6 +75,25 @@ def _chamar_modelo(db, texto: str) -> dict | None:
         raw = raw.split("```")[0].strip()
     saida = json.loads(raw)
     return saida if isinstance(saida, dict) else None
+
+
+def _compromissos_independentes(chat_id: str, doc_id: str, extraidos) -> dict:
+    """Passo 3: cada promessa firme da mensagem vira um compromisso próprio no chat
+    (autonomy.compromissos_chat). Só chaves e contagem; substituição explícita não
+    tem sinal na extração e fica fora da sombra. Falha não derruba a sombra."""
+    registro: tuple = ()
+    descartados = 0
+    for i, e in enumerate(extraidos):
+        if e.classe != PROMESSA or e.incerta:
+            continue
+        try:  # um item inválido (caractere não imprimível etc.) não descarta os outros
+            registro = compromissos_chat.abrir(registro, chat_id, doc_id, i, " ".join(e.objeto.split()))
+        except ValueError:
+            descartados += 1
+    resumo = {"n_compromissos": len(registro), "chaves_compromissos": [c.chave for c in registro]}
+    if descartados:
+        resumo["compromissos_chat_erro"] = descartados
+    return resumo
 
 
 def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar_modelo=None) -> dict | None:
@@ -135,6 +155,7 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
         cont_ref.set({"erro_modelo": firestore.Increment(1)}, merge=True)
         return None
     resumo.update(comparar_sombra(base, extraidos), n_extraidos=len(extraidos))
+    resumo.update(_compromissos_independentes(resumo["chat_id"], doc_id, extraidos))
     ref.set(resumo)
     cont_ref.set({
         "avaliadas": firestore.Increment(1),
