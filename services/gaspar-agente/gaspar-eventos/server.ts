@@ -116,7 +116,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   description: 'Manda ao Andre no Telegram uma mensagem com botoes de resposta (teclado do Telegram). O toque num botao chega como mensagem normal dele com o texto do botao; ele tambem pode digitar outra coisa. Use para perguntas de escolha: sim/nao, opcoes de horario, "faco eu?". Texto puro, sem markdown.',
   inputSchema: { type: 'object', properties: { texto: { type: 'string' },
     opcoes: { type: 'array', items: { type: 'string' }, description: '2 a 8 rotulos curtos (ate 40 caracteres), ex.: ["Sim, pode fazer", "Alterar", "Nao"]' },
-    colunas: { type: 'number', description: 'botoes por linha (padrao 2)' } }, required: ['texto', 'opcoes'] } }] }))
+    colunas: { type: 'number', description: 'botoes por linha (padrao 2)' } }, required: ['texto', 'opcoes'] } }, {
+  name: 'avisar_reserva',
+  description: 'So quando o reply do Telegram falhar com 429 (Too Many Requests) duas vezes seguidas: manda o aviso ao Andre pelo bot antigo do Gaspar. Uma mensagem juntando tudo; texto puro.',
+  inputSchema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'] } }] }))
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   if (req.params.name === 'agora')
     return { content: [{ type: 'text', text: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' }) }] }
@@ -151,6 +154,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     const opcoes = typeof a.opcoes === 'string' ? JSON.parse(a.opcoes) : a.opcoes
     return { content: [{ type: 'text', text: await enviarOpcoes(texto, opcoes, Number(a.colunas) || 2) }] }
   }
+  if (req.params.name === 'avisar_reserva')
+    return { content: [{ type: 'text', text: await avisarReserva(String((req.params.arguments as any)?.texto ?? '')) }] }
   if (req.params.name !== 'marcar_visto') throw new Error('tool desconhecida')
   const id = String((req.params.arguments as any).event_id)
   delete cursor.pendentes[id]
@@ -181,6 +186,23 @@ async function enviarOpcoes(texto: string, opcoes: unknown, colunas: number): Pr
   const j = await r.json() as any
   if (!j.ok) throw new Error(`telegram ${r.status}: ${j.description ?? ''}`)
   return `enviado (message_id ${j.result.message_id})`
+}
+
+// ---------- reserva: bot antigo do Gaspar ----------
+// Quando o Telegram bloqueia o bot do agente (429 que nao passa), o aviso sai pelo bot antigo (outro token,
+// em system/api_keys.telegram_bot_token). Mesmo destino fixo; o token nao chega ao modelo.
+async function avisarReserva(texto: string): Promise<string> {
+  const r = await fetch(`${FS}/system/api_keys`, { headers: { Authorization: `Bearer ${await getAccessToken()}` } })
+  if (!r.ok) throw new Error(`api_keys ${r.status}`)
+  const token = str(((await r.json()) as any).fields?.telegram_bot_token)
+  const chat = (JSON.parse(readFileSync(join(process.env.TELEGRAM_STATE_DIR ?? '', 'access.json'), 'utf8')).allowFrom ?? [])[0]
+  if (!token || !chat) throw new Error('token do bot antigo ou chat nao encontrado')
+  const t = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chat, text: `🛟 Gaspar Agente (pelo bot antigo; responda no bot do agente):\n\n${texto.slice(0, 3800)}` }) })
+  const j = await t.json() as any
+  if (!j.ok) throw new Error(`telegram reserva ${t.status}: ${j.description ?? ''}`)
+  return `enviado pelo bot antigo (message_id ${j.result.message_id})`
 }
 
 // ---------- transcricao (Groq Whisper, a mesma do Gaspar em functions/telegram_utils.py) ----------
