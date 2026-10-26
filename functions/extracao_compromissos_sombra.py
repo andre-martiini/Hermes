@@ -19,11 +19,14 @@ from zoneinfo import ZoneInfo
 from firebase_admin import firestore
 
 from autonomy import compromissos_chat
-from autonomy.commitments import NAO_RELACIONADA, PROMESSA, classificar_mensagem
+from autonomy.commitments import NAO_RELACIONADA, PROMESSA, chave_compromisso, classificar_mensagem
 from autonomy.extracao_estruturada import MAX_MENSAGEM, comparar_sombra, validar_extracao
 
 SOMBRA_COLLECTION = "extracao_compromissos_sombra"
 CONTADORES_COLLECTION = "extracao_compromissos_sombra_contadores"
+REGISTRO_COLLECTION = "compromissos_chat_sombra"  # um documento por chat: {"compromissos": [{chave, estado}]}
+MAX_REGISTRO_CHAT = 200
+_TEXTO_NAO_GRAVADO = "texto nao gravado"
 FEATURE = "atencao_extracao_compromissos"
 DEFAULT_MAX_POR_DIA = 200
 _FUSO = ZoneInfo("America/Sao_Paulo")
@@ -77,22 +80,67 @@ def _chamar_modelo(db, texto: str) -> dict | None:
     return saida if isinstance(saida, dict) else None
 
 
-def _compromissos_independentes(chat_id: str, doc_id: str, extraidos) -> dict:
-    """Passo 3: cada promessa firme da mensagem vira um compromisso próprio no chat
-    (autonomy.compromissos_chat). Só chaves e contagem; substituição explícita não
-    tem sinal na extração e fica fora da sombra. Falha não derruba a sombra."""
+def _carregar_registro(db, chat_id: str) -> tuple:
+    """Registro persistido do chat (só chave e estado; o texto nunca é gravado, então
+    volta com marcador fixo). Documento ilegível vira registro vazio e conta no resumo."""
+    doc = db.collection(REGISTRO_COLLECTION).document(chat_id).get()
+    if not doc.exists:
+        return ()
     registro: tuple = ()
+    for item in (doc.to_dict() or {}).get("compromissos") or []:
+        c = compromissos_chat.Compromisso(
+            item["chave"], chat_id, _TEXTO_NAO_GRAVADO, item["estado"], item.get("substituido_por")
+        )
+        registro = tuple.__add__(registro, (c,))
+    compromissos_chat._registro(registro)  # revalida o conjunto
+    return registro
+
+
+def _compromissos_independentes(db, chat_id: str, doc_id: str, extraidos, agora: datetime) -> dict:
+    """Passo 3: cada promessa firme da mensagem vira um compromisso próprio no chat
+    (autonomy.compromissos_chat), persistido por chat em `compromissos_chat_sombra`
+    (ArrayUnion de elementos só com chave e estado: idempotente por chave e sem perda de escrita concorrente). Só chaves,
+    estado e contagem; substituição explícita não tem sinal na extração e fica fora
+    da sombra. Falha não derruba a sombra."""
+    try:
+        existente = _carregar_registro(db, chat_id)
+    except Exception as exc:  # noqa: BLE001 -- leitura ou dado ruim: sombra nunca derruba o gatilho
+        print(f"[ExtracaoCompromissos] Registro do chat ilegível: {exc}")
+        existente = None
+    registro = existente or ()
+    novos = []
+    reprocessados = []
     descartados = 0
     for i, e in enumerate(extraidos):
         if e.classe != PROMESSA or e.incerta:
             continue
         try:  # um item inválido (caractere não imprimível etc.) não descarta os outros
+            chave = chave_compromisso(chat_id, doc_id, i)
+            if compromissos_chat.existe(registro, chave):  # reprocessamento: já registrado, não é erro
+                reprocessados.append(chave)
+                continue
             registro = compromissos_chat.abrir(registro, chat_id, doc_id, i, " ".join(e.objeto.split()))
+            novos.append(registro[-1].chave)
         except ValueError:
             descartados += 1
-    resumo = {"n_compromissos": len(registro), "chaves_compromissos": [c.chave for c in registro]}
+    resumo = {"n_compromissos": len(novos) + len(reprocessados), "chaves_compromissos": sorted(novos + reprocessados)}
     if descartados:
         resumo["compromissos_chat_erro"] = descartados
+    if existente is None:
+        resumo["registro_chat_ilegivel"] = True
+    elif novos:
+        if len(existente) + len(novos) > MAX_REGISTRO_CHAT:
+            resumo["registro_chat_cheio"] = True
+        else:
+            try:
+                db.collection(REGISTRO_COLLECTION).document(chat_id).set({
+                    "compromissos": firestore.ArrayUnion(
+                        [{"chave": k, "estado": compromissos_chat.ABERTO} for k in novos]
+                    )
+                }, merge=True)
+            except Exception as exc:  # noqa: BLE001 -- sombra nunca derruba o gatilho
+                print(f"[ExtracaoCompromissos] Falha ao persistir registro do chat: {exc}")
+                resumo["registro_chat_erro"] = True
     return resumo
 
 
@@ -155,7 +203,7 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
         cont_ref.set({"erro_modelo": firestore.Increment(1)}, merge=True)
         return None
     resumo.update(comparar_sombra(base, extraidos), n_extraidos=len(extraidos))
-    resumo.update(_compromissos_independentes(resumo["chat_id"], doc_id, extraidos))
+    resumo.update(_compromissos_independentes(db, resumo["chat_id"], doc_id, extraidos, agora))
     ref.set(resumo)
     cont_ref.set({
         "avaliadas": firestore.Increment(1),
