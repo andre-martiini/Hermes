@@ -32,7 +32,10 @@ class _Doc:
         if merge:
             atual = self.db.dados.setdefault((self.colecao, self.id), {})
             for k, v in dados.items():
-                atual[k] = atual.get(k, 0) + v.value if hasattr(v, "value") else v
+                if hasattr(v, "values"):  # ArrayUnion
+                    atual[k] = atual.get(k, []) + [x for x in v.values if x not in atual.get(k, [])]
+                else:
+                    atual[k] = atual.get(k, 0) + v.value if hasattr(v, "value") else v
         else:
             self.db.dados[(self.colecao, self.id)] = dados
 
@@ -141,7 +144,7 @@ class TestSombra(unittest.TestCase):
         firme = lambda o: CompromissoExtraido("promessa", o, "evidencia", False)  # noqa: E731
         extraidos = (firme("planilha"), CompromissoExtraido("promessa", "x", "e", True),
                      CompromissoExtraido("intencao_vaga", "y", "e", False), firme("contrato"))
-        r = ecs._compromissos_independentes("111@lid", "chat_m1", extraidos)
+        r = ecs._compromissos_independentes(_DB(), "111@lid", "chat_m1", extraidos, AGORA)
         self.assertEqual(r["n_compromissos"], 2)
         self.assertEqual(r["chaves_compromissos"], ["111@lid__chat_m1__0", "111@lid__chat_m1__3"])
 
@@ -153,7 +156,7 @@ class TestSombra(unittest.TestCase):
 
     def test_objeto_com_quebra_de_linha_nao_descarta_os_outros(self):
         f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
-        r = ecs._compromissos_independentes("1@lid", "m1", (f("enviar\nplanilha"), f("con\u200btrato"), f("ok")))
+        r = ecs._compromissos_independentes(_DB(), "1@lid", "m1", (f("enviar\nplanilha"), f("con\u200btrato"), f("ok")), AGORA)
         self.assertEqual(r["chaves_compromissos"], ["1@lid__m1__0", "1@lid__m1__2"])
         self.assertEqual(r["compromissos_chat_erro"], 1)
 
@@ -163,6 +166,65 @@ class TestSombra(unittest.TestCase):
         self.assertEqual(r["compromissos_chat_erro"], 1)
         self.assertIn("concorda", r)
         self.assertEqual(len(db.em(ecs.SOMBRA_COLLECTION)), 1)
+
+    def test_registro_do_chat_persiste_e_acumula_entre_mensagens(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        r = ecs._compromissos_independentes(db, "1@lid", "m2", (f("contrato"),), AGORA)
+        self.assertEqual(r["chaves_compromissos"], ["1@lid__m2__0"])
+        guardado = db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")]["compromissos"]
+        self.assertEqual([c["chave"] for c in guardado], ["1@lid__m1__0", "1@lid__m2__0"])
+        self.assertTrue(all(c["estado"] == "aberto" for c in guardado))
+        self.assertNotIn("planilha", repr(guardado))
+        self.assertNotIn("contrato", repr(guardado))
+
+    def test_registro_de_outro_chat_nao_se_mistura(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        ecs._compromissos_independentes(db, "2@lid", "m1", (f("planilha"),), AGORA)
+        self.assertEqual(len(db.dados[(ecs.REGISTRO_COLLECTION, "2@lid")]["compromissos"]), 1)
+
+    def test_registro_ilegivel_nao_derruba_nem_sobrescreve(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")] = {"compromissos": [{"chave": "lixo", "estado": "aberto"}]}
+        r = ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        self.assertTrue(r["registro_chat_ilegivel"])
+        self.assertEqual(db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")]["compromissos"], [{"chave": "lixo", "estado": "aberto"}])
+
+    def test_registro_cheio_nao_grava_mais(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")] = {"compromissos": [
+            {"chave": f"1@lid__a{i}__0", "estado": "aberto"} for i in range(ecs.MAX_REGISTRO_CHAT)]}
+        r = ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        self.assertTrue(r["registro_chat_cheio"])
+        self.assertEqual(len(db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")]["compromissos"]), ecs.MAX_REGISTRO_CHAT)
+
+    def test_falha_de_escrita_do_registro_nao_derruba(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        orig = _Doc.set
+        def set_falho(self, dados, merge=False):
+            if self.colecao == ecs.REGISTRO_COLLECTION:
+                raise RuntimeError("boom")
+            return orig(self, dados, merge)
+        with mock.patch.object(_Doc, "set", set_falho):
+            r = ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        self.assertTrue(r["registro_chat_erro"])
+
+    def test_regravar_a_mesma_chave_nao_duplica_e_leitura_com_falha_nao_derruba(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        db.collection(ecs.REGISTRO_COLLECTION).document("1@lid").set(
+            {"compromissos": ecs.firestore.ArrayUnion([{"chave": "1@lid__m1__0", "estado": "aberto"}])}, merge=True)
+        self.assertEqual(len(db.dados[(ecs.REGISTRO_COLLECTION, "1@lid")]["compromissos"]), 1)
+        with mock.patch.object(_Doc, "get", side_effect=RuntimeError("503")):
+            r = ecs._compromissos_independentes(db, "1@lid", "m2", (f("contrato"),), AGORA)
+        self.assertTrue(r["registro_chat_ilegivel"])
 
 
 if __name__ == "__main__":
