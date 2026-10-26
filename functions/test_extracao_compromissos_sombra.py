@@ -79,6 +79,8 @@ class TestSombra(unittest.TestCase):
         modelo = mock.Mock(return_value=SAIDA_OK)
         self.assertIsNone(_rodar(_DB(None), _msg(), modelo))
         self.assertIsNone(_rodar(_DB({}), _msg(), modelo))
+        for valor in ("false", "0", "true", 1):
+            self.assertIsNone(_rodar(_DB({"enabled": valor}), _msg(), modelo))
         modelo.assert_not_called()
 
     def test_grava_so_concordancia_sem_texto(self):
