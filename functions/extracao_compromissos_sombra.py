@@ -106,7 +106,7 @@ def processar_mensagem(db, mensagem: dict, agora: datetime | None = None, chamar
     if type(texto) is not str or not texto.strip() or len(texto) > MAX_MENSAGEM:
         return None
     cfg = _config(db)
-    if not cfg.get("enabled", False):
+    if cfg.get("enabled") is not True:
         return None
     doc_id = str(mensagem.get("id") or mensagem.get("wa_message_id") or "")
     if not doc_id:

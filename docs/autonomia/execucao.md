@@ -615,51 +615,11 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 15/N -- gravação em sombra do item de atenção por chave/versão (passo 8): followup_compromissos_sombra.registrar passa a gravar também o item de autonomy.atencao_compromisso (montar_item_atencao + deve_gravar) na coleção própria atencao_compromissos_sombra, id <promessa>__v1, com modo=sombra. Mesma flag da sombra de follow-up (system/settings.atencao.followup_sombra.enabled, padrão DESLIGADO). Só ids, ação, motivo constante, estado e datas -- nunca texto. A fila real (atencao) não é escrita."
-estado: validado
-inicio: "2026-10-25T14:00:00Z"
-fim: "2026-10-25T14:25:00Z"
-decisoes:
-  - id: p07-sub15-colecao-propria
-    motivo: "Gravar na fila real `atencao` mudaria comportamento de produção; coleção própria permite comparar o item novo com a fila antiga antes de qualquer troca."
-  - id: p07-sub15-ordem
-    motivo: "O item é gravado por último (depois do resumo e dos contadores). Limitação de projeto apontada na revisão: falha transitória na gravação do item não é refeita na reentrega (o resumo já existe) e gera perda esporádica de itens na medição."
-  - id: p07-sub15-arquivo
-    motivo: "execucao.md em 50487 bytes: bloco P07 sub 12 arquivado em execucao-archive-p07sub12.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4645 OK (diário); DEPOIS 4652 OK (+7 sobre o diário: 3 novos em test_followup_compromissos_sombra; o restante veio de PRs já mescladas em main)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): não achou bug; apenas a limitação de reentrega acima, de projeto."
-pendencias:
-  - "P07: passo 8 agora tem wiring em sombra. Falta a revisão final do pacote (pacote_concluido: P07) conferindo os 8 passos com chamadores; ativação das sombras só com aval do André."
-```
+# (Em 2026-10-26 o bloco "P07 sub-entrega 15/N" foi movido para docs/autonomia/execucao-archive-p07sub15.md.)
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 16/N -- wiring em sombra do passo 4 (prazo expresso x estimativa de acompanhamento): followup_compromissos_sombra.registrar passa a chamar autonomy.prazo_followup.planejar_acompanhamento (que não tinha chamador em produção) e grava no resumo acompanhamento_origem/verificar_em/amostra e acompanhamento_delta_horas contra o vence_em fixo do fluxo antigo. Histórico de horas de resposta do dono derivado das últimas 200 mensagens do chat (horas_de_resposta). Mesma flag da sombra de follow-up (padrão DESLIGADO); só números e datas, nunca texto; falha vira acompanhamento_erro sem derrubar a sombra."
-estado: validado
-inicio: "2026-10-25T16:45:00Z"
-fim: "2026-10-25T17:30:00Z"
-decisoes:
-  - id: p07-sub16-triagem
-    motivo: "Nenhuma PR aberta no início do disparo das 14h BRT; nenhuma execução paralela da linha de autonomia. Revisão final do P07 achou o passo 4 (prazo_followup) sem chamador: a revisão final anterior (revogada) não cobria isso; pacote_concluido: P07 segue pendente."
-  - id: p07-sub16-sem-prazo-expresso
-    motivo: "A sombra planeja com prazo=None (estimativa); o prazo expresso da extração estruturada ainda não é lido aqui. Limitação declarada."
-  - id: p07-sub16-bot-no-historico
-    motivo: "Respostas do bot saem como from_me e o registro que as identifica expira em 6h, então não dá para filtrá-las no histórico (e filtrar geraria até 200 leituras por promessa). Latências < 2 min são tratadas como automáticas; respostas do bot mais lentas contaminam a amostra para baixo (piso de 1 h limita)."
-  - id: p07-sub16-arquivo
-    motivo: "execucao.md em 49523 bytes: bloco P07 sub 13 arquivado em execucao-archive-p07sub13.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4652 OK (diário); DEPOIS 4657 OK (+5 em test_followup_compromissos_sombra)."
-revisao_adversarial:
-  - "Rodada 1: 1 achado real (respostas do bot contavam como do dono) -> correção. Rodada 2 sobre a correção: 2 achados reais (filtro só vale 6h; leituras sequenciais por mensagem) -> filtro trocado por piso de latência, sem leituras. Rodada 3: não achou nada."
-pendencias:
-  - "P07: ler prazo expresso da extração na sombra de acompanhamento; ativação das sombras só com aval do André; depois, nova revisão final do pacote (pacote_concluido: P07)."
-```
+# (Em 2026-10-26 o bloco "P07 sub-entrega 16/N" foi movido para docs/autonomia/execucao-archive-p07sub16.md.)
 
 ---
 
@@ -709,4 +669,33 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 1 achado real (objeto com quebra de linha/não imprimível zerava todas as promessas da mensagem) -> correção por item + normalização. Rodada 2 sobre a correção: não achou nada."
 pendencias:
   - "P07: substituir (relação explícita) segue sem chamador por falta de sinal na extração -- decidir se vale um sinal de modelo ou se o passo 3 fica atendido só por independência; ativação das sombras só com aval do André; depois, nova revisão final do pacote (pacote_concluido: P07)."
+```
+
+
+---
+
+```yaml
+pacote: "P07 revisão final do pacote (2ª) + correção da flag da sombra de extração: conferência dos 8 passos com chamador em produção (sob flag/sombra) por agente sem contexto; flag system/settings.atencao.extracao_estruturada.enabled passa a exigir booleano True (antes strings como 'false'/'0' ligavam a extração, igual às outras 3 sombras que já usavam 'is True')."
+estado: validado
+inicio: "2026-10-26T13:50:00Z"
+fim: "2026-10-26T14:30:00Z"
+decisoes:
+  - id: p07-final2-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 11h BRT."
+  - id: p07-final2-passos
+    motivo: "Passos 1-8 têm chamador em produção sob flag desligada/sombra (extracao_compromissos_sombra, correlacao_, cumprimento_, followup_compromissos_sombra, via atencao_whatsapp). Nenhuma sombra envia mensagem nem fecha atenção real; escrita só em coleções *_sombra. Testes exigidos (almoço, 'vou tentar') existem."
+  - id: p07-final2-substituir
+    motivo: "compromissos_chat.substituir segue sem chamador: a extração não emite sinal de substituição e o contrato proíbe inventar relação por semelhança. Passo 3 atendido por independência de múltiplos compromissos + capacidade de substituição explícita pronta para quando houver sinal. Decisão: não criar sinal de modelo agora."
+  - id: p07-final2-a06
+    motivo: "O fechamento por comprimento (>40 caracteres) em atencao_whatsapp segue ativo em produção; a troca pelo avaliador novo depende de ligar as sombras e medir precisão com dados reais (portão de ativação do André). Reversão do plano não exige removê-lo antes disso."
+  - id: p07-final2-arquivo
+    motivo: "execucao.md acima de ~50KB: blocos P07 sub 15 e sub 16 arquivados em execucao-archive-p07sub15.md e execucao-archive-p07sub16.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4664 OK (main 882b6e5); DEPOIS 4664 OK (teste existente estendido com valores não booleanos)."
+revisao_adversarial:
+  - "Revisão final (agente sem contexto): chamadores dos 8 passos confirmados; 1 achado real (flag da extração aceitava string/int truthy) -> corrigido. Rodada sobre o diff: não achou nada."
+pendencias:
+  - "Ativação das sombras do P07 (extração, cumprimento, correlação, follow-up) só com aval do André, medindo precisão antes de substituir o fechamento por comprimento (A06). Próximo: P08 (runner Claude, shadow/off)."
+pacote_concluido: P07
 ```
