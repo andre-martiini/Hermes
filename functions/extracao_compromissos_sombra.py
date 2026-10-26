@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 from firebase_admin import firestore
 
 from autonomy import compromissos_chat
-from autonomy.commitments import NAO_RELACIONADA, PROMESSA, classificar_mensagem
+from autonomy.commitments import NAO_RELACIONADA, PROMESSA, chave_compromisso, classificar_mensagem
 from autonomy.extracao_estruturada import MAX_MENSAGEM, comparar_sombra, validar_extracao
 
 SOMBRA_COLLECTION = "extracao_compromissos_sombra"
@@ -109,16 +109,21 @@ def _compromissos_independentes(db, chat_id: str, doc_id: str, extraidos, agora:
         existente = None
     registro = existente or ()
     novos = []
+    reprocessados = []
     descartados = 0
     for i, e in enumerate(extraidos):
         if e.classe != PROMESSA or e.incerta:
             continue
         try:  # um item inválido (caractere não imprimível etc.) não descarta os outros
+            chave = chave_compromisso(chat_id, doc_id, i)
+            if compromissos_chat.existe(registro, chave):  # reprocessamento: já registrado, não é erro
+                reprocessados.append(chave)
+                continue
             registro = compromissos_chat.abrir(registro, chat_id, doc_id, i, " ".join(e.objeto.split()))
             novos.append(registro[-1].chave)
         except ValueError:
             descartados += 1
-    resumo = {"n_compromissos": len(novos), "chaves_compromissos": novos}
+    resumo = {"n_compromissos": len(novos) + len(reprocessados), "chaves_compromissos": sorted(novos + reprocessados)}
     if descartados:
         resumo["compromissos_chat_erro"] = descartados
     if existente is None:

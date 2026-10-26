@@ -623,28 +623,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 17/N -- prazo expresso na sombra de acompanhamento (passo 4): followup_compromissos_sombra._acompanhamento passa a extrair o prazo expresso do texto da promessa (autonomy.commitments.extrair_prazo_expresso, determinístico, dia local America/Sao_Paulo de prometido_em) e a entregá-lo a planejar_acompanhamento; prazo expresso com data vence no fim do dia prometido (origem prazo_expresso). Se o planejador recusar o prazo, cai na estimativa e grava acompanhamento_prazo_descartado=true. Mesma flag da sombra de follow-up (padrão DESLIGADO); só números/datas, nunca texto."
-estado: validado
-inicio: "2026-10-25T19:48:00Z"
-fim: "2026-10-25T20:20:00Z"
-decisoes:
-  - id: p07-sub17-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 17h BRT."
-  - id: p07-sub17-fonte-do-prazo
-    motivo: "A extração estruturada em sombra não guarda prazo (só concordância) e o texto não é gravado; usa-se a seleção barata sobre promessa.texto, que já alimenta a promessa. Ler o prazo do modelo exigiria gravar dado novo da extração: fora do escopo."
-  - id: p07-sub17-prazo-distante
-    motivo: "Sem teto para prazos distantes (ex.: ano digitado errado) -- prazo expresso é vinculante por contrato; só polui o delta da métrica, que não é agregada ainda. Limitação declarada."
-  - id: p07-sub17-arquivo
-    motivo: "execucao.md em 49925 bytes: bloco P07 sub 14 arquivado em execucao-archive-p07sub14.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4657 OK (diário); DEPOIS 4660 OK (+3 em test_followup_compromissos_sombra; fixture PROMESSA sem prazo para manter os testes de estimativa)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): nenhum bug; verificou fuso/dia, prometido_em naive (acompanhamento_erro), overflow (cai na estimativa), texto não-string. Achado menor: sem teto para prazo distante (limitação acima). Sem rodada 2: lógica pura, achado só afeta métrica."
-pendencias:
-  - "P07: ativação das sombras (extração, cumprimento, correlação, follow-up) só com aval do André e medição de precisão antes de qualquer fechamento automático; depois, nova revisão final do pacote (pacote_concluido: P07)."
-```
+# (Em 2026-10-26 o bloco "P07 sub-entrega 17/N" foi movido para docs/autonomia/execucao-archive-p07sub17.md.)
 
 ---
 
@@ -697,4 +676,29 @@ revisao_adversarial:
   - "Revisão final (agente sem contexto): chamadores dos 8 passos confirmados; 1 achado real (flag da extração aceitava string/int truthy) -> corrigido. Rodada sobre o diff: não achou nada."
 pendencias:
   - "P07 PENDENTE (achado do Codex na PR 537, verificado): o passo 3 exige relação de substituição explícita; compromissos_chat.substituir não tem chamador e o registro de compromissos recomeça vazio a cada mensagem (não persiste entre mensagens). Próxima sub-entrega: persistir o registro por chat (sombra) e definir o sinal de substituição (ou declarar o passo atendido por decisão do André); só então pacote_concluido: P07. Ativação das sombras só com aval do André."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 19/N -- registro de compromissos persistido por chat em sombra (passo 3, achado do Codex na PR 537): extracao_compromissos_sombra carrega o registro do chat de compromissos_chat_sombra/{chat_id}, abre as promessas firmes novas contra ele (chave repetida = reprocessamento, sem erro falso) e persiste só {chave, estado} por ArrayUnion (idempotente, sem perda em mensagens concorrentes; nunca texto; teto de 200 por chat). Falha de leitura/escrita vira flag no resumo (registro_chat_ilegivel/erro/cheio), nunca derruba o gatilho. Mesma flag da sombra de extração (padrão DESLIGADO)."
+estado: validado
+inicio: "2026-10-26T16:45:00Z"
+fim: "2026-10-26T17:40:00Z"
+decisoes:
+  - id: p07-sub19-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 14h BRT."
+  - id: p07-sub19-texto
+    motivo: "O registro não guarda texto (princípio das sombras); ao reler, o Compromisso volta com marcador fixo 'texto nao gravado'. Suficiente para chave/estado/substituição."
+  - id: p07-sub19-substituicao
+    motivo: "Persistência entregue; o SINAL de substituição explícita continua inexistente e NÃO foi inventado (contrato proíbe relação por semelhança). Decisão do André pendente: (a) autorizar um sinal de modelo na extração ou (b) declarar o passo 3 atendido por independência + persistência. Sem isso pacote_concluido: P07 não é declarado."
+  - id: p07-sub19-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P07 sub 17 arquivado em execucao-archive-p07sub17.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4664 OK (main 79bbae2); DEPOIS 4671 OK (+7 em test_extracao_compromissos_sombra)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 2 achados reais (leitura do registro só capturava exceções de dado, não de Firestore; criado_em no elemento do ArrayUnion duplicava chaves e deixava o chat ilegível) -> corrigidos. Rodada 2: 1 achado (reprocessar a mesma mensagem dava erro falso e zerava chaves) -> corrigido. Rodada 3 sobre a correção: não achou nada."
+pendencias:
+  - "P07 PENDENTE só pela decisão do André sobre o sinal de substituição (acima). Ativação das sombras só com aval do André. Se a decisão for (b), registrar e declarar pacote_concluido: P07; o próximo é o P08 (runner Claude, shadow/off)."
 ```

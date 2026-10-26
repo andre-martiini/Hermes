@@ -226,6 +226,14 @@ class TestSombra(unittest.TestCase):
             r = ecs._compromissos_independentes(db, "1@lid", "m2", (f("contrato"),), AGORA)
         self.assertTrue(r["registro_chat_ilegivel"])
 
+    def test_reprocessar_a_mesma_mensagem_mantem_as_chaves_sem_erro(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        db = _DB()
+        ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        r = ecs._compromissos_independentes(db, "1@lid", "m1", (f("planilha"),), AGORA)
+        self.assertEqual(r["chaves_compromissos"], ["1@lid__m1__0"])
+        self.assertNotIn("compromissos_chat_erro", r)
+
 
 if __name__ == "__main__":
     unittest.main()
