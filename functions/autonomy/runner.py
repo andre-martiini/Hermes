@@ -27,6 +27,7 @@ são falha final.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -64,7 +65,7 @@ class ChamadaFerramenta:
 class ResultadoFerramenta:
     ok: bool
     dados: Mapping[str, Any] = field(default_factory=dict)
-    erro: str = ""
+    erro: str = ""  # código curto [a-z0-9_]; texto livre é descartado do histórico
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,17 @@ class ResultadoRunner:
     erro_modelo: ErroModelo | None = None
 
 
+_CODIGO_ERRO = re.compile(r"[a-z0-9_]{1,40}")
+
+
+def _codigo_erro(erro: Any) -> str:
+    """Só códigos curtos tipados entram no histórico; texto livre do adaptador
+    (resposta de provedor, URL, dado de domínio) nunca é persistido."""
+    if isinstance(erro, str) and _CODIGO_ERRO.fullmatch(erro):
+        return erro
+    return "erro_ferramenta" if erro else ""
+
+
 def _saida_valida(saida: Any, permitidas: frozenset[str]) -> str:
     """Devolve '' se válida, senão o motivo. Ferramenta desconhecida inclusa."""
     if not isinstance(saida, SaidaPlanner):
@@ -167,7 +179,7 @@ def _saida_valida(saida: Any, permitidas: frozenset[str]) -> str:
         if not isinstance(c, ChamadaFerramenta) or not isinstance(c.nome, str):
             return "chamada_invalida"
         if c.nome not in permitidas:
-            return f"ferramenta_desconhecida:{c.nome}"
+            return "ferramenta_desconhecida:" + _codigo_erro(c.nome or "?").replace("erro_ferramenta", "nome_invalido")
     return ""
 
 
@@ -227,6 +239,10 @@ def executar_lote(
             continue
 
         tokens += saida.tokens
+        if tokens > limites.max_tokens:
+            return _res(StatusRunner.PAUSADO_LIMITE, "tokens")
+        if agora() - inicio >= timedelta(seconds=limites.max_duracao_segundos):
+            return _res(StatusRunner.PAUSADO_LIMITE, "duracao")
         if isinstance(saida.desfecho, Concluir):
             return _res(StatusRunner.CONCLUIDO, saida.desfecho.resumo)
         if isinstance(saida.desfecho, Esperar):
@@ -238,8 +254,6 @@ def executar_lote(
             return _res(StatusRunner.FALHA, "lote_excede_max_ferramentas")
         if n_ferr + len(saida.chamadas) > limites.max_ferramentas:
             return _res(StatusRunner.PAUSADO_LIMITE, "ferramentas")
-        if tokens > limites.max_tokens:
-            return _res(StatusRunner.PAUSADO_LIMITE, "tokens")
         for chamada in saida.chamadas:
             if agora() - inicio >= timedelta(seconds=limites.max_duracao_segundos):
                 return _res(StatusRunner.PAUSADO_LIMITE, "duracao")
@@ -251,5 +265,5 @@ def executar_lote(
             historico += ({
                 "tipo": "ferramenta", "nome": chamada.nome,
                 "ok": getattr(r, "ok", False) is True,
-                "erro": str(getattr(r, "erro", "")),
+                "erro": _codigo_erro(getattr(r, "erro", "")),
             },)

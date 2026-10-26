@@ -167,6 +167,38 @@ class RunnerTest(unittest.TestCase):
         s = SaidaPlanner(desfecho=Esperar(None))
         self.assertEqual(self.rodar([s, s]).status, StatusRunner.FALHA)
 
+    def test_concluir_com_tokens_estourados_pausa(self):
+        r = self.rodar([SaidaPlanner(desfecho=Concluir("x"), tokens=101)], limites=LimitesRunner(max_tokens=100))
+        self.assertEqual((r.status, r.motivo), (StatusRunner.PAUSADO_LIMITE, "tokens"))
+
+    def test_esperar_apos_duracao_pausa(self):
+        t = [0]
+
+        def ag():
+            t[0] += 100
+            return datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=t[0])
+
+        r = self.rodar([SaidaPlanner(desfecho=Esperar("x"))], limites=LimitesRunner(max_duracao_segundos=150), agora=ag)
+        self.assertEqual((r.status, r.motivo), (StatusRunner.PAUSADO_LIMITE, "duracao"))
+
+    def test_erro_livre_nao_vai_ao_historico(self):
+        class E:
+            def executar(self, c):
+                return ResultadoFerramenta(ok=False, erro="403 https://x?token=abc")
+
+        r = self.rodar([lote("ler"), SaidaPlanner(desfecho=Concluir())], E())
+        self.assertEqual(r.historico[0]["erro"], "erro_ferramenta")
+        class E2:
+            def executar(self, c):
+                return ResultadoFerramenta(ok=False, erro="timeout_adapter")
+
+        r = self.rodar([lote("ler"), SaidaPlanner(desfecho=Concluir())], E2())
+        self.assertEqual(r.historico[0]["erro"], "timeout_adapter")
+
+    def test_nome_de_ferramenta_livre_nao_vai_ao_historico(self):
+        r = self.rodar([lote("x segredo joao@x.com"), lote("x segredo joao@x.com")])
+        self.assertNotIn("joao", repr(r.historico) + r.motivo)
+
     def test_limites_validados(self):
         for kw in ({"max_rodadas": 0}, {"max_tokens": True}, {"max_duracao_segundos": 0},
                    {"max_duracao_segundos": float("inf")}, {"max_duracao_segundos": 1e20}, {"max_duracao_segundos": 1e-7}):

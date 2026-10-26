@@ -699,9 +699,9 @@ decisoes:
     motivo: "execucao.md perto de 50KB: bloco P07 sub 18 arquivado em execucao-archive-p07sub18.md."
 testes:
   resultados:
-    - "functions/ completo ANTES 4671 OK (diário, P07 sub 19); DEPOIS 4692 OK (+21 em test_autonomy_runner)."
+    - "functions/ completo ANTES 4671 OK (diário, P07 sub 19); DEPOIS 4696 OK (+25 em test_autonomy_runner)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 6 achados reais (allowlist str, lote maior que o teto em livelock, ErroModelo.tipo str, chamadas não-tupla, tokens/duração ultrapassados antes de executar) -> corrigidos. Rodada 2: 1 achado (max_duracao_segundos inf/1e20 estourava timedelta) -> corrigido. Rodada 3 sobre a correção: 1 achado menor (duração < 1 µs arredondava para 0 e pausava de imediato) -> piso de 1 ms; correção trivial de uma constante coberta por teste, sem rodada 4."
+  - "Rodada 1 (agente sem contexto): 6 achados reais (allowlist str, lote maior que o teto em livelock, ErroModelo.tipo str, chamadas não-tupla, tokens/duração ultrapassados antes de executar) -> corrigidos. Rodada 2: 1 achado (max_duracao_segundos inf/1e20 estourava timedelta) -> corrigido. Rodada 3 sobre a correção: 1 achado menor (duração < 1 µs arredondava para 0 e pausava de imediato) -> piso de 1 ms; piso de 1 ms. Revisão do Codex na PR (2 achados P2: limites checados só depois do desfecho; texto livre do executor no histórico) -> corrigidos. Rodada 4 sobre essas correções: 1 achado (nome de ferramenta desconhecida, texto do planner, vazava no histórico/motivo) -> sanitizado; corrigido e coberto por teste; sem nova rodada (correção de uma linha reutilizando o sanitizador já revisado)."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
 ```
