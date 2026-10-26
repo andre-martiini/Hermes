@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 import extracao_compromissos_sombra as ecs
+from autonomy.extracao_estruturada import CompromissoExtraido
 
 AGORA = datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc)
 TEXTO = "Vou te enviar a planilha amanhã"
@@ -133,6 +134,33 @@ class TestSombra(unittest.TestCase):
 
         self.assertIsNone(_rodar(db, _msg(), falha))
         self.assertEqual(db.em(ecs.SOMBRA_COLLECTION), [])
+
+    def test_duas_promessas_firmes_viram_dois_compromissos_independentes(self):
+        firme = lambda o: CompromissoExtraido("promessa", o, "evidencia", False)  # noqa: E731
+        extraidos = (firme("planilha"), CompromissoExtraido("promessa", "x", "e", True),
+                     CompromissoExtraido("intencao_vaga", "y", "e", False), firme("contrato"))
+        r = ecs._compromissos_independentes("111@lid", "chat_m1", extraidos)
+        self.assertEqual(r["n_compromissos"], 2)
+        self.assertEqual(r["chaves_compromissos"], ["111@lid__chat_m1__0", "111@lid__chat_m1__3"])
+
+    def test_resumo_traz_compromissos_sem_texto(self):
+        db = _DB({"enabled": True})
+        r = _rodar(db, _msg(), lambda d, t: SAIDA_OK)
+        self.assertEqual(r["n_compromissos"], len(r["chaves_compromissos"]))
+        self.assertNotIn("planilha", repr(db.em(ecs.SOMBRA_COLLECTION)))
+
+    def test_objeto_com_quebra_de_linha_nao_descarta_os_outros(self):
+        f = lambda o: CompromissoExtraido("promessa", o, "ev", False)  # noqa: E731
+        r = ecs._compromissos_independentes("1@lid", "m1", (f("enviar\nplanilha"), f("con\u200btrato"), f("ok")))
+        self.assertEqual(r["chaves_compromissos"], ["1@lid__m1__0", "1@lid__m1__2"])
+        self.assertEqual(r["compromissos_chat_erro"], 1)
+
+    def test_id_invalido_para_chave_nao_derruba_a_sombra(self):
+        db = _DB({"enabled": True})
+        r = _rodar(db, _msg(id="chat__m1"), lambda d, t: SAIDA_OK)
+        self.assertEqual(r["compromissos_chat_erro"], 1)
+        self.assertIn("concorda", r)
+        self.assertEqual(len(db.em(ecs.SOMBRA_COLLECTION)), 1)
 
 
 if __name__ == "__main__":
