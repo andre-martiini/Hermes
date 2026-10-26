@@ -627,29 +627,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 18/N -- wiring em sombra do passo 3 (vários compromissos por chat): extracao_compromissos_sombra passa a chamar autonomy.compromissos_chat.abrir (que não tinha chamador em produção) para cada promessa firme (não incerta) extraída da mensagem, gravando no resumo da sombra só n_compromissos e chaves_compromissos (chat__mensagem__indice) e, se algum item for descartado, compromissos_chat_erro (contagem). Mesma flag da sombra de extração (system/settings.atencao.extracao_estruturada.enabled, padrão DESLIGADO); nunca texto."
-estado: validado
-inicio: "2026-10-26T11:00:00Z"
-fim: "2026-10-26T11:50:00Z"
-decisoes:
-  - id: p07-sub18-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT. A revisão final do P07 achou o passo 3 (compromissos_chat) sem chamador em produção; pacote_concluido: P07 segue pendente."
-  - id: p07-sub18-substituicao
-    motivo: "A extração não tem sinal de substituição explícita; compromissos_chat.substituir continua sem chamador e fica fora da sombra. Limitação declarada: não se inventa relação por semelhança de texto (o contrato proíbe)."
-  - id: p07-sub18-item-invalido
-    motivo: "Item inválido (ex.: caractere não imprimível no objeto) é descartado isoladamente e contado; objeto normalizado por espaços. Achado da rodada 1 (um item ruim zerava todos)."
-  - id: p07-sub18-arquivo
-    motivo: "execucao.md perto de 50KB: bloco 'P07 correção da revisão final' arquivado em execucao-archive-p07correcao.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4660 OK (diário, sub 17); DEPOIS 4664 OK (+4 em test_extracao_compromissos_sombra)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 1 achado real (objeto com quebra de linha/não imprimível zerava todas as promessas da mensagem) -> correção por item + normalização. Rodada 2 sobre a correção: não achou nada."
-pendencias:
-  - "P07: substituir (relação explícita) segue sem chamador por falta de sinal na extração -- decidir se vale um sinal de modelo ou se o passo 3 fica atendido só por independência; ativação das sombras só com aval do André; depois, nova revisão final do pacote (pacote_concluido: P07)."
-```
-
+# (Em 2026-10-26 o bloco "P07 sub-entrega 18/N" foi movido para docs/autonomia/execucao-archive-p07sub18.md.)
 
 ---
 
@@ -701,4 +679,29 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 2 achados reais (leitura do registro só capturava exceções de dado, não de Firestore; criado_em no elemento do ArrayUnion duplicava chaves e deixava o chat ilegível) -> corrigidos. Rodada 2: 1 achado (reprocessar a mesma mensagem dava erro falso e zerava chaves) -> corrigido. Rodada 3 sobre a correção: não achou nada."
 pendencias:
   - "P07 PENDENTE só pela decisão do André sobre o sinal de substituição (acima). Ativação das sombras só com aval do André. Se a decisão for (b), registrar e declarar pacote_concluido: P07; o próximo é o P08 (runner Claude, shadow/off)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 1/N -- núcleo puro do runner (autonomy/runner.py): interfaces PlannerModel e ToolExecutor separadas (passo 1), executar_lote (planejar -> executar -> checkpoint, termina sempre com resultado tipado; Esperar vira AGUARDANDO sem bloquear), limites de rodadas/ferramentas/tokens/duração com PAUSADO_LIMITE recuperável (nunca CONCLUIDO por limite), erros do modelo tipados (429/indisponível/timeout -> RETENTAR; recusa/contexto excedido -> FALHA), allowlist de ferramentas, saída inválida contada. Sem I/O, sem Cloud Tasks, sem Claude real: só dublês (passo 11, shadow/off)."
+estado: validado
+inicio: "2026-10-26T20:00:00Z"
+fim: "2026-10-26T20:50:00Z"
+decisoes:
+  - id: p08-sub1-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela no disparo das 17h BRT. P07 segue pendente só pela decisão do André sobre o sinal de substituição; P08 depende de P04-P06 (validados), não de P07, e nasce em shadow/off, então avança sem esperar."
+  - id: p08-sub1-historico
+    motivo: "O histórico guarda só nome/ok/erro das ferramentas (sem dados de domínio); levar dados ao planner é decisão do wiring."
+  - id: p08-sub1-lote-grande
+    motivo: "Lote que sozinho excede max_ferramentas é FALHA (pausar reproduziria o mesmo plano para sempre)."
+  - id: p08-sub1-arquivo
+    motivo: "execucao.md perto de 50KB: bloco P07 sub 18 arquivado em execucao-archive-p07sub18.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4671 OK (diário, P07 sub 19); DEPOIS 4696 OK (+25 em test_autonomy_runner)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 6 achados reais (allowlist str, lote maior que o teto em livelock, ErroModelo.tipo str, chamadas não-tupla, tokens/duração ultrapassados antes de executar) -> corrigidos. Rodada 2: 1 achado (max_duracao_segundos inf/1e20 estourava timedelta) -> corrigido. Rodada 3 sobre a correção: 1 achado menor (duração < 1 µs arredondava para 0 e pausava de imediato) -> piso de 1 ms; piso de 1 ms. Revisão do Codex na PR (2 achados P2: limites checados só depois do desfecho; texto livre do executor no histórico) -> corrigidos. Rodada 4 sobre essas correções: 1 achado (nome de ferramenta desconhecida, texto do planner, vazava no histórico/motivo) -> sanitizado; corrigido e coberto por teste; sem nova rodada (correção de uma linha reutilizando o sanitizador já revisado)."
+pendencias:
+  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
 ```
