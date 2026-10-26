@@ -607,24 +607,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 correção da revisão final -- só documentação. A entrada anterior (revisão final, PR #520) declarou o P07 concluído por engano e fica REVOGADA: a revisão do Codex, chegada depois do merge, é procedente. (1) autonomy/correlacao_entregaveis.correlacionar não tem chamador em produção (passo 5 sem wiring); (2) autonomy/atencao_compromisso só é usado por followup_compromissos_sombra para copiar a próxima avaliação, sem gravar a decisão semântica na fila de atenção (passo 8 sem wiring). (3) A flag da sombra de extração é system/settings.atencao.extracao_estruturada.enabled (não atencao.extracao_sombra); as outras são atencao.cumprimento_sombra.enabled e atencao.followup_sombra.enabled."
-estado: validado
-inicio: "2026-10-24T20:10:00Z"
-fim: "2026-10-24T20:20:00Z"
-decisoes:
-  - id: p07-correcao-causa
-    motivo: "Fiz o merge da #520 sem esperar os comentários do Codex (só conferi os checks do CI). Passa a valer: ler reviews/comentários de bots antes de mesclar, mesmo em PR de docs."
-  - id: p07-correcao-estado
-    motivo: "P07 segue ABERTO. Faltam sub-entregas de wiring em sombra: correlação de entregáveis entre canais (passo 5) e escrita do item de atenção por chave/versão (passo 8), ambas atrás de flag desligada."
-testes:
-  resultados:
-    - "Sem mudança de código; functions/ completo 4636 OK em main."
-revisao_adversarial:
-  - "Não aplicável (docs)."
-pendencias:
-  - "P07 sub 14: wiring em sombra de correlacionar (passo 5). P07 sub 15: gravação do item de atenção por chave/versão (passo 8), em sombra. Só depois, nova revisão final; ativação das sombras só com aval do André."
-```
+# (Em 2026-10-26 o bloco "P07 correção da revisão final" foi movido para docs/autonomia/execucao-archive-p07correcao.md.)
 
 ---
 
@@ -701,4 +684,29 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): nenhum bug; verificou fuso/dia, prometido_em naive (acompanhamento_erro), overflow (cai na estimativa), texto não-string. Achado menor: sem teto para prazo distante (limitação acima). Sem rodada 2: lógica pura, achado só afeta métrica."
 pendencias:
   - "P07: ativação das sombras (extração, cumprimento, correlação, follow-up) só com aval do André e medição de precisão antes de qualquer fechamento automático; depois, nova revisão final do pacote (pacote_concluido: P07)."
+```
+
+---
+
+```yaml
+pacote: "P07 sub-entrega 18/N -- wiring em sombra do passo 3 (vários compromissos por chat): extracao_compromissos_sombra passa a chamar autonomy.compromissos_chat.abrir (que não tinha chamador em produção) para cada promessa firme (não incerta) extraída da mensagem, gravando no resumo da sombra só n_compromissos e chaves_compromissos (chat__mensagem__indice) e, se algum item for descartado, compromissos_chat_erro (contagem). Mesma flag da sombra de extração (system/settings.atencao.extracao_estruturada.enabled, padrão DESLIGADO); nunca texto."
+estado: validado
+inicio: "2026-10-26T11:00:00Z"
+fim: "2026-10-26T11:50:00Z"
+decisoes:
+  - id: p07-sub18-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT. A revisão final do P07 achou o passo 3 (compromissos_chat) sem chamador em produção; pacote_concluido: P07 segue pendente."
+  - id: p07-sub18-substituicao
+    motivo: "A extração não tem sinal de substituição explícita; compromissos_chat.substituir continua sem chamador e fica fora da sombra. Limitação declarada: não se inventa relação por semelhança de texto (o contrato proíbe)."
+  - id: p07-sub18-item-invalido
+    motivo: "Item inválido (ex.: caractere não imprimível no objeto) é descartado isoladamente e contado; objeto normalizado por espaços. Achado da rodada 1 (um item ruim zerava todos)."
+  - id: p07-sub18-arquivo
+    motivo: "execucao.md perto de 50KB: bloco 'P07 correção da revisão final' arquivado em execucao-archive-p07correcao.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4660 OK (diário, sub 17); DEPOIS 4664 OK (+4 em test_extracao_compromissos_sombra)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 1 achado real (objeto com quebra de linha/não imprimível zerava todas as promessas da mensagem) -> correção por item + normalização. Rodada 2 sobre a correção: não achou nada."
+pendencias:
+  - "P07: substituir (relação explícita) segue sem chamador por falta de sinal na extração -- decidir se vale um sinal de modelo ou se o passo 3 fica atendido só por independência; ativação das sombras só com aval do André; depois, nova revisão final do pacote (pacote_concluido: P07)."
 ```
