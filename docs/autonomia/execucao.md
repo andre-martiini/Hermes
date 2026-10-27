@@ -631,30 +631,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 revisão final do pacote (2ª) + correção da flag da sombra de extração: conferência dos 8 passos com chamador em produção (sob flag/sombra) por agente sem contexto; flag system/settings.atencao.extracao_estruturada.enabled passa a exigir booleano True (antes strings como 'false'/'0' ligavam a extração, igual às outras 3 sombras que já usavam 'is True')."
-estado: validado
-inicio: "2026-10-26T13:50:00Z"
-fim: "2026-10-26T14:30:00Z"
-decisoes:
-  - id: p07-final2-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 11h BRT."
-  - id: p07-final2-passos
-    motivo: "Passos 1-8 têm chamador em produção sob flag desligada/sombra (extracao_compromissos_sombra, correlacao_, cumprimento_, followup_compromissos_sombra, via atencao_whatsapp). Nenhuma sombra envia mensagem nem fecha atenção real; escrita só em coleções *_sombra. Testes exigidos (almoço, 'vou tentar') existem."
-  - id: p07-final2-substituir
-    motivo: "REVISADA após achado do Codex: o passo 3 NÃO fica atendido; P07 permanece pendente. Registro original: compromissos_chat.substituir segue sem chamador: a extração não emite sinal de substituição e o contrato proíbe inventar relação por semelhança. Passo 3 atendido por independência de múltiplos compromissos + capacidade de substituição explícita pronta para quando houver sinal. Decisão: não criar sinal de modelo agora."
-  - id: p07-final2-a06
-    motivo: "O fechamento por comprimento (>40 caracteres) em atencao_whatsapp segue ativo em produção; a troca pelo avaliador novo depende de ligar as sombras e medir precisão com dados reais (portão de ativação do André). Reversão do plano não exige removê-lo antes disso."
-  - id: p07-final2-arquivo
-    motivo: "execucao.md acima de ~50KB: blocos P07 sub 15 e sub 16 arquivados em execucao-archive-p07sub15.md e execucao-archive-p07sub16.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4664 OK (main 882b6e5); DEPOIS 4664 OK (teste existente estendido com valores não booleanos)."
-revisao_adversarial:
-  - "Revisão final (agente sem contexto): chamadores dos 8 passos confirmados; 1 achado real (flag da extração aceitava string/int truthy) -> corrigido. Rodada sobre o diff: não achou nada."
-pendencias:
-  - "P07 PENDENTE (achado do Codex na PR 537, verificado): o passo 3 exige relação de substituição explícita; compromissos_chat.substituir não tem chamador e o registro de compromissos recomeça vazio a cada mensagem (não persiste entre mensagens). Próxima sub-entrega: persistir o registro por chat (sombra) e definir o sinal de substituição (ou declarar o passo atendido por decisão do André); só então pacote_concluido: P07. Ativação das sombras só com aval do André."
-```
+# (Em 2026-10-27 o bloco "P07 revisão final do pacote (2ª) + correção da flag da sombra" foi movido para docs/autonomia/execucao-archive-p07final2.md.)
 
 ---
 
@@ -704,4 +681,30 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 6 achados reais (allowlist str, lote maior que o teto em livelock, ErroModelo.tipo str, chamadas não-tupla, tokens/duração ultrapassados antes de executar) -> corrigidos. Rodada 2: 1 achado (max_duracao_segundos inf/1e20 estourava timedelta) -> corrigido. Rodada 3 sobre a correção: 1 achado menor (duração < 1 µs arredondava para 0 e pausava de imediato) -> piso de 1 ms; piso de 1 ms. Revisão do Codex na PR (2 achados P2: limites checados só depois do desfecho; texto livre do executor no histórico) -> corrigidos. Rodada 4 sobre essas correções: 1 achado (nome de ferramenta desconhecida, texto do planner, vazava no histórico/motivo) -> sanitizado; corrigido e coberto por teste; sem nova rodada (correção de uma linha reutilizando o sanitizador já revisado)."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
+```
+
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 2/N -- decisão de continuação do runner (autonomy/runner_continuacao.py, passos 4-7): função pura decidir_continuacao traduz o ResultadoRunner no próximo estado do pedido a partir de EM_ANDAMENTO. CONCLUIDO -> VERIFICANDO (nunca fecha direto); AGUARDANDO -> AGUARDANDO_EXTERNO sem continuação imediata (horário sem fuso/tipo errado vira espera sem horário, com UTC); PAUSADO_LIMITE -> RETENTATIVA_AGENDADA em 60 s com teto de 20 pausas (não gasta tentativa); RETENTAR -> backoff de requests.calcular_backoff_segundos até DEFAULT_MAX_TENTATIVAS, depois FALHA_FINAL; FALHA/entrada inválida -> FALHA_FINAL. Soma de tempo em UTC (DST). Sem I/O, sem Cloud Tasks (shadow/off, passo 11)."
+estado: validado
+inicio: "2026-10-27T10:50:00Z"
+fim: "2026-10-27T11:20:00Z"
+decisoes:
+  - id: p08-sub2-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT."
+  - id: p08-sub2-verificar
+    motivo: "Sucesso do runner vai para VERIFICANDO (passo 4, 'verificar'); só o verificador conclui o pedido."
+  - id: p08-sub2-pausas
+    motivo: "Pausa por limite não consome tentativa de erro, mas tem teto próprio (20) para não girar para sempre."
+  - id: p08-sub2-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P07 revisão final (2ª) arquivado em execucao-archive-p07final2.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4696 OK (diário, P08 sub 1; main 8cfa553); DEPOIS 4713 OK (+17 em test_autonomy_runner_continuacao)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 3 achados (soma de timedelta sem normalizar para UTC com fuso de DST; OverflowError em agora no limite do calendário; AGUARDANDO sem espera) -> corrigidos. Rodada 2 sobre a correção: 2 achados (acordar_em de tipo errado vazava como continuar_em; OverflowError na normalização fora do try) -> corrigidos. Sem rodada 3 (correções de uma linha, cobertas por teste, lógica pura)."
+pendencias:
+  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
 ```
