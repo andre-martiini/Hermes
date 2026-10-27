@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   LIMITE_EXECUTOR_COMO,
+  dataPrevistaDe,
+  subtarefaCorrente,
   ROTULO_EXECUTOR,
   comEstado,
   comEstadoExplicito,
@@ -244,5 +246,43 @@ describe('executor da etapa', () => {
   it('as etiquetas dizem o que o agente faz', () => {
     expect(ROTULO_EXECUTOR.agente).toBe('Agente faz');
     expect(ROTULO_EXECUTOR.agente_aprovado).toBe('Agente prepara, você aprova');
+  });
+});
+
+describe('subtarefaCorrente — mesma etapa que o backend escolhe', () => {
+  const e = (id: string, extra: Record<string, any> = {}) => etapa({ id, text: `Passo ${id}`, ...extra });
+
+  it('plano sem datas: a primeira em aberto, herdando a data da ação', () => {
+    const plano = [e('a', { completed: true, estado: 'feito' }), e('b'), e('c')];
+    expect(subtarefaCorrente(plano, '2026-10-27')?.id).toBe('b');
+  });
+
+  it('a de menor data ganha da primeira da lista', () => {
+    const plano = [e('a', { data_prevista: '2026-10-30' }), e('b', { data_prevista: '2026-10-28' })];
+    expect(subtarefaCorrente(plano, '2026-10-27')?.id).toBe('b');
+  });
+
+  it('plano misto: a etapa sem data vai para o fim, não para a frente', () => {
+    const plano = [e('a'), e('b', { data_prevista: '2026-10-29' })];
+    expect(subtarefaCorrente(plano, '2026-10-27')?.id).toBe('b');
+    expect(dataPrevistaDe(plano[0], '2026-10-27', plano)).toBe('');
+  });
+
+  it('empate resolve pela ordem do plano', () => {
+    const plano = [e('a', { data_prevista: '2026-10-28' }), e('b', { data_prevista: '2026-10-28' })];
+    expect(subtarefaCorrente(plano, null)?.id).toBe('a');
+  });
+
+  it('tudo feito: nenhuma', () => {
+    expect(subtarefaCorrente([e('a', { completed: true, estado: 'feito' })], '2026-10-27')).toBeNull();
+    expect(subtarefaCorrente([], '2026-10-27')).toBeNull();
+  });
+
+  it('a espera decide pela etapa corrente, não pela primeira da lista', () => {
+    const plano = [
+      e('a', { estado: 'aguardando_terceiro', aguardando_de: 'FAPES', data_prevista: '2026-10-30' }),
+      e('b', { data_prevista: '2026-10-28' }),
+    ];
+    expect(estadoDaSubtarefa(subtarefaCorrente(plano, '2026-10-27')!)).toBe('pendente');
   });
 });

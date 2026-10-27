@@ -1482,3 +1482,55 @@ export interface ResumoMatinal {
     /** Gravado pela UI na primeira abertura do dia. */
     visto_em?: string;
 }
+
+// ---------------------------------------------------------------------------
+// briefing_dia/{YYYY-MM-DD} — o briefing das 05:00 em itens (Painel do dia)
+// ---------------------------------------------------------------------------
+
+/** De onde vem um item de Decidir. A tela confere a origem ao vivo e esconde o item resolvido. */
+export type BriefingOrigem = 'fila_atencao' | 'whatsapp' | 'etapa' | 'acao';
+
+export type BriefingDecidirStatus = 'pendente' | 'feito' | 'dispensado';
+
+export interface BriefingDecidirItem {
+    id: string;
+    ordem?: number;
+    quem: string;
+    texto: string;
+    recomendacao?: string;
+    tag?: string;
+    origem: BriefingOrigem;
+    /** Id do item de origem (item da fila, conversa, etapa ou ação). */
+    ref: string;
+    /** Ação ligada ao item. Obrigatório com origem `etapa` (então `ref` é o id da etapa). */
+    acao_id?: string;
+    status?: BriefingDecidirStatus;
+    /** Texto ISO. Nunca um sentinela de servidor: o Firestore não aceita dentro de array. */
+    resolvido_em?: string | null;
+}
+
+export interface BriefingEuFaco {
+    id?: string;
+    acao_id: string;
+    texto: string;
+    status?: 'proposto' | 'aprovado' | 'pronto' | 'recusado';
+}
+
+export interface BriefingForaDaAgenda {
+    titulo: string;
+    inicio: string;
+    fim?: string | null;
+    motivo?: string;
+}
+
+export interface BriefingDia {
+    data: string;
+    hoje?: Array<{ acao_id: string; motivo?: string }>;
+    decidir?: BriefingDecidirItem[];
+    eu_faco?: BriefingEuFaco[];
+    /** `dia` é YYYY-MM-DD; o "em N dias" a tela calcula, nunca vem gravado. */
+    preparo?: Array<{ dia: string; texto: string }>;
+    fora_da_agenda?: BriefingForaDaAgenda[];
+    avisos?: Array<{ tipo: 'nao_li' | 'conversa' | 'dado_suspeito'; texto: string }>;
+    menores?: number;
+}

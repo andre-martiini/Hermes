@@ -201,6 +201,48 @@ export const contarSubtarefas = (plano?: ActionPlanItem[] | null): [number, numb
   return [itens.filter(estaFeita).length, itens.length];
 };
 
+/** Se alguma etapa marcou data própria. Espelho de `subtarefas.plano_tem_datas`. */
+export const planoTemDatas = (plano?: ActionPlanItem[] | null): boolean =>
+  (plano || []).some(i => String(i?.data_prevista || '').trim());
+
+/**
+ * Data da etapa, herdando a da macroação quando cabe. Espelho de
+ * `subtarefas.data_prevista_de`: num plano misto (algumas etapas com data, outras
+ * sem) a etapa sem data não herda — é a que ainda não foi posicionada.
+ */
+export const dataPrevistaDe = (
+  item: ActionPlanItem,
+  dataLimiteAcao?: string | null,
+  plano?: ActionPlanItem[] | null,
+): string => {
+  const propria = String(item?.data_prevista || '').trim();
+  if (propria) return propria;
+  if (plano && planoTemDatas(plano)) return '';
+  return String(dataLimiteAcao || '').trim();
+};
+
+/**
+ * A etapa que vale agora: a de menor data ainda não concluída; empate pela ordem
+ * do plano; etapa sem dia num plano com datas vai para o fim da fila. Espelho de
+ * `subtarefas.subtarefa_corrente` — é ela que decide se a ação está em espera
+ * (`estado === 'aguardando_terceiro'`), e o painel e o resumo precisam concordar.
+ */
+export const subtarefaCorrente = (
+  plano?: ActionPlanItem[] | null,
+  dataLimiteAcao?: string | null,
+): ActionPlanItem | null => {
+  const itens = plano || [];
+  let melhor: { data: string; ordem: number; item: ActionPlanItem } | null = null;
+  itens.forEach((item, ordem) => {
+    if (!item || !textoDaSubtarefa(item) || estaFeita(item)) return;
+    const data = dataPrevistaDe(item, dataLimiteAcao, itens) || '9999-12-31';
+    if (!melhor || data < melhor.data || (data === melhor.data && ordem < melhor.ordem)) {
+      melhor = { data, ordem, item };
+    }
+  });
+  return melhor ? (melhor as { item: ActionPlanItem }).item : null;
+};
+
 export type ExecutionLane = 'avanco' | 'continuo' | 'aguardando_terceiro';
 
 /**

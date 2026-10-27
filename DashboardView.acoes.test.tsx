@@ -96,7 +96,9 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const abrir = (titulo: string) => fireEvent.click(screen.getByTitle(titulo));
+// O "Próximo passo" repete o texto da primeira etapa; a etapa na lista é o <p> dentro de uma <div>.
+const textoDaEtapa = (texto: string) => screen.getByText(texto, { selector: 'div > p' });
+const abrir = (titulo: string) => fireEvent.click(screen.getByRole('button', { name: `Ver etapas: ${titulo}` }));
 
 describe('AcoesDoDiaCard — executor da etapa', () => {
     it('mostra o contador só nas ações com etapa em aberto para o agente', () => {
@@ -129,7 +131,7 @@ describe('AcoesDoDiaCard — executor da etapa', () => {
     it('a etapa do agente leva etiqueta e a frase de como; a só do André fica sem selo', () => {
         render(<AcoesDoDiaCard />);
         abrir('Sispnaes');
-        const linhaDe = (texto: string) => screen.getByText(texto).parentElement!;
+        const linhaDe = (texto: string) => textoDaEtapa(texto).parentElement!;
         expect(within(linhaDe('Ler o relatório de lições aprendidas')).getByTestId('etiqueta-executor'))
             .toHaveTextContent('Agente faz');
         expect(within(linhaDe('Escrever a mensagem à DAE')).getByTestId('etiqueta-executor'))
@@ -144,12 +146,12 @@ describe('AcoesDoDiaCard — executor da etapa', () => {
         expect(filtro).toHaveAttribute('aria-pressed', 'false');
         fireEvent.click(filtro);
         expect(filtro).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByText('Ler o relatório de lições aprendidas')).toBeInTheDocument();
-        expect(screen.getByText('Escrever a mensagem à DAE')).toBeInTheDocument();
-        expect(screen.queryByText('Entregar à DAE')).toBeNull();
-        expect(screen.queryByTitle('Folha de pagamento')).toBeNull();
+        expect(textoDaEtapa('Ler o relatório de lições aprendidas')).toBeInTheDocument();
+        expect(textoDaEtapa('Escrever a mensagem à DAE')).toBeInTheDocument();
+        expect(screen.queryByText('Entregar à DAE', { selector: 'div > p' })).toBeNull();
+        expect(screen.queryByText('Folha de pagamento')).toBeNull();
         fireEvent.click(filtro);
-        expect(screen.getByTitle('Folha de pagamento')).toBeInTheDocument();
+        expect(screen.getByText('Folha de pagamento')).toBeInTheDocument();
     });
 
     it('o menu da etapa grava a correção do André como "usuario" e preserva as outras etapas', async () => {
