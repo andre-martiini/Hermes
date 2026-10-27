@@ -663,30 +663,7 @@ pendencias:
 ```
 
 
----
-
-```yaml
-pacote: "P08 sub-entrega 2/N -- decisão de continuação do runner (autonomy/runner_continuacao.py, passos 4-7): função pura decidir_continuacao traduz o ResultadoRunner no próximo estado do pedido a partir de EM_ANDAMENTO. CONCLUIDO -> VERIFICANDO (nunca fecha direto); AGUARDANDO -> AGUARDANDO_EXTERNO sem continuação imediata (horário sem fuso/tipo errado vira espera sem horário, com UTC); PAUSADO_LIMITE -> RETENTATIVA_AGENDADA em 60 s com teto de 20 pausas (não gasta tentativa); RETENTAR -> backoff de requests.calcular_backoff_segundos até DEFAULT_MAX_TENTATIVAS, depois FALHA_FINAL; FALHA/entrada inválida -> FALHA_FINAL. Soma de tempo em UTC (DST). Sem I/O, sem Cloud Tasks (shadow/off, passo 11)."
-estado: validado
-inicio: "2026-10-27T10:50:00Z"
-fim: "2026-10-27T11:20:00Z"
-decisoes:
-  - id: p08-sub2-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT."
-  - id: p08-sub2-verificar
-    motivo: "Sucesso do runner vai para VERIFICANDO (passo 4, 'verificar'); só o verificador conclui o pedido."
-  - id: p08-sub2-pausas
-    motivo: "Pausa por limite não consome tentativa de erro, mas tem teto próprio (20) para não girar para sempre."
-  - id: p08-sub2-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P07 revisão final (2ª) arquivado em execucao-archive-p07final2.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4696 OK (diário, P08 sub 1; main 8cfa553); DEPOIS 4713 OK (+17 em test_autonomy_runner_continuacao)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 3 achados (soma de timedelta sem normalizar para UTC com fuso de DST; OverflowError em agora no limite do calendário; AGUARDANDO sem espera) -> corrigidos. Rodada 2 sobre a correção: 2 achados (acordar_em de tipo errado vazava como continuar_em; OverflowError na normalização fora do try) -> corrigidos. Sem rodada 3 (correções de uma linha, cobertas por teste, lógica pura)."
-pendencias:
-  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
-```
+# (Em 2026-10-27 o bloco "P08 sub 2" foi movido para docs/autonomia/execucao-archive-p08sub2.md.)
 
 ---
 
@@ -709,4 +686,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): achados reais (indisponiveis str virava caracteres; config mutável; validado_em no futuro nunca vencia; exceções não tipadas; set sem ordem; tzinfo sem offset; tarifa sem tipo; contexto Decimal global) -> corrigidos. Codex na PR: 1 achado P2 (itens não-str de indisponíveis ignorados) -> corrigido. Rodada 2 sobre a correção: 5 achados (preço/taxa ainda dependiam do contexto global; agora inválido só checado se papel existisse + OverflowError; custo sem validar tarifa/teto de tokens; indisponíveis não-str ignorados; config não hasheável) -> corrigidos e cobertos por teste. Achado de id sem data: recusado (ver decisão). Sem rodada 3: correções pequenas, lógica pura, cobertas por teste."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 4/N -- adaptador de consumo Cowork (autonomy/executor_cowork.py, passo 10): CapacidadesExecutor (runner_servico ou cowork, ids 'cowork:<rotina>' reservados ao Cowork, regex de id, só capacidades DECLARADAS -- nunca herdadas entre tipos), capacidades_faltantes e reservar_pedido_para_executor (checagem prévia de capacidade sem tocar o pedido; depois a MESMA reserva de assumir_pedido: lease, geração, run). Perder a disputa vira DisputaPerdida; faltar capacidade vira CapacidadeInsuficiente. Sem I/O (shadow/off, passo 11)."
+estado: validado
+inicio: "2026-10-27T17:00:00Z"
+fim: "2026-10-27T17:40:00Z"
+decisoes:
+  - id: p08-sub4-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 14h BRT."
+  - id: p08-sub4-cas
+    motivo: "Função pura: dois executores partindo do MESMO snapshot pendente reservam ambos em memória; a exclusão real é compare-and-set por geração/status na gravação (wiring Firestore). Documentado na docstring e coberto por teste."
+  - id: p08-sub4-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 2 arquivado em execucao-archive-p08sub2.md."
+testes:
+  resultados:
+    - "functions/ completo DEPOIS 4847 OK (inclui +14 em test_autonomy_executor_cowork). ANTES: 4741 no diário (P08 sub 3); main atual rende 4833 (4847-14), pois PRs #541/#542 acrescentaram testes depois."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): achados reais (id vazio após prefixo, runner com 'COWORK:'/unicode/controles, duracao_segundos inf/nan, tipos errados sem TypeError, disputa sem exceção própria, faltantes mutável) -> corrigidos e cobertos por teste; snapshot concorrente documentado. Rodada 2 sobre a correção: 2 achados menores (int gigante vazava OverflowError na checagem de duração -> corrigido com checagem de faixa só; DisputaPerdida também cobre retentativa antes da hora -> documentado). Sem rodada 3: lógica pura, correções de uma linha cobertas por teste."
+pendencias:
+  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), dispatcher shadow/off). Confirmar que os ids reais de runners cabem no regex [A-Za-z0-9_.:-]{1,100}."
 ```
