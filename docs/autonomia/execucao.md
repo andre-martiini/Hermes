@@ -635,28 +635,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P07 sub-entrega 19/N -- registro de compromissos persistido por chat em sombra (passo 3, achado do Codex na PR 537): extracao_compromissos_sombra carrega o registro do chat de compromissos_chat_sombra/{chat_id}, abre as promessas firmes novas contra ele (chave repetida = reprocessamento, sem erro falso) e persiste só {chave, estado} por ArrayUnion (idempotente, sem perda em mensagens concorrentes; nunca texto; teto de 200 por chat). Falha de leitura/escrita vira flag no resumo (registro_chat_ilegivel/erro/cheio), nunca derruba o gatilho. Mesma flag da sombra de extração (padrão DESLIGADO)."
-estado: validado
-inicio: "2026-10-26T16:45:00Z"
-fim: "2026-10-26T17:40:00Z"
-decisoes:
-  - id: p07-sub19-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 14h BRT."
-  - id: p07-sub19-texto
-    motivo: "O registro não guarda texto (princípio das sombras); ao reler, o Compromisso volta com marcador fixo 'texto nao gravado'. Suficiente para chave/estado/substituição."
-  - id: p07-sub19-substituicao
-    motivo: "Persistência entregue; o SINAL de substituição explícita continua inexistente e NÃO foi inventado (contrato proíbe relação por semelhança). Decisão do André pendente: (a) autorizar um sinal de modelo na extração ou (b) declarar o passo 3 atendido por independência + persistência. Sem isso pacote_concluido: P07 não é declarado."
-  - id: p07-sub19-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P07 sub 17 arquivado em execucao-archive-p07sub17.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4664 OK (main 79bbae2); DEPOIS 4671 OK (+7 em test_extracao_compromissos_sombra)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 2 achados reais (leitura do registro só capturava exceções de dado, não de Firestore; criado_em no elemento do ArrayUnion duplicava chaves e deixava o chat ilegível) -> corrigidos. Rodada 2: 1 achado (reprocessar a mesma mensagem dava erro falso e zerava chaves) -> corrigido. Rodada 3 sobre a correção: não achou nada."
-pendencias:
-  - "P07 PENDENTE só pela decisão do André sobre o sinal de substituição (acima). Ativação das sombras só com aval do André. Se a decisão for (b), registrar e declarar pacote_concluido: P07; o próximo é o P08 (runner Claude, shadow/off)."
-```
+# (Em 2026-10-27 o bloco "P07 sub-entrega 19/N" foi movido para docs/autonomia/execucao-archive-p07sub19.md.)
 
 ---
 
@@ -707,4 +686,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 3 achados (soma de timedelta sem normalizar para UTC com fuso de DST; OverflowError em agora no limite do calendário; AGUARDANDO sem espera) -> corrigidos. Rodada 2 sobre a correção: 2 achados (acordar_em de tipo errado vazava como continuar_em; OverflowError na normalização fora do try) -> corrigidos. Sem rodada 3 (correções de uma linha, cobertas por teste, lógica pura)."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real com tarifas versionadas e cache de prompt, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 3/N -- seleção de modelo por configuração validada e custo por tarifa versionada (autonomy/modelos.py, passos 8-9): ConfigModelos (papel -> ids em ordem de preferência, imutável, cada id com TarifaModelo versionada, validação da conta vence em 90 dias, sem aliases latest/alias/default), selecionar_modelo com rotação por indisponíveis e erro tipado (papel desconhecido / validação vencida / todos indisponíveis, nunca modelo padrão escondido), custo_chamada em Decimal com leitura/escrita de cache e taxa_acerto_cache. Preços não embutidos: chegam da configuração da conta. Sem I/O (shadow/off, passo 11)."
+estado: validado
+inicio: "2026-10-27T14:30:00Z"
+fim: "2026-10-27T15:10:00Z"
+decisoes:
+  - id: p08-sub3-triagem
+    motivo: "Nenhuma PR da linha de autonomia aberta (a única aberta, #541 painel do dia, é de outra origem e não trivial: ignorada); nenhuma execução paralela."
+  - id: p08-sub3-id-sem-data
+    motivo: "Não exigi sufixo de data no id: os ids da conta (ex.: claude-opus-5-5) não têm; a garantia de snapshot fixo vem da lista validada + tarifa + validade de 90 dias. Só aliases explícitos (latest/alias/default, separador - ou .) são barrados."
+  - id: p08-sub3-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P07 sub 19 arquivado em execucao-archive-p07sub19.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4713 OK (diário, P08 sub 2); DEPOIS 4740 OK (+27 em test_autonomy_modelos)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): achados reais (indisponiveis str virava caracteres; config mutável; validado_em no futuro nunca vencia; exceções não tipadas; set sem ordem; tzinfo sem offset; tarifa sem tipo; contexto Decimal global) -> corrigidos. Rodada 2 sobre a correção: 5 achados (preço/taxa ainda dependiam do contexto global; agora inválido só checado se papel existisse + OverflowError; custo sem validar tarifa/teto de tokens; indisponíveis não-str ignorados; config não hasheável) -> corrigidos e cobertos por teste. Achado de id sem data: recusado (ver decisão). Sem rodada 3: correções pequenas, lógica pura, cobertas por teste."
+pendencias:
+  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
 ```
