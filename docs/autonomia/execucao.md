@@ -665,28 +665,7 @@ pendencias:
 
 # (Em 2026-10-27 o bloco "P08 sub 2" foi movido para docs/autonomia/execucao-archive-p08sub2.md.)
 
----
-
-```yaml
-pacote: "P08 sub-entrega 3/N -- seleção de modelo por configuração validada e custo por tarifa versionada (autonomy/modelos.py, passos 8-9): ConfigModelos (papel -> ids em ordem de preferência, imutável, cada id com TarifaModelo versionada, validação da conta vence em 90 dias, sem aliases latest/alias/default), selecionar_modelo com rotação por indisponíveis e erro tipado (papel desconhecido / validação vencida / todos indisponíveis, nunca modelo padrão escondido), custo_chamada em Decimal com leitura/escrita de cache e taxa_acerto_cache. Preços não embutidos: chegam da configuração da conta. Sem I/O (shadow/off, passo 11)."
-estado: validado
-inicio: "2026-10-27T14:30:00Z"
-fim: "2026-10-27T15:10:00Z"
-decisoes:
-  - id: p08-sub3-triagem
-    motivo: "Nenhuma PR da linha de autonomia aberta (a única aberta, #541 painel do dia, é de outra origem e não trivial: ignorada); nenhuma execução paralela."
-  - id: p08-sub3-id-sem-data
-    motivo: "Não exigi sufixo de data no id: os ids da conta (ex.: claude-opus-5-5) não têm; a garantia de snapshot fixo vem da lista validada + tarifa + validade de 90 dias. Só aliases explícitos (latest/alias/default, separador - ou .) são barrados."
-  - id: p08-sub3-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P07 sub 19 arquivado em execucao-archive-p07sub19.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4713 OK (diário, P08 sub 2); DEPOIS 4741 OK (+28 em test_autonomy_modelos)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): achados reais (indisponiveis str virava caracteres; config mutável; validado_em no futuro nunca vencia; exceções não tipadas; set sem ordem; tzinfo sem offset; tarifa sem tipo; contexto Decimal global) -> corrigidos. Codex na PR: 1 achado P2 (itens não-str de indisponíveis ignorados) -> corrigido. Rodada 2 sobre a correção: 5 achados (preço/taxa ainda dependiam do contexto global; agora inválido só checado se papel existisse + OverflowError; custo sem validar tarifa/teto de tokens; indisponíveis não-str ignorados; config não hasheável) -> corrigidos e cobertos por teste. Achado de id sem data: recusado (ver decisão). Sem rodada 3: correções pequenas, lógica pura, cobertas por teste."
-pendencias:
-  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
-```
+# (Em 2026-10-27 o bloco "P08 sub-entrega 3/N" foi movido para docs/autonomia/execucao-archive-p08sub3.md.)
 
 ---
 
@@ -709,4 +688,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): achados reais (id vazio após prefixo, runner com 'COWORK:'/unicode/controles, duracao_segundos inf/nan, tipos errados sem TypeError, disputa sem exceção própria, faltantes mutável) -> corrigidos e cobertos por teste; snapshot concorrente documentado. Rodada 2 sobre a correção: 2 achados menores (int gigante vazava OverflowError na checagem de duração -> corrigido com checagem de faixa só; DisputaPerdida também cobre retentativa antes da hora -> documentado). Sem rodada 3: lógica pura, correções de uma linha cobertas por teste."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), dispatcher shadow/off). Confirmar que os ids reais de runners cabem no regex [A-Za-z0-9_.:-]{1,100}."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 5/N -- dispatcher shadow/off (autonomy/dispatcher.py, passos 3 e 11): função pura decidir_despacho/decidir_lote. Modo OFF é o padrão e o destino de config inválida (fail-closed); SHADOW devolve nome/payload da tarefa que seria enfileirada sem enfileirar; ATIVO só enfileira com orçamento de despachos inteiro positivo (sem orçamento, nada). Payload só com request_id (conteúdo vem do banco após autenticar); nome de tarefa sha256 por pedido+tentativa. Elegibilidade espelha assumir_pedido (transição válida para RESERVADO, lease expirada, retentativa só após proximo_tentativa_em). Lote deduplica request_id e consome orçamento por ENFILEIRAR. Sem I/O, sem Cloud Tasks."
+estado: validado
+inicio: "2026-10-27T20:00:00Z"
+fim: "2026-10-27T20:40:00Z"
+decisoes:
+  - id: p08-sub5-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 17h BRT."
+  - id: p08-sub5-nome-reutilizado
+    motivo: "Achado do Codex (P2): RESERVADO->PENDENTE não incrementa tentativas, então o nome se repetiria e o Cloud Tasks recusa nomes de tarefas já executadas por horas (ALREADY_EXISTS), deixando o pedido sem tarefa. Corrigido: o nome inclui a geração da lease (monotônica, cresce a cada reserva). ALREADY_EXISTS passa a significar duplicata real."
+  - id: p08-sub5-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 3 arquivado em execucao-archive-p08sub3.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4847 OK (diário, P08 sub 4); DEPOIS 4862 OK (+15 em test_autonomy_dispatcher, incluindo o caso da geração no nome)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 3 achados reais (status str crua ignorava backoff por usar 'is'; tentativas não-inteira gerava nome inválido; pedido repetido no lote gastava orçamento duas vezes) -> corrigidos e cobertos por teste. Rodada 2 sobre a correção: não achou nada (só desvio cosmético: motivo duplicado_no_lote em modo OFF, ação igual). Codex na PR: 1 achado P2 (nome reutilizado após liberar reserva) -> corrigido com a geração da lease no nome e coberto por teste; mudança de uma linha, sem nova rodada."
+pendencias:
+  - "P08: wiring (worker HTTP autenticado, Cloud Tasks real tratando ALREADY_EXISTS como duplicata, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), leitura da flag do modo e do orçamento de despachos)."
 ```
