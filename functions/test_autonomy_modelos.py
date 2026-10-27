@@ -106,6 +106,12 @@ class SelecaoTest(unittest.TestCase):
             with self.assertRaises(ValueError, msg=ruim):
                 selecionar_modelo(config(), "planner", AGORA, ruim)
 
+    def test_indisponiveis_com_item_nao_str_e_erro(self):
+        for ruim in ([A, b"x"], [None], [["x"]], [5]):
+            with self.assertRaises(ValueError, msg=ruim):
+                selecionar_modelo(config(), "planner", AGORA, ruim)
+        self.assertEqual(selecionar_modelo(config(), "planner", AGORA, [A]).modelo_id, B)
+
     def test_agora_invalido_e_erro_mesmo_com_papel_desconhecido(self):
         with self.assertRaises(ValueError):
             selecionar_modelo(config(), "outro", datetime(2026, 10, 27))

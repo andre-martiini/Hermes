@@ -161,7 +161,10 @@ def selecionar_modelo(
         return ErroSelecao(MotivoSelecao.VALIDACAO_VENCIDA)
     if isinstance(indisponiveis, (str, bytes)) or not isinstance(indisponiveis, Iterable):
         raise ValueError("indisponiveis deve ser uma coleção de ids")
-    fora = frozenset(indisponiveis)  # ids são str; item não hashable é erro do chamador
+    fora = tuple(indisponiveis)
+    if not all(isinstance(i, str) for i in fora):
+        raise ValueError("indisponiveis deve conter apenas ids (str)")
+    fora = frozenset(fora)
     for i, mid in enumerate(ids):
         if mid not in fora:
             return ModeloEscolhido(mid, config.tarifas[mid], rotacionado=i > 0)

@@ -704,9 +704,9 @@ decisoes:
     motivo: "execucao.md no limite de ~50KB: bloco P07 sub 19 arquivado em execucao-archive-p07sub19.md."
 testes:
   resultados:
-    - "functions/ completo ANTES 4713 OK (diário, P08 sub 2); DEPOIS 4740 OK (+27 em test_autonomy_modelos)."
+    - "functions/ completo ANTES 4713 OK (diário, P08 sub 2); DEPOIS 4741 OK (+28 em test_autonomy_modelos)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): achados reais (indisponiveis str virava caracteres; config mutável; validado_em no futuro nunca vencia; exceções não tipadas; set sem ordem; tzinfo sem offset; tarifa sem tipo; contexto Decimal global) -> corrigidos. Rodada 2 sobre a correção: 5 achados (preço/taxa ainda dependiam do contexto global; agora inválido só checado se papel existisse + OverflowError; custo sem validar tarifa/teto de tokens; indisponíveis não-str ignorados; config não hasheável) -> corrigidos e cobertos por teste. Achado de id sem data: recusado (ver decisão). Sem rodada 3: correções pequenas, lógica pura, cobertas por teste."
+  - "Rodada 1 (agente sem contexto): achados reais (indisponiveis str virava caracteres; config mutável; validado_em no futuro nunca vencia; exceções não tipadas; set sem ordem; tzinfo sem offset; tarifa sem tipo; contexto Decimal global) -> corrigidos. Codex na PR: 1 achado P2 (itens não-str de indisponíveis ignorados) -> corrigido. Rodada 2 sobre a correção: 5 achados (preço/taxa ainda dependiam do contexto global; agora inválido só checado se papel existisse + OverflowError; custo sem validar tarifa/teto de tokens; indisponíveis não-str ignorados; config não hasheável) -> corrigidos e cobertos por teste. Achado de id sem data: recusado (ver decisão). Sem rodada 3: correções pequenas, lógica pura, cobertas por teste."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, adaptador Cowork, dispatcher shadow/off). P07: decisão do André sobre o sinal de substituição."
 ```
