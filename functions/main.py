@@ -14405,6 +14405,31 @@ def _require_internal_user(req: https_fn.CallableRequest) -> None:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.PERMISSION_DENIED, message="Acesso restrito.")
 
 
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
+def decidirElevacao(req: https_fn.CallableRequest) -> dict:
+    """Aceita ou descarta (nunca) uma sugestão de elevação pelo Painel do dia.
+
+    `aceitar` também cria a ação e a vincula ao objetivo, os dois passos que o
+    agente faz à mão na tool `decidir_elevacao`.
+    """
+    _require_internal_user(req)
+    data = req.data or {}
+
+    import elevacao_pela_tela
+    from morning_summary import _hoje_sp
+    from tools import hermes_tools
+    from tools.tool_context import ToolContext
+
+    db = get_db()
+    ctx = ToolContext(user_uid=req.auth.uid, canal="web", _db=db)
+    return elevacao_pela_tela.decidir_pela_tela(
+        db, data.get("sugestaoId"), data.get("decisao"), _hoje_sp(),
+        criar_acao=lambda args: hermes_tools.criar_acao_no_sistema(ctx, args),
+        vincular=lambda task_id, objetivo_id: hermes_tools.editar_acao(
+            ctx, {"task_id": task_id, "alteracoes": {"estrategia_objetivo_id": objetivo_id}}),
+    )
+
+
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
 def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     """Lê o subconjunto de system/settings das automações multi-canal."""

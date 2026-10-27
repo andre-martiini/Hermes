@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { arrayUnion, collection, doc, getDoc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, functions } from './firebase';
+import { httpsCallable } from 'firebase/functions';
 import {
     Tarefa, ActionPlanItem, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
@@ -1370,14 +1371,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         }
     };
 
-    const [verSugestoes, setVerSugestoes] = useState(false);
-    const [sugestoes, setSugestoes] = useState<SugestaoDeElevacao[]>([]);
+    // Sugestões de elevação que esperam decisão: ao vivo, para a contagem e os cards
+    // acompanharem a decisão sem recarregar.
+    const [sugestoes, setSugestoes] = useState<SugestaoDeElevacao[] | null>(null);
     useEffect(() => {
-        if (!verSugestoes) return;
         const q = query(collection(db, 'elevacoes_sugeridas'), where('status', '==', 'pendente'));
         const unsub = onSnapshot(q, snap => setSugestoes(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))), () => undefined);
         return () => unsub();
-    }, [verSugestoes]);
+    }, []);
+    const decidirElevacao = async (sugestaoId: string, decisao: 'aceitar' | 'descartar') => {
+        const fn = httpsCallable<{ sugestaoId: string; decisao: string }, { ok: boolean; erro?: string; aviso?: string }>(functions, 'decidirElevacao');
+        const { data } = await fn({ sugestaoId, decisao });
+        if (!data?.ok) throw new Error(data?.erro || 'Não foi possível gravar a decisão.');
+    };
 
     const [contagem, setContagem] = useState({ ativas: 0, emEspera: 0 });
 
@@ -1652,13 +1658,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     );
 
     const total = contagem.ativas + contagem.emEspera;
-    const temRodapeDeDecidir = (resumo?.filas?.elevacoes?.total ?? 0) > 0 || (resumo?.avisos_do_sistema ?? []).length > 0;
+    // Ao vivo quando a lista chegou; até lá, o que o resumo das 05:00 disse.
+    const totalElevacoes = sugestoes ? sugestoes.length : (resumo?.filas?.elevacoes?.total ?? 0);
+    const temRodapeDeDecidir = totalElevacoes > 0 || (resumo?.avisos_do_sistema ?? []).length > 0;
     const rodapeDeDecidir = (
         <ElevacoesRodape
-            total={resumo?.filas?.elevacoes?.total ?? 0}
+            total={totalElevacoes}
             avisos={resumo?.avisos_do_sistema ?? []}
-            sugestoes={sugestoes}
-            onAbrir={setVerSugestoes}
+            sugestoes={sugestoes ?? []}
+            onDecidir={decidirElevacao}
             isDark={isDark}
         />
     );

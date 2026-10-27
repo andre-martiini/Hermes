@@ -14,9 +14,9 @@ interface ElevacoesRodapeProps {
     total: number;
     /** `resumo.avisos_do_sistema`: o que parou de funcionar direito (antigo "Avisos do sistema"). */
     avisos: ResumoAvisoDoSistema[];
-    /** Cards só são lidos quando o bloco abre. */
     sugestoes: SugestaoDeElevacao[];
-    onAbrir: (aberto: boolean) => void;
+    /** Grava a decisão: `aceitar` cria a ação e a vincula ao objetivo; `descartar` é "nunca". */
+    onDecidir: (sugestaoId: string, decisao: 'aceitar' | 'descartar') => Promise<void>;
     isDark?: boolean;
 }
 
@@ -28,18 +28,26 @@ const dataCurta = (iso?: string | null) => {
 /**
  * Rodapé de Decidir: o aviso de elevações sugeridas e o que parou no sistema.
  *
- * Os cards mostram o que já existe, o que falta e o custo. A decisão
- * (aceitar, adiar, nunca) continua sendo do agente por `decidir_elevacao`:
- * aceitar cria uma ação e a vincula a um objetivo em dois passos que só ele faz.
+ * Os cards mostram o que já existe, o que falta e o custo. Aceitar cria a ação e a
+ * vincula ao objetivo; Descartar é "nunca" (a sugestão não volta e a vaga do mês
+ * é devolvida). Quem grava é a callable `decidirElevacao`.
  */
-const ElevacoesRodape: React.FC<ElevacoesRodapeProps> = ({ total, avisos, sugestoes, onAbrir, isDark = false }) => {
+const ElevacoesRodape: React.FC<ElevacoesRodapeProps> = ({ total, avisos, sugestoes, onDecidir, isDark = false }) => {
     const [aberto, setAberto] = useState(false);
+    const [ocupada, setOcupada] = useState<string | null>(null);
+    const [erro, setErro] = useState<string | null>(null);
     if (total <= 0 && avisos.length === 0) return null;
 
-    const alternar = () => {
-        const proximo = !aberto;
-        setAberto(proximo);
-        onAbrir(proximo);
+    const decidir = async (id: string, decisao: 'aceitar' | 'descartar') => {
+        setOcupada(id);
+        setErro(null);
+        try {
+            await onDecidir(id, decisao);
+        } catch (e) {
+            setErro(e instanceof Error ? e.message : 'Não foi possível gravar a decisão.');
+        } finally {
+            setOcupada(null);
+        }
     };
 
     return (
@@ -61,7 +69,7 @@ const ElevacoesRodape: React.FC<ElevacoesRodapeProps> = ({ total, avisos, sugest
                     <button
                         type="button"
                         aria-expanded={aberto}
-                        onClick={alternar}
+                        onClick={() => setAberto(v => !v)}
                         className={`min-h-[44px] px-3.5 rounded-xl border text-[12.5px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce] ${
                             isDark ? 'border-[#8a6a1a] bg-[#3a2a0a] text-amber-200' : 'border-[#c9a24a] bg-[#fff8e6] text-[#5a3300]'
                         }`}
@@ -73,34 +81,54 @@ const ElevacoesRodape: React.FC<ElevacoesRodapeProps> = ({ total, avisos, sugest
 
             {aberto && (
                 <div className="flex flex-col gap-2.5">
-                    {sugestoes.length === 0 && (
-                        <p className={`m-0 text-xs ${isDark ? 'text-slate-400' : 'text-[#5f586a]'}`}>Carregando as sugestões…</p>
+                    {erro && (
+                        <p role="alert" className={`m-0 text-xs font-semibold ${isDark ? 'text-rose-300' : 'text-[#9b1c1c]'}`}>{erro}</p>
                     )}
                     {sugestoes.map(s => (
                         <div
                             key={s.id}
                             data-testid="card-elevacao"
-                            className={`rounded-2xl border px-4 py-3.5 ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#fff8e6] border-[#f0e2bd]'}`}
+                            className={`flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border px-4 py-3.5 ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#fff8e6] border-[#f0e2bd]'}`}
                         >
-                            <p className="m-0 text-[13.5px] font-bold">{s.titulo_acao || 'Ação'}</p>
-                            {s.ativo_possivel && (
-                                <p className={`m-0 mt-1 text-[12.5px] leading-snug ${isDark ? 'text-slate-300' : 'text-[#4a4455]'}`}>
-                                    <span className="font-bold">Ativo possível:</span> {s.ativo_possivel}
-                                </p>
-                            )}
-                            {s.passo_que_falta && (
-                                <p className={`m-0 mt-0.5 text-[12.5px] leading-snug ${isDark ? 'text-slate-300' : 'text-[#4a4455]'}`}>
-                                    <span className="font-bold">Falta:</span> {s.passo_que_falta}
-                                    {s.custo_estimado ? <span className={isDark ? 'text-slate-400' : 'text-[#5f586a]'}> · {s.custo_estimado}</span> : null}
-                                </p>
-                            )}
+                            <div className="flex-1 basis-[320px] min-w-0">
+                                <p className="m-0 text-[13.5px] font-bold">{s.titulo_acao || 'Ação'}</p>
+                                {s.ativo_possivel && (
+                                    <p className={`m-0 mt-1 text-[12.5px] leading-snug ${isDark ? 'text-slate-300' : 'text-[#4a4455]'}`}>
+                                        <span className="font-bold">Ativo possível:</span> {s.ativo_possivel}
+                                    </p>
+                                )}
+                                {s.passo_que_falta && (
+                                    <p className={`m-0 mt-0.5 text-[12.5px] leading-snug ${isDark ? 'text-slate-300' : 'text-[#4a4455]'}`}>
+                                        <span className="font-bold">Falta:</span> {s.passo_que_falta}
+                                        {s.custo_estimado ? <span className={isDark ? 'text-slate-400' : 'text-[#5f586a]'}> · {s.custo_estimado}</span> : null}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    disabled={ocupada !== null}
+                                    onClick={() => decidir(s.id, 'aceitar')}
+                                    aria-label={`Aceitar: ${s.titulo_acao || 'sugestão'}`}
+                                    className="min-h-[44px] px-4 rounded-xl border-0 bg-[#7e22ce] text-white text-[13px] font-bold disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce]"
+                                >
+                                    {ocupada === s.id ? 'Gravando…' : 'Aceitar'}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={ocupada !== null}
+                                    onClick={() => decidir(s.id, 'descartar')}
+                                    aria-label={`Descartar: ${s.titulo_acao || 'sugestão'}`}
+                                    title="Descartar: a sugestão não volta mais"
+                                    className={`min-h-[44px] px-4 rounded-xl border text-[13px] font-bold disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce] ${
+                                        isDark ? 'border-[#3b3552] text-slate-200 bg-transparent' : 'border-[#d9d6e0] text-[#4a4455] bg-white'
+                                    }`}
+                                >
+                                    Descartar
+                                </button>
+                            </div>
                         </div>
                     ))}
-                    {sugestoes.length > 0 && (
-                        <p className={`m-0 text-xs ${isDark ? 'text-slate-400' : 'text-[#5f586a]'}`}>
-                            Para decidir, peça ao agente: aceitar, adiar ou descartar para sempre.
-                        </p>
-                    )}
                 </div>
             )}
         </div>

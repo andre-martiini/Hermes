@@ -4683,7 +4683,7 @@ const App: React.FC = () => {
             </div>
             <nav className="flex flex-col gap-1.5">
               {[
-                { id: 'dashboard', label: 'Painel do dia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
                 { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
@@ -4979,14 +4979,14 @@ const App: React.FC = () => {
                         className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
-                          {viewMode === 'home' ? 'Painel do dia' :
+                          {viewMode === 'home' ? 'Dashboard' :
                             viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'diario' ? 'Diário Pessoal' :
                                 viewMode === 'whatsapp' ? 'Caixa de Entrada WhatsApp' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
-                                  activeModule === 'dashboard' ? 'Painel do dia' :
+                                  activeModule === 'dashboard' ? 'Dashboard' :
                                       activeModule === 'acoes' ? 'Ações' :
                                         activeModule === 'financeiro' ? 'Financeiro' :
                                         activeModule === 'saude' ? 'Saúde' :
@@ -5247,7 +5247,7 @@ const App: React.FC = () => {
                 <div className={`md:hidden border-t animate-in slide-in-from-top-4 duration-300 ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                   <nav className="flex flex-col p-4 gap-2">
                     {[
-                      { label: 'Painel do dia', active: viewMode === 'dashboard' || viewMode === 'home' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                      { label: 'Dashboard', active: viewMode === 'dashboard' || viewMode === 'home' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
                       { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                       { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
                       { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => navigateToModule('acoes', 'pgc') },

@@ -32,7 +32,11 @@ const snapQuery = (q: any) => {
 };
 const notificar = () => ouvintes.forEach(({ alvo, cb }) => cb(alvo.clausulas ? snapQuery(alvo) : snapDoc(alvo)));
 
+const chamarCallable = vi.fn();
 vi.mock('./firebase', () => ({ db: {}, functions: {} }));
+vi.mock('firebase/functions', () => ({
+    httpsCallable: (_fns: any, nome: string) => (dados: any) => chamarCallable(nome, dados),
+}));
 vi.mock('firebase/firestore', () => ({
     arrayUnion: vi.fn(), updateDoc: vi.fn(), getDoc: vi.fn((ref: any) => Promise.resolve(snapDoc(ref))),
     collection: vi.fn((_db: any, col: string) => ({ col })),
@@ -111,6 +115,13 @@ const preparar = (briefing: any | null) => {
     armazem['google_calendar_events/e2'] = { titulo: 'Acupuntura', data_inicio: `${HOJE}T13:30:00-03:00`, data_fim: `${HOJE}T14:30:00-03:00` };
     armazem['google_calendar_events/ontem'] = { titulo: 'De ontem', data_inicio: '2026-10-26T10:00:00-03:00', data_fim: '2026-10-26T11:00:00-03:00' };
     armazem['atencao/a1'] = { estado: 'aberto' };
+    ['e1', 'e2', 'e3'].forEach((id, i) => {
+        armazem[`elevacoes_sugeridas/${id}`] = {
+            status: 'pendente', titulo_acao: `Ação elevável ${i + 1}`, ativo_possivel: `Ativo ${i + 1}`,
+            passo_que_falta: `Passo ${i + 1}`, custo_estimado: 'uma tarde',
+        };
+    });
+    armazem['elevacoes_sugeridas/velha'] = { status: 'nunca', titulo_acao: 'Já decidida' };
     if (briefing) armazem[`briefing_dia/${HOJE}`] = briefing;
 };
 
@@ -122,6 +133,7 @@ beforeEach(() => {
     for (const k of Object.keys(armazem)) delete armazem[k];
     ouvintes.length = 0;
     gravacoes.length = 0;
+    chamarCallable.mockReset();
     erroDoConsole = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 afterEach(() => {
@@ -306,5 +318,59 @@ describe('Painel do dia — com briefing_dia', () => {
         const ativas = screen.getAllByTestId('acao-ativa').map(a => within(a).getByRole('heading', { level: 3 }).textContent);
         expect(ativas).toEqual(['Sispnaes', 'Folha de pagamento']);
         expect(screen.queryByText('Adiada', { exact: false })).toBeNull();
+    });
+});
+
+
+describe('Painel do dia — sugestões de elevação', () => {
+    beforeEach(() => preparar(briefingCompleto()));
+
+    it('"Ver sugestões" abre os cards (só as pendentes) com Aceitar e Descartar', () => {
+        render(<DashboardView {...propsBase()} />);
+        expect(screen.queryByTestId('card-elevacao')).toBeNull();
+        const ver = screen.getByRole('button', { name: 'Ver sugestões' });
+        expect(ver).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(ver);
+        expect(ver).toHaveAttribute('aria-expanded', 'true');
+        const cards = screen.getAllByTestId('card-elevacao');
+        expect(cards).toHaveLength(3);
+        expect(cards[0]).toHaveTextContent('Ação elevável 1');
+        expect(cards[0]).toHaveTextContent('Ativo possível: Ativo 1');
+        expect(cards[0]).toHaveTextContent('Falta: Passo 1 · uma tarde');
+        expect(screen.queryByText('Já decidida')).toBeNull();
+        expect(within(cards[0]).getByRole('button', { name: /^Aceitar/ })).toBeInTheDocument();
+        expect(within(cards[0]).getByRole('button', { name: /^Descartar/ })).toBeInTheDocument();
+    });
+
+    it('Aceitar chama a callable com "aceitar"; Descartar com "descartar" (nunca)', async () => {
+        chamarCallable.mockResolvedValue({ data: { ok: true } });
+        render(<DashboardView {...propsBase()} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Ver sugestões' }));
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Aceitar: Ação elevável 1' })); });
+        expect(chamarCallable).toHaveBeenLastCalledWith('decidirElevacao', { sugestaoId: 'e1', decisao: 'aceitar' });
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Descartar: Ação elevável 2' })); });
+        expect(chamarCallable).toHaveBeenLastCalledWith('decidirElevacao', { sugestaoId: 'e2', decisao: 'descartar' });
+    });
+
+    it('decidida, a sugestão sai e a contagem acompanha sem recarregar', async () => {
+        chamarCallable.mockImplementation(async (_n: string, d: any) => {
+            armazem[`elevacoes_sugeridas/${d.sugestaoId}`] = { ...armazem[`elevacoes_sugeridas/${d.sugestaoId}`], status: 'nunca' };
+            notificar();
+            return { data: { ok: true } };
+        });
+        render(<DashboardView {...propsBase()} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Ver sugestões' }));
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Descartar: Ação elevável 1' })); });
+        expect(screen.getAllByTestId('card-elevacao')).toHaveLength(2);
+        expect(screen.getByText('2 sugestões de elevação esperam decisão.')).toBeInTheDocument();
+    });
+
+    it('erro da callable aparece e a sugestão continua lá', async () => {
+        chamarCallable.mockResolvedValue({ data: { ok: false, erro: 'Nao foi possivel criar a acao: area invalida. A sugestao continua pendente.' } });
+        render(<DashboardView {...propsBase()} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Ver sugestões' }));
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Aceitar: Ação elevável 1' })); });
+        expect(screen.getByText(/area invalida/)).toHaveAttribute('role', 'alert');
+        expect(screen.getAllByTestId('card-elevacao')).toHaveLength(3);
     });
 });
