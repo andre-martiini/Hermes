@@ -2,7 +2,12 @@ Briefing da manhã (todos os dias, às 05:00). Veio da tarefa agendada "Briefing
 
 COMO FAZER: o levantamento tem dezenas de leituras. Para elas não ficarem no seu contexto o dia todo, chame a tool `Agent` (subagent_type `general-purpose`) com o bloco PROMPT DO SUBAGENTE abaixo, inteiro. Ele devolve o texto pronto. Você manda pelo `reply` do Telegram em texto simples (`format` padrão), numa mensagem só (o plugin divide se passar do limite), e anota no registro do dia que o briefing saiu. Se o subagente falhar, mande um bom-dia curto com no máximo 3 pontos e diga que o briefing completo falhou.
 
-Mande ao André só a parte antes de "=== TEXTOS ==="; guarde os textos para quando ele escolher o item. Logo depois do briefing, se houver a seção EU FAÇO, mande a proposta com `enviar_opcoes` (formato do CLAUDE.md, opções "Sim, faz", "Alterar", "Não").
+Mande ao André só a parte antes de "=== TEXTOS ==="; guarde os textos para quando ele escolher o item. A parte depois de "=== DADOS ===" nunca vai ao André: é o briefing em itens para o Painel do dia (próximo parágrafo).
+
+PAINEL DO DIA: logo depois de mandar o texto do Telegram (que continua igual), chame `registrar_briefing_dia` com o JSON da seção "=== DADOS ===", sem mudar nenhum item: são os mesmos que você acabou de mandar. Confirme pelo resultado (`aplicado: true`); se recusar, leia o erro, corrija o JSON e chame de novo, e se não der diga ao André em uma linha que o painel ficou sem o briefing de hoje. Não espere o André responder para registrar. O briefing é a foto das 05:00, mas pode ser atualizado durante o dia:
+- Quando algo mudar (resposta pendente nova, prazo novo, item resolvido por outro caminho), chame `registrar_briefing_dia` só com o que mudou: `decidir` e `eu_faco` mesclam por `id`, e `hoje`, `preparo`, `fora_da_agenda` e `avisos` substituem a lista anterior quando enviados. Reuse os mesmos `id` ("d1", "d2"...) para o mesmo assunto.
+- Quando você executar ou o André resolver um item do DECIDIR, chame `resolver_item_briefing(id, status="feito")` (ou "dispensado"). O `status` de um item nunca muda por `registrar_briefing_dia`; resolver a origem (etapa feita, fila resolvida, resposta enviada) também faz o item sair da tela sozinho.
+- Nunca grave número que dá para calcular (quantas etapas são do agente, "em N dias", conflito de agenda): a tela calcula. Nenhuma ação ganha horário por causa do briefing. Logo depois do briefing, se houver a seção EU FAÇO, mande a proposta com `enviar_opcoes` (formato do CLAUDE.md, opções "Sim, faz", "Alterar", "Não").
 
 Quando o André responder com os números ("1 cobra, 3 reagenda sexta, 5 já resolvi"), execute o que não envia nada a terceiros. Para cada item que manda mensagem, mostre o texto exato e o destinatário com `enviar_opcoes` ("Envia", "Alterar", "Não"): só o "Envia" autoriza. Depois de cada gravação, confirme pelo resultado da ferramenta; se der errado, diga qual item e por quê. Nunca pague, assine ou aceite termos em nome dele.
 
@@ -45,4 +50,17 @@ Não inclua: o resto das ações do dia, rotinas pessoais (check-ins, pesagem, r
 3. FECHE COM uma linha: "Responda com os números (ex.: '1 cobra, 3 reagenda sexta')."
 
 Devolva também, DEPOIS do briefing e separado pela linha "=== TEXTOS ===", o texto exato proposto para cada item do DECIDIR que envolve mensagem a terceiro (número do item e texto; primeira pessoa, como se fosse o André; nunca sugerir ligação ou videochamada; a esposa dele é Alnínive, Amor, Gatinha ou Fofinha, nunca "Tininha"). Essa parte não vai para o André.
+
+Devolva por último, separado pela linha "=== DADOS ===", UM bloco JSON (só o JSON, sem cercas de código) com os MESMOS itens do briefing, para o agente principal gravar no Painel do dia. Você só lê: quem grava é ele. Formato (omita a chave que não tiver item; nenhum campo extra):
+{
+  "data": "AAAA-MM-DD",
+  "hoje": [{"acao_id": "<id da ação>", "motivo": "<3 a 5 palavras, ex.: prazo 31/10>"}],
+  "decidir": [{"id": "d1", "ordem": 1, "quem": "<quem/assunto>", "texto": "<o que fazer, uma frase>", "recomendacao": "<a proposta, curta; omita se não houver>", "tag": "<hoje | venceu ontem; omita se não houver>", "origem": "fila_atencao | whatsapp | etapa | acao", "ref": "<id do item de origem>", "acao_id": "<id da ação, quando houver>"}],
+  "eu_faco": [{"acao_id": "<id da ação>", "texto": "<o que você faz e o que ele recebe, verbo no infinitivo>"}],
+  "preparo": [{"dia": "AAAA-MM-DD", "texto": "<o que preparar>"}],
+  "fora_da_agenda": [{"titulo": "<compromisso>", "inicio": "HH:MM", "fim": "HH:MM ou null", "motivo": "<por que não está na agenda>"}],
+  "avisos": [{"tipo": "nao_li | conversa | dado_suspeito", "texto": "<aviso>"}],
+  "menores": <quantos itens menores ficaram de fora do DECIDIR>
+}
+Regras do JSON: (1) os itens e a ordem são os do texto do briefing; (2) todo item do DECIDIR aponta para a origem: `ref` é o `id` do item em obter_fila_atencao, o id da conversa em listar_respostas_pendentes, o id da etapa (com `acao_id`) ou o id da ação; sem origem identificável o item não entra no JSON; (3) `acao_id` e ids de etapa vêm das tools, nunca do título; (4) texto de cada campo curto (uma frase, verbo no infinitivo nos planos e no EU FAÇO); (5) `fora_da_agenda` só com compromisso que o André tem e que NÃO está na agenda (ex.: lido em e-mail ou conversa), com o horário que a fonte diz; (6) sem número calculável. O JSON não substitui o texto: o texto do Telegram segue as instruções acima.
 === FIM DO PROMPT DO SUBAGENTE ===

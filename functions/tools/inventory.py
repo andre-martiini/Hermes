@@ -875,6 +875,31 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "preferência/autorização' é por ISOLAMENTO da coleção, não por um campo que bloqueie "
         "promoção; nenhum outro módulo lê `observacoes_externas` hoje).",
     ),
+    "registrar_briefing_dia": ToolInventoryEntry(
+        "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool valida tudo antes de gravar e relê o documento depois (grava-e-relê); a tela "
+        "confere cada item contra a origem viva na hora de mostrar",
+        dados_sensiveis_categoria="assuntos e recomendações do briefing, texto livre que pode citar "
+        "pessoas e processos do André",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Painel do dia, PR 2. Grava em briefing_dia/{data} (foto das 05:00, atualizável). Reversível: "
+        "regravar o dia corrige. Idempotente: repetir a chamada com os mesmos argumentos deixa o documento "
+        "igual (merge por id nos itens de decidir/eu_faco; as outras listas são substituídas); só "
+        "`atualizado_em` muda. Nunca muda o status de um item de decidir já resolvido.",
+    ),
+    "obter_briefing_dia": ToolInventoryEntry(
+        "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        dados_sensiveis_categoria="assuntos e recomendações do briefing, texto livre",
+        nota="Painel do dia, PR 2. Lê um documento por id.",
+    ),
+    "resolver_item_briefing": ToolInventoryEntry(
+        "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "a própria tool relê o item depois de gravar",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Painel do dia, PR 2. Só muda status/resolvido_em de UM item de briefing_dia/{data}.decidir; "
+        "não toca ação, etapa nem fila de origem. 'pendente' desfaz. Idempotente: repetir a mesma marca "
+        "não escreve de novo.",
+    ),
     "gerar_imagem": ToolInventoryEntry(
         "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "nenhum automático — a prévia volta anexada ao resultado para quem pediu conferir a imagem",

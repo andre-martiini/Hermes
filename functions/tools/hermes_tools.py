@@ -2670,6 +2670,24 @@ def _registrar_saude(ctx: ToolContext, args: dict):
     return registrar(ctx, args)
 
 
+def _registrar_briefing_dia(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.registrar(ctx.db, args)
+
+
+def _obter_briefing_dia(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.obter(ctx.db, args)
+
+
+def _resolver_item_briefing(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.resolver_item(ctx.db, args)
+
+
 def _registrar_observacao_externa(ctx: ToolContext, args: dict):
     from tools.registrar_observacao_externa import registrar
 
@@ -3215,6 +3233,9 @@ _HANDLERS: dict = {
     "consultar_saude": _consultar_saude,
     "registrar_saude": _registrar_saude,
     "registrar_observacao_externa": _registrar_observacao_externa,
+    "registrar_briefing_dia": _registrar_briefing_dia,
+    "obter_briefing_dia": _obter_briefing_dia,
+    "resolver_item_briefing": _resolver_item_briefing,
     "consultar_atividades_mes": _consultar_atividades_mes,
     "consultar_saude_integracoes": _consultar_saude_integracoes,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,

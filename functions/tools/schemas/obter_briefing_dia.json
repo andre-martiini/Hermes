@@ -1,0 +1,14 @@
+{
+  "name": "obter_briefing_dia",
+  "description": "Lê o briefing estruturado de um dia (briefing_dia/{data}), somente leitura: itens de decidir com status e resolvido_em, hoje (foco), eu_faco, preparo, fora_da_agenda, avisos e menores, mais decidir_pendentes. 'existe: false' quando o briefing do dia não foi gravado. É uma foto das 05:00: o estado vivo das ações vem de obter_estado_atual e obter_acao.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "YYYY-MM-DD. Padrão: hoje (fuso de Brasília)"
+      }
+    },
+    "required": []
+  }
+}

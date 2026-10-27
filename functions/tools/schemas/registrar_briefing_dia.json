@@ -1,0 +1,206 @@
+{
+  "name": "registrar_briefing_dia",
+  "description": "Grava (ou atualiza durante o dia) o briefing estruturado do dia em briefing_dia/{data}, para o Painel do dia do Gaspar. Chame logo depois de montar o texto do Telegram, com os MESMOS itens, e de novo sempre que algo mudar. Só entra o que a IA escreve; ações, agenda e filas continuam vindo ao vivo. Todo item aponta para a origem (acao_id, origem+ref): a tela esconde o item cuja origem já foi resolvida. Mescla por id em decidir e eu_faco (item que não vier fica como estava; o status de decidir NUNCA muda por aqui, use resolver_item_briefing); hoje, preparo, fora_da_agenda e avisos substituem a lista anterior quando enviados. Nada de número calculável (contagem de etapas, 'em N dias', conflito de agenda). Qualquer item inválido recusa a chamada inteira sem gravar. Devolve o documento relido do banco.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "YYYY-MM-DD. Padrão: hoje (fuso de Brasília)"
+      },
+      "hoje": {
+        "type": "array",
+        "description": "Foco do dia: ações que merecem destaque hoje (no máximo 3, como no briefing).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "acao_id": {
+              "type": "string",
+              "description": "ID da ação (tarefa)"
+            },
+            "motivo": {
+              "type": "string",
+              "description": "Por quê, em até 120 caracteres. Ex.: 'prazo 31/10'"
+            }
+          },
+          "required": [
+            "acao_id"
+          ]
+        }
+      },
+      "decidir": {
+        "type": "array",
+        "description": "O que pede decisão ou ação do André, na ordem do briefing. Mescla por id.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Id estável do item (ex.: 'd1'). Reenviar o mesmo id atualiza o item"
+            },
+            "ordem": {
+              "type": "integer",
+              "description": "Posição (1 = primeiro). Omitido: ordem de chegada"
+            },
+            "quem": {
+              "type": "string",
+              "description": "Quem ou qual assunto (até 120 caracteres)"
+            },
+            "texto": {
+              "type": "string",
+              "description": "O que fazer, em uma frase"
+            },
+            "recomendacao": {
+              "type": "string",
+              "description": "A recomendação do agente, em cinza na tela"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Rótulo curto opcional: 'hoje', 'venceu ontem'"
+            },
+            "origem": {
+              "type": "string",
+              "enum": [
+                "fila_atencao",
+                "whatsapp",
+                "etapa",
+                "acao"
+              ],
+              "description": "De onde vem o item"
+            },
+            "ref": {
+              "type": "string",
+              "description": "Id do item de origem (item da fila, conversa, etapa ou ação). Obrigatório: é o que faz o item sumir quando a origem é resolvida"
+            },
+            "acao_id": {
+              "type": "string",
+              "description": "Ação ligada ao item. Obrigatório com origem 'etapa' (ref = id da etapa); com origem 'acao' vale o próprio ref"
+            }
+          },
+          "required": [
+            "id",
+            "quem",
+            "texto",
+            "origem",
+            "ref"
+          ]
+        }
+      },
+      "eu_faco": {
+        "type": "array",
+        "description": "O que o agente prepara hoje (sem botão na tela). Mescla por id (padrão: acao_id).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Opcional; padrão = acao_id"
+            },
+            "acao_id": {
+              "type": "string",
+              "description": "ID da ação"
+            },
+            "texto": {
+              "type": "string",
+              "description": "O que o agente faz e o que o André recebe. Frase curta, verbo no infinitivo"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "proposto",
+                "aprovado",
+                "pronto",
+                "recusado"
+              ],
+              "description": "Padrão 'proposto'"
+            }
+          },
+          "required": [
+            "acao_id",
+            "texto"
+          ]
+        }
+      },
+      "preparo": {
+        "type": "array",
+        "description": "Até 3 itens dos próximos dias que pedem preparo antes.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "dia": {
+              "type": "string",
+              "description": "YYYY-MM-DD (o 'em N dias' a tela calcula)"
+            },
+            "texto": {
+              "type": "string",
+              "description": "Ex.: 'retirar o carro na Localiza, 9h'"
+            }
+          },
+          "required": [
+            "dia",
+            "texto"
+          ]
+        }
+      },
+      "fora_da_agenda": {
+        "type": "array",
+        "description": "Compromissos que o André tem mas que NÃO estão na agenda (entram tracejados na linha do tempo e no cálculo de conflito).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "titulo": {
+              "type": "string"
+            },
+            "inicio": {
+              "type": "string",
+              "description": "HH:MM"
+            },
+            "fim": {
+              "type": "string",
+              "nullable": true,
+              "description": "HH:MM ou omitido"
+            },
+            "motivo": {
+              "type": "string",
+              "description": "Ex.: 'reunião que não está na agenda'"
+            }
+          },
+          "required": [
+            "titulo",
+            "inicio"
+          ]
+        }
+      },
+      "avisos": {
+        "type": "array",
+        "description": "Avisos do agente sobre o próprio levantamento.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tipo": {
+              "type": "string",
+              "enum": [
+                "nao_li",
+                "conversa",
+                "dado_suspeito"
+              ]
+            },
+            "texto": {
+              "type": "string",
+              "description": "Ex.: 'Não li hoje: e-mail e SIGFAPES.'"
+            }
+          },
+          "required": [
+            "tipo",
+            "texto"
+          ]
+        }
+      },
+      "menores": {
+        "type": "integer",
+        "description": "Quantas pendências menores ficaram fora de decidir (o 'resto' do briefing)"
+      }
+    },
+    "required": []
+  }
+}
