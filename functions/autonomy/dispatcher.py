@@ -16,10 +16,11 @@ escondido ou Cloud Tasks; o wiring executa a decisão.
   e tentativa, para o Cloud Tasks recusar duplicata do mesmo despacho.
 - Elegibilidade espelha `assumir_pedido`: transição válida para `RESERVADO`,
   lease anterior expirada e retentativa só depois de `proximo_tentativa_em`.
-- Limite conhecido: o caminho RESERVADO -> PENDENTE não incrementa
-  `tentativas`, então um novo despacho reutiliza o nome; o Cloud Tasks recusa
-  nome reutilizado por ~1h (ALREADY_EXISTS). O wiring deve tratar esse erro
-  como "já despachado", e o sweep reconcilia.
+- O nome inclui a geração da lease: o caminho RESERVADO -> PENDENTE não
+  incrementa `tentativas`, mas a geração sim a cada reserva, então um novo
+  despacho não reutiliza o nome de uma tarefa já executada (o Cloud Tasks
+  retém nomes por horas). ALREADY_EXISTS no wiring significa mesmo despacho
+  duplicado: tratar como "já despachado".
 """
 
 from __future__ import annotations
@@ -65,10 +66,12 @@ def modo_de_config(valor: object) -> ModoDispatcher:
     return ModoDispatcher.OFF
 
 
-def nome_tarefa(request_id: str, tentativas: int) -> str:
-    """Nome válido no Cloud Tasks ([A-Za-z0-9_-]), estável por pedido e tentativa."""
+def nome_tarefa(request_id: str, tentativas: int, geracao: int = 0) -> str:
+    """Nome válido no Cloud Tasks ([A-Za-z0-9_-]), estável por pedido, tentativa e geração
+    da reserva (a geração da lease só cresce, então redespachar depois de uma
+    reserva liberada nunca reutiliza o nome de uma tarefa já executada)."""
     h = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
-    return f"runner-{h}-t{tentativas}"
+    return f"runner-{h}-t{tentativas}-g{geracao}"
 
 
 def _elegivel(pedido: PedidoDuravel, agora: datetime) -> str:
@@ -109,7 +112,10 @@ def decidir_despacho(
     motivo = _elegivel(pedido, agora)
     if motivo:
         return DecisaoDespacho(AcaoDespacho.NAO_DESPACHAR, motivo)
-    nome = nome_tarefa(pedido.request_id, pedido.tentativas)
+    geracao = pedido.lease.generation if pedido.lease is not None else 0
+    if type(geracao) is not int or geracao < 0:
+        return DecisaoDespacho(AcaoDespacho.NAO_DESPACHAR, "geracao_invalida")
+    nome = nome_tarefa(pedido.request_id, pedido.tentativas, geracao)
     payload = (("request_id", pedido.request_id),)
     if modo is ModoDispatcher.SHADOW:
         return DecisaoDespacho(AcaoDespacho.REGISTRAR_SOMBRA, "sombra", nome, payload)

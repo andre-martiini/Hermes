@@ -93,6 +93,17 @@ class TestAchadosRevisao(unittest.TestCase):
             AcaoDespacho.ENFILEIRAR, AcaoDespacho.NAO_DESPACHAR, AcaoDespacho.ENFILEIRAR])
 
 
+class TestGeracaoNoNome(unittest.TestCase):
+    def test_redespacho_apos_liberar_reserva_muda_o_nome(self):
+        vencida1 = Lease("t", 1, "r", AGORA - timedelta(minutes=1))
+        vencida2 = Lease("t", 2, "r", AGORA - timedelta(minutes=1))
+        n1 = decidir_despacho(pedido(lease=vencida1), "ativo", AGORA, 1).nome_tarefa
+        n2 = decidir_despacho(pedido(lease=vencida2), "ativo", AGORA, 1).nome_tarefa
+        self.assertNotEqual(n1, n2)
+        self.assertNotEqual(n1, decidir_despacho(pedido(), "ativo", AGORA, 1).nome_tarefa)
+        self.assertRegex(n2, r"^[A-Za-z0-9_-]+$")
+
+
 class TestLote(unittest.TestCase):
     def test_orcamento_e_consumido_em_ordem(self):
         ps = [pedido("a"), pedido("b", status=RequestStatus.CONCLUIDO), pedido("c"), pedido("d")]
