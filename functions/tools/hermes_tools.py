@@ -2615,6 +2615,17 @@ def obter_acao(ctx: ToolContext, args: dict):
             etapa["aguardando_de"] = i["aguardando_de"]
         if int(i.get("degradation_count") or 0):
             etapa["degradation_count"] = int(i["degradation_count"])
+        # Ausente = humano: so a etapa que o agente faz ou prepara carrega a marca.
+        if subtarefas.e_do_agente(i):
+            etapa["executor"] = subtarefas.executor_de(i)
+            if str(i.get("executor_como") or "").strip():
+                etapa["executor_como"] = str(i["executor_como"]).strip()
+            if subtarefas.definido_por_de(i):
+                etapa["executor_definido_por"] = subtarefas.definido_por_de(i)
+        elif subtarefas.definido_por_de(i) == subtarefas.DEFINIDO_POR_USUARIO:
+            # `humano` fixado pelo Andre: o agente precisa saber que nao pode mudar.
+            etapa["executor"] = subtarefas.EXECUTOR_HUMANO
+            etapa["executor_definido_por"] = subtarefas.DEFINIDO_POR_USUARIO
         etapas.append(etapa)
 
     return {

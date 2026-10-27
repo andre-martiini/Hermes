@@ -43,11 +43,30 @@ FEITO = "feito"
 
 ESTADOS = (PENDENTE, EM_ANDAMENTO, AGUARDANDO_TERCEIRO, FEITO)
 
+# Quem executa a etapa. Ausente = `humano`. A tela mostra "Agente faz" (agente)
+# e "Agente prepara, voce aprova" (agente_aprovado); `humano` fica sem etiqueta.
+# O texto e "agente", nunca o nome de um produto: qualquer IA com o conector
+# Gaspar pode executar.
+EXECUTOR_AGENTE = "agente"
+EXECUTOR_AGENTE_APROVADO = "agente_aprovado"
+EXECUTOR_HUMANO = "humano"
+EXECUTORES = (EXECUTOR_AGENTE, EXECUTOR_AGENTE_APROVADO, EXECUTOR_HUMANO)
+
+# Quem fixou o executor. Etapa marcada pelo Andre na tela (`usuario`) nao e
+# reescrita pelo agente: a correcao dele vale mais que a sugestao da IA.
+DEFINIDO_POR_AGENTE = "agente"
+DEFINIDO_POR_USUARIO = "usuario"
+DEFINIDOS_POR = (DEFINIDO_POR_AGENTE, DEFINIDO_POR_USUARIO)
+
+# "Como o agente faria", em uma frase. O teto vale para a tela e para o agente.
+LIMITE_EXECUTOR_COMO = 140
+
 # Campos que este modulo governa. Serve para `mesclar_plano` saber o que e dele
 # e o que e de outra pessoa — tudo o que nao estiver aqui e preservado intacto.
 _CAMPOS_CONHECIDOS = frozenset(
     {"id", "text", "texto", "completed", "estado", "aguardando_de",
      "data_prevista", "degradation_count",
+     "executor", "executor_como", "executor_definido_por",
      # Instrucoes de quem edita, nao dado da etapa: nunca sao gravadas.
      "remover", "restaurar"}
 )
@@ -55,7 +74,7 @@ _CAMPOS_CONHECIDOS = frozenset(
 # Campos que quem edita pode APAGAR mandando `null` ou "". Nos outros, vazio
 # continua significando "nao mexa": sem data nem espera a etapa ainda faz
 # sentido, sem texto ou estado nao.
-_CAMPOS_APAGAVEIS = frozenset({"data_prevista", "aguardando_de"})
+_CAMPOS_APAGAVEIS = frozenset({"data_prevista", "aguardando_de", "executor_como"})
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +95,41 @@ def estado_de(item: dict) -> str:
 
 def esta_feita(item: dict) -> bool:
     return estado_de(item) == FEITO
+
+
+def executor_de(item) -> str:
+    """Executor da etapa; ausente ou desconhecido le como `humano`.
+
+    Valor desconhecido nunca vira etiqueta: prefere-se tirar a marca a mostrar
+    "Agente faz" numa etapa que ninguem combinou que o agente faz.
+    """
+    if not isinstance(item, dict):
+        return EXECUTOR_HUMANO
+    bruto = str(item.get("executor") or "").strip().lower()
+    return bruto if bruto in EXECUTORES else EXECUTOR_HUMANO
+
+
+def definido_por_de(item) -> str | None:
+    """`agente`, `usuario` ou `None` quando ninguem fixou o executor."""
+    if not isinstance(item, dict):
+        return None
+    bruto = str(item.get("executor_definido_por") or "").strip().lower()
+    return bruto if bruto in DEFINIDOS_POR else None
+
+
+def e_do_agente(item) -> bool:
+    """Se o agente executa ou prepara a etapa (`agente` ou `agente_aprovado`)."""
+    return executor_de(item) != EXECUTOR_HUMANO
+
+
+def contar_para_agente(plano) -> int:
+    """Quantas etapas EM ABERTO o agente faz ou prepara.
+
+    Calculado na leitura, nunca gravado: um numero gravado diverge no primeiro
+    `editar_etapa` que marcar uma etapa como feita.
+    """
+    return sum(1 for i in (plano or [])
+               if isinstance(i, dict) and texto_de(i) and not esta_feita(i) and e_do_agente(i))
 
 
 def texto_de(item) -> str:
@@ -262,6 +316,18 @@ def normalizar(item, *, id_existente: str | None = None) -> dict | None:
     if contador:
         saida["degradation_count"] = contador
 
+    # Executor: valor desconhecido vira `humano` em vez de sumir ou passar.
+    # Ausente continua ausente (ler ausente ja e `humano`), e `humano` explicito
+    # fica gravado — e a correcao do Andre, que o agente nao pode desfazer.
+    if str(item.get("executor") or "").strip():
+        saida["executor"] = executor_de(item)
+    como = str(item.get("executor_como") or "").strip()
+    if como:
+        saida["executor_como"] = como[:LIMITE_EXECUTOR_COMO]
+    definido_por = definido_por_de(item)
+    if definido_por and ("executor" in saida or "executor_como" in saida):
+        saida["executor_definido_por"] = definido_por
+
     # Tudo o que este modulo nao governa viaja junto. E o que impede a proxima
     # feature de ser apagada por um merge que nao sabia dela.
     for chave, valor in item.items():
@@ -275,6 +341,12 @@ def converter_plano(plano) -> list[dict]:
     """Plano recem-criado: lista de strings ou de objetos vira lista canonica."""
     saida = []
     for item in normalizar_entrada_plano(plano):
+        if isinstance(item, dict):
+            # Etapa nova escrita pelo agente: executor marcado como dele, e a
+            # marca de autoria enviada junto e descartada.
+            item = {c: v for c, v in item.items() if c != "executor_definido_por"}
+            if _pede_executor(item):
+                item["executor_definido_por"] = DEFINIDO_POR_AGENTE
         norm = normalizar(item)
         if norm:
             saida.append(norm)
@@ -330,13 +402,77 @@ def _pede_restauracao(item: dict) -> bool:
     return _flag(item, "restaurar")
 
 
-def _mesclar_item(original: dict, item: dict, id_fallback: str | None = None) -> dict | None:
+def _validar_executor(item: dict) -> None:
+    """Recusa executor desconhecido e `executor_como` acima do teto.
+
+    `normalizar` aceita tudo e normaliza (e o que le dado gravado). Quem ESCREVE
+    precisa saber que errou: `executor="claude"` virar `humano` em silencio
+    gravaria o contrario do que se quis.
+    """
+    bruto = item.get("executor")
+    if bruto is not None and str(bruto).strip():
+        if str(bruto).strip().lower() not in EXECUTORES:
+            raise PlanoInvalido(
+                f"executor {bruto!r} invalido; use um de: {', '.join(EXECUTORES)}.")
+    como = item.get("executor_como")
+    if isinstance(como, str) and len(como.strip()) > LIMITE_EXECUTOR_COMO:
+        raise PlanoInvalido(
+            f"executor_como tem {len(como.strip())} caracteres; o maximo e "
+            f"{LIMITE_EXECUTOR_COMO} (uma frase curta, verbo no infinitivo).")
+
+
+def _pede_executor(item: dict) -> bool:
+    return any(item.get(c) not in (None, "") for c in ("executor", "executor_como"))
+
+
+def _item_de_quem_edita(item: dict, por: str, original: dict | None = None) -> dict:
+    """O item como enviado, sem a marca de autoria e com o executor validado.
+
+    `executor_definido_por` nunca vem de quem edita: quem escreve nao escolhe
+    se a escolha foi dele ou do Andre. Quem decide e `por`. Reenviar o mesmo
+    executor para uma etapa que o Andre fixou nao troca a marca dele.
+    """
+    _validar_executor(item)
+    limpo = {c: v for c, v in item.items() if c != "executor_definido_por"}
+    do_usuario = original is not None and definido_por_de(original) == DEFINIDO_POR_USUARIO
+    if _pede_executor(limpo) and not (do_usuario and por != DEFINIDO_POR_USUARIO):
+        limpo["executor_definido_por"] = por
+    return limpo
+
+
+def _recusar_se_do_usuario(original: dict, item: dict, por: str) -> None:
+    """O agente nao reescreve o executor que o Andre fixou na tela.
+
+    Reenviar o mesmo valor nao e sobrescrita (o agente que reenvia o plano
+    inteiro nao pode ser punido por isso); mudar ou apagar e.
+    """
+    if por == DEFINIDO_POR_USUARIO or definido_por_de(original) != DEFINIDO_POR_USUARIO:
+        return
+    muda_executor = (str(item.get("executor") or "").strip() != ""
+                     and executor_de(item) != executor_de(original))
+    muda_como = ("executor_como" in item
+                 and str(item.get("executor_como") or "").strip()[:LIMITE_EXECUTOR_COMO]
+                 != str(original.get("executor_como") or "").strip())
+    if muda_executor or muda_como:
+        raise PlanoInvalido(
+            f"A etapa {_descrever(original)} teve o executor fixado pelo Andre na tela "
+            f"({executor_de(original)}); o agente nao pode alterar executor nem executor_como "
+            "dela. Deixe esses campos de fora.")
+
+
+def _mesclar_item(original: dict, item: dict, id_fallback: str | None = None,
+                  por: str = DEFINIDO_POR_AGENTE) -> dict | None:
     """Herda o original inteiro e deixa o item novo sobrepor o que trouxer.
 
-    Campo ausente preserva o herdado; `data_prevista`/`aguardando_de` com
-    `null` ou "" apagam. Texto ausente (edicao so de estado, por exemplo)
-    mantem o texto que a etapa ja tinha.
+    Campo ausente preserva o herdado; `data_prevista`/`aguardando_de`/
+    `executor_como` com `null` ou "" apagam. Texto ausente (edicao so de
+    estado, por exemplo) mantem o texto que a etapa ja tinha.
+
+    `executor`/`executor_como` de etapa cujo executor o Andre fixou na tela sao
+    recusados quando vem do agente (`PlanoInvalido`).
     """
+    _recusar_se_do_usuario(original, item, por)
+    item = _item_de_quem_edita(item, por, original)
     mesclado = {**original}
     for chave, valor in item.items():
         if chave in ("id", "remover", "restaurar"):
@@ -413,7 +549,7 @@ def _descrever(item: dict) -> str:
 
 
 def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
-                 etapas_removidas=None) -> EdicaoPlano:
+                 etapas_removidas=None, por: str = DEFINIDO_POR_AGENTE) -> EdicaoPlano:
     """Aplica uma edicao ao plano, no modo pedido.
 
     **`parcial` (padrao).** So as etapas citadas mudam; as outras ficam
@@ -446,8 +582,13 @@ def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
     5. Senao, e etapa nova. Um id desconhecido e mantido quando nao colide
        com nenhum outro; se colidir, a etapa ganha id novo.
 
+    `por` diz quem edita: `agente` (padrao: MCP, Telegram, copiloto) ou
+    `usuario`. O agente nao muda `executor`/`executor_como` de etapa que o
+    Andre fixou (`executor_definido_por == "usuario"`).
+
     Levanta `PlanoInvalido` quando a edicao cita uma etapa que nao da para
-    interpretar (remover etapa inexistente; id desconhecido sem texto).
+    interpretar (remover etapa inexistente; id desconhecido sem texto) ou
+    quando o agente tenta sobrescrever o executor fixado pelo Andre.
     """
     modo = str(modo or MODO_PARCIAL).strip().lower()
     if modo not in MODOS:
@@ -506,7 +647,7 @@ def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
 
     def _citar(idx: int, item: dict, id_fallback: str | None = None):
         base = atualizadas.get(idx) or atual[idx]
-        atualizadas[idx] = _mesclar_item(base, item, id_fallback=id_fallback)
+        atualizadas[idx] = _mesclar_item(base, item, id_fallback=id_fallback, por=por)
         if modo == MODO_SUBSTITUIR:
             ordem.append(("atual", idx))
 
@@ -529,7 +670,7 @@ def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
                     f"Etapa {item_id} está na lixeira; para restaurar envie "
                     f"{{\"id\": \"{item_id}\", \"restaurar\": true}}.")
             entrada_lixeira = lixeira[item_id]
-            etapa = _mesclar_item(entrada_lixeira["etapa"], item, id_fallback=item_id)
+            etapa = _mesclar_item(entrada_lixeira["etapa"], item, id_fallback=item_id, por=por)
             if etapa:
                 del lixeira[item_id]
                 restauradas_ids.append(item_id)
@@ -560,7 +701,8 @@ def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
                 continue
 
         id_novo = item_id if item_id and item_id not in ids_ocupados else None
-        nova = normalizar(item, id_existente=id_novo or str(uuid.uuid4())[:8])
+        nova = normalizar(_item_de_quem_edita(item, por),
+                          id_existente=id_novo or str(uuid.uuid4())[:8])
         if nova:
             ids_ocupados.add(nova["id"])
             if modo == MODO_SUBSTITUIR:
@@ -608,13 +750,14 @@ def editar_plano(plano_atual, novo_plano, *, modo: str = MODO_PARCIAL,
                        ja_removidas=ja_removidas)
 
 
-def mesclar_plano(plano_atual, novo_plano, modo: str = MODO_PARCIAL) -> list[dict]:
+def mesclar_plano(plano_atual, novo_plano, modo: str = MODO_PARCIAL,
+                  por: str = DEFINIDO_POR_AGENTE) -> list[dict]:
     """O plano resultante de `editar_plano` — atalho para quem so quer a lista.
 
     Desde 27/09/2026 o padrao e o modo `parcial`: etapa nao citada fica. Quem
     manda a lista inteira para reordenar passa `modo="substituir"`.
     """
-    return editar_plano(plano_atual, novo_plano, modo=modo).plano
+    return editar_plano(plano_atual, novo_plano, modo=modo, por=por).plano
 
 
 def atualizar_lixeira(etapas_removidas, edicao: EdicaoPlano, agora_iso: str) -> list[dict]:

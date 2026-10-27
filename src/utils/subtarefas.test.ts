@@ -10,12 +10,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  LIMITE_EXECUTOR_COMO,
+  ROTULO_EXECUTOR,
   comEstado,
   comEstadoExplicito,
+  comExecutor,
+  comExecutorNoPlano,
+  contarParaAgente,
   contarSubtarefas,
   derivarLane,
+  eDoAgente,
   estaFeita,
   estadoDaSubtarefa,
+  executorDaEtapa,
   visualDaEtapa,
   visualDaSubtarefa,
 } from './subtarefas';
@@ -171,5 +178,71 @@ describe('estaFeita', () => {
   it('é a mesma pergunta que o backend faz', () => {
     expect(estaFeita(etapa({ completed: true }))).toBe(true);
     expect(estaFeita(etapa({ completed: true, estado: 'em_andamento' }))).toBe(false);
+  });
+});
+
+describe('executor da etapa', () => {
+  const plano = () => [
+    etapa({ id: 'a1', executor: 'agente', executor_como: 'Ler e resumir', executor_definido_por: 'agente' }),
+    etapa({ id: 'a2', executor: 'agente_aprovado' }),
+    etapa({ id: 'a3' }),
+    etapa({ id: 'a4', executor: 'humano', executor_definido_por: 'usuario' }),
+    etapa({ id: 'a5', executor: 'agente', completed: true, estado: 'feito' }),
+  ];
+
+  it('ausente e desconhecido leem como humano — nunca viram etiqueta', () => {
+    expect(executorDaEtapa(etapa())).toBe('humano');
+    expect(executorDaEtapa(etapa({ executor: 'claude' }))).toBe('humano');
+    expect(executorDaEtapa(etapa({ executor: ' AGENTE ' }))).toBe('agente');
+    expect(eDoAgente(etapa({ executor: 'claude' }))).toBe(false);
+  });
+
+  it('conta só etapa em aberto que o agente faz ou prepara', () => {
+    expect(contarParaAgente(plano())).toBe(2);
+    expect(contarParaAgente(null)).toBe(0);
+    expect(contarParaAgente([etapa({ text: '', executor: 'agente' })])).toBe(0);
+  });
+
+  it('o contador acompanha a etapa concluída, sem número gravado', () => {
+    const p = plano();
+    p[0] = comEstado(p[0], 'feito');
+    expect(contarParaAgente(p)).toBe(1);
+  });
+
+  it('comEstado preserva os três campos — marcar feita não apaga a marca', () => {
+    const feita = comEstado(plano()[0], 'feito');
+    expect(feita.executor).toBe('agente');
+    expect(feita.executor_como).toBe('Ler e resumir');
+    expect(feita.executor_definido_por).toBe('agente');
+    expect(comEstadoExplicito(plano()[3]).executor_definido_por).toBe('usuario');
+  });
+
+  it('a correção do André grava executor_definido_por: usuario', () => {
+    const corrigida = comExecutor(plano()[0], 'humano');
+    expect(corrigida.executor).toBe('humano');
+    expect(corrigida.executor_definido_por).toBe('usuario');
+    // Etapa que passa a ser só do André perde a frase "como o agente faria".
+    expect(corrigida.executor_como).toBeUndefined();
+  });
+
+  it('mantém e limita executor_como quando a etapa continua com o agente', () => {
+    const longa = comExecutor(etapa({ executor_como: 'a'.repeat(200) }), 'agente_aprovado');
+    expect(longa.executor_como).toHaveLength(LIMITE_EXECUTOR_COMO);
+    expect(longa.executor).toBe('agente_aprovado');
+  });
+
+  it('comExecutorNoPlano troca só a etapa pedida', () => {
+    const antes = plano();
+    const depois = comExecutorNoPlano(antes, 'a3', 'agente');
+    expect(depois[2].executor).toBe('agente');
+    expect(depois[2].executor_definido_por).toBe('usuario');
+    expect(depois[0]).toBe(antes[0]);
+    expect(depois[3]).toBe(antes[3]);
+    expect(depois).toHaveLength(antes.length);
+  });
+
+  it('as etiquetas dizem o que o agente faz', () => {
+    expect(ROTULO_EXECUTOR.agente).toBe('Agente faz');
+    expect(ROTULO_EXECUTOR.agente_aprovado).toBe('Agente prepara, você aprova');
   });
 });

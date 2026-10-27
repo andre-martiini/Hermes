@@ -202,6 +202,23 @@ def _hora_do_iso(valor) -> str | None:
 # Coleta                                                                       #
 # --------------------------------------------------------------------------- #
 
+def _marca_executor(etapa: dict) -> dict:
+    """`executor`/`executor_como` da etapa, so quando o agente faz ou prepara.
+
+    Ausente = humano, entao a etapa so do Andre nao leva campo nenhum. Nao ha
+    contador aqui: "N etapas para o agente" e calculado na leitura, com o plano
+    vivo (`subtarefas.contar_para_agente`), porque um numero gravado no resumo
+    das 05:00 divergiria na primeira etapa marcada como feita.
+    """
+    if not subtarefas.e_do_agente(etapa):
+        return {}
+    marca = {"executor": subtarefas.executor_de(etapa)}
+    como = str(etapa.get("executor_como") or "").strip()
+    if como:
+        marca["executor_como"] = como
+    return marca
+
+
 def _coletar_acoes(db, hoje: str) -> dict:
     """Varredura única de `tarefas` ativas. Tudo que as outras seções precisam saber
     sobre ações sai daqui — a coleção é lida uma vez só."""
@@ -304,6 +321,7 @@ def _coletar_acoes(db, hoje: str) -> dict:
                 "data_prevista": subtarefas.data_prevista_de(corrente, data_limite, plano),
                 "aguardando_de": corrente.get("aguardando_de"),
                 "degradation_count": int(corrente.get("degradation_count") or 0),
+                **_marca_executor(corrente),
             }
 
         # A espera some hoje: a macroação aparece em `avanco` por causa de outra
@@ -312,7 +330,8 @@ def _coletar_acoes(db, hoje: str) -> dict:
         esperando = [
             {"id": i.get("id"), "texto": subtarefas.texto_de(i),
              "aguardando_de": i.get("aguardando_de"),
-             "data_prevista": subtarefas.data_prevista_de(i, data_limite, plano)}
+             "data_prevista": subtarefas.data_prevista_de(i, data_limite, plano),
+             **_marca_executor(i)}
             for i in subtarefas.aguardando_terceiros(plano)
         ]
 

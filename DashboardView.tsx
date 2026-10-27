@@ -5,11 +5,16 @@ import {
     Tarefa, ActionPlanItem, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
     formatDateLocalISO, sumWalkBlocksKm,
-    ResumoMatinal, ResumoAcao
+    ResumoMatinal, ResumoAcao, EtapaExecutor
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
-import { contarSubtarefas, estaFeita, estadoDaSubtarefa, ROTULO_ESTADO, textoDaSubtarefa } from './src/utils/subtarefas';
+import {
+    comExecutorNoPlano, contarParaAgente, contarSubtarefas, eDoAgente, estaFeita, estadoDaSubtarefa,
+    ROTULO_ESTADO, textoDaSubtarefa,
+} from './src/utils/subtarefas';
+import EtiquetaExecutor from './src/components/painel/EtiquetaExecutor';
+import MenuExecutor from './src/components/painel/MenuExecutor';
 import { isStandbyStatus } from './src/utils/helpers';
 
 interface DashboardViewProps {
@@ -1014,6 +1019,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
     const [carregandoPlanos, setCarregandoPlanos] = useState<Record<string, boolean>>({});
     const [errosPlanos, setErrosPlanos] = useState<Record<string, boolean>>({});
     const [acoesAoVivo, setAcoesAoVivo] = useState<Record<string, Tarefa>>({});
+    const [soAgente, setSoAgente] = useState(false);
 
     useEffect(() => {
         const hojeId = formatDateLocalISO(new Date());
@@ -1152,14 +1158,45 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
         }
     };
 
+    // O plano vivo da ação: o snapshot da tarefa quando já chegou, senão o lido sob demanda.
+    const planoDe = (a: ResumoAcao): ActionPlanItem[] => acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [];
+    // Calculado a cada render com o plano vivo — nunca gravado: um número gravado
+    // diverge na primeira etapa que o agente marca como feita.
+    const paraAgente = (a: ResumoAcao) => contarParaAgente(planoDe(a));
+    const rotuloParaAgente = (n: number) => `${n} ${n === 1 ? 'etapa' : 'etapas'} para o agente`;
+    // O filtro só muda o que aparece; a barra do dia continua contando todas as ativas.
+    const ativasVisiveis = soAgente ? ativas.filter(a => paraAgente(a) > 0) : ativas;
+    const emEsperaVisiveis = soAgente ? emEspera.filter(a => paraAgente(a) > 0) : emEspera;
+
+    // O André corrige quem executa a etapa. Lê o plano dentro da transação e troca
+    // só essa etapa, para não apagar o que o agente gravou no meio do caminho;
+    // `comExecutorNoPlano` grava `executor_definido_por: 'usuario'`.
+    const corrigirExecutor = async (a: ResumoAcao, etapaId: string, executor: EtapaExecutor) => {
+        try {
+            const ref = doc(db, 'tarefas', a.id);
+            await runTransaction(db, async (transaction) => {
+                const snap = await transaction.get(ref);
+                if (!snap.exists()) return;
+                const plano = snap.data().plano_acao;
+                if (!Array.isArray(plano)) return;
+                transaction.update(ref, {
+                    plano_acao: comExecutorNoPlano(plano as ActionPlanItem[], etapaId, executor),
+                    data_atualizacao: new Date().toISOString(),
+                });
+            });
+        } catch (error) {
+            console.error('Não foi possível gravar quem executa a etapa:', error);
+        }
+    };
+
     // Painel de etapas restantes, usado pelas ações ativas e pelas em espera.
     const painelEtapas = (a: ResumoAcao) => {
         // Etapa sem data herda a data da ação; a lista segue a data efetiva, e o
         // empate mantém a ordem do plano (sort estável).
         const dataDaAcao = String(a.data_limite || '').slice(0, 10);
         const dataEfetiva = (etapa: ActionPlanItem) => String(etapa.data_prevista || '').slice(0, 10) || dataDaAcao;
-        const etapasAbertas = (acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [])
-            .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa))
+        const etapasAbertas = planoDe(a)
+            .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa) && (!soAgente || eDoAgente(etapa)))
             .sort((x, y) => (dataEfetiva(x) || '9999').localeCompare(dataEfetiva(y) || '9999'));
         return (
             <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
@@ -1181,12 +1218,24 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                         estado === 'em_andamento' ? 'bg-blue-500' :
                                             estado === 'aguardando_terceiro' ? 'bg-amber-400' : 'bg-slate-400'
                                     }`} />
-                                    <div className="min-w-0">
-                                        <p className={`m-0 ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{textoDaSubtarefa(etapa)}</p>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                            <p className={`m-0 ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{textoDaSubtarefa(etapa)}</p>
+                                            <EtiquetaExecutor etapa={etapa} isDark={isDark} />
+                                        </div>
+                                        {eDoAgente(etapa) && etapa.executor_como && (
+                                            <p className={`m-0 text-[11.5px] leading-snug ${isDark ? 'text-slate-400' : 'text-[#4a4455]'}`}>{etapa.executor_como}</p>
+                                        )}
                                         <p className={`m-0 text-[10px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
                                             {ROTULO_ESTADO[estado]}{dataPrevista ? ` · ${dataPrevista}` : ''}{estado === 'aguardando_terceiro' && etapa.aguardando_de ? ` · ${etapa.aguardando_de}` : ''}
                                         </p>
                                     </div>
+                                    <MenuExecutor
+                                        etapa={etapa}
+                                        textoEtapa={textoDaSubtarefa(etapa)}
+                                        isDark={isDark}
+                                        onEscolher={executor => corrigirExecutor(a, etapa.id, executor)}
+                                    />
                                 </div>
                             );
                         })}
@@ -1251,15 +1300,41 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                     )}
                 </div>
 
+                {/* Filtro por executor + legenda das etiquetas */}
+                <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
+                    <button
+                        type="button"
+                        aria-pressed={soAgente}
+                        onClick={() => setSoAgente(v => !v)}
+                        className={`min-h-[44px] px-3.5 rounded-full border text-[11.5px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce] ${
+                            soAgente
+                                ? 'bg-[#4c1d95] border-[#4c1d95] text-white'
+                                : isDark ? 'bg-transparent border-[#4c3a7a] text-violet-300' : 'bg-white border-[#c9bfe6] text-[#4c1d95]'
+                        }`}
+                    >
+                        Só o que o agente faz
+                    </button>
+                    <span className={`inline-flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] ${isDark ? 'text-slate-400' : 'text-[#4a4455]'}`}>
+                        <EtiquetaExecutor etapa={{ executor: 'agente' }} isDark={isDark} />
+                        <EtiquetaExecutor etapa={{ executor: 'agente_aprovado' }} isDark={isDark} />
+                        <span>sem selo: só você</span>
+                    </span>
+                </div>
+
+                {soAgente && ativasVisiveis.length === 0 && emEsperaVisiveis.length === 0 && (
+                    <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Nenhuma etapa em aberto está com o agente.</p>
+                )}
+
                 {/* Lista de ações ativas */}
-                {ativas.length > 0 && (
+                {ativasVisiveis.length > 0 && (
                     <div className="flex flex-col gap-2.5">
-                        {ativas.map((a) => {
+                        {ativasVisiveis.map((a) => {
                             const done = concluida(a);
                             const alerta = done && a.degradation_count > 0
                                 ? `Adiada ${a.degradation_count}x apesar dos passos concluídos — falta um passo de fechamento.`
                                 : null;
-                            const isOpen = !!expanded[a.id];
+                            const isOpen = soAgente || !!expanded[a.id];
+                            const nAgente = paraAgente(a);
                             const pct = a.etapas_totais > 0 ? Math.round((a.etapas_feitas / a.etapas_totais) * 100) : 0;
                             return (
                                 <div key={a.id} className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}>
@@ -1295,6 +1370,14 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                                 ) : (
                                                     <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>sem plano de etapas</span>
                                                 )}
+                                                {nAgente > 0 && (
+                                                    <span
+                                                        data-testid="contador-agente"
+                                                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isDark ? 'text-violet-300 bg-violet-900/40' : 'text-[#4c1d95] bg-[#ece6fa]'}`}
+                                                    >
+                                                        {rotuloParaAgente(nAgente)}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                         <svg
@@ -1314,15 +1397,16 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                 )}
 
                 {/* Em espera -- não conta na barra do dia */}
-                {emEspera.length > 0 && (
+                {emEsperaVisiveis.length > 0 && (
                     <div>
                         <p className={`text-[10.5px] font-bold font-mono uppercase tracking-wider mb-2 ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
                             Em espera — não conta hoje
                         </p>
                         <div className="flex flex-col gap-2">
-                            {emEspera.map((a) => {
+                            {emEsperaVisiveis.map((a) => {
                                 const aguardandoDe = a.subtarefa_do_dia?.aguardando_de ?? null;
-                                const isOpen = !!expanded[a.id];
+                                const isOpen = soAgente || !!expanded[a.id];
+                                const nAgente = paraAgente(a);
                                 return (
                                     <div key={a.id} className={`rounded-2xl border border-dashed ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#f0f3ff] border-[#e5e7eb]'}`}>
                                         <button
@@ -1338,6 +1422,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                                 <p className={`m-0 text-[13px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{a.titulo}</p>
                                                 <p className={`m-0 mt-0.5 text-[11.5px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
                                                     {aguardandoDe ? `Aguardando: ${aguardandoDe}` : 'Aguardando terceiro'}
+                                                    {nAgente > 0 ? ` · ${rotuloParaAgente(nAgente)}` : ''}
                                                 </p>
                                             </div>
                                             <svg

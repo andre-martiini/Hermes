@@ -30,6 +30,16 @@ export type TipoAcao = 'fast' | 'deep';
 
 export type SubtarefaEstado = 'pendente' | 'em_andamento' | 'aguardando_terceiro' | 'feito';
 
+/**
+ * Quem executa a etapa. Ausente = `humano`.
+ * `agente`: o agente faz sozinho. `agente_aprovado`: o agente prepara e o André aprova.
+ * O texto na tela é "agente", nunca o nome de um produto: qualquer IA com o conector pode executar.
+ */
+export type EtapaExecutor = 'agente' | 'agente_aprovado' | 'humano';
+
+/** Quem fixou o executor. Etapa fixada pelo André (`usuario`) o agente não sobrescreve. */
+export type EtapaExecutorDefinidoPor = 'agente' | 'usuario';
+
 export interface ActionPlanItem {
     id: string;
     text: string;
@@ -43,6 +53,12 @@ export interface ActionPlanItem {
     data_prevista?: string;
     /** Adiamentos desta etapa. Etapa aguardando terceiro não acumula. */
     degradation_count?: number;
+    /** Ausente = `humano`. Valor desconhecido também lê como `humano`. */
+    executor?: EtapaExecutor;
+    /** Como o agente faria, em uma frase (até 140 caracteres). */
+    executor_como?: string;
+    /** Corrigido na tela => `usuario`; o agente não sobrescreve. */
+    executor_definido_por?: EtapaExecutorDefinidoPor;
 }
 
 export interface ChatMessage {
@@ -1278,6 +1294,9 @@ export interface ResumoAcao {
         data_prevista: string | null;
         aguardando_de: string | null;
         degradation_count: number;
+        /** Só quando o agente faz ou prepara a etapa; ausente = `humano`. */
+        executor?: EtapaExecutor;
+        executor_como?: string;
     } | null;
     /**
      * Toda subtarefa da ação (não só a de hoje) que está aguardando terceiro —
@@ -1289,6 +1308,8 @@ export interface ResumoAcao {
         texto: string | null;
         aguardando_de: string | null;
         data_prevista: string | null;
+        executor?: EtapaExecutor;
+        executor_como?: string;
     }>;
 }
 

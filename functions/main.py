@@ -10388,6 +10388,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "data_prevista": "YYYY-MM-DD" — dia previsto para esta etapa; sem ela, herda a data da ação
                 "estado": "pendente" | "em_andamento" | "aguardando_terceiro" | "feito"
                 "aguardando_de": de quem se espera, quando o estado for "aguardando_terceiro"
+                "executor": "agente" | "agente_aprovado" | "humano" — quem executa a etapa (omitido = humano; etapa fixada pelo André na tela é recusada)
+                "executor_como": como o agente faria, em uma frase de até 140 caracteres
                 "remover": true — tira a etapa do plano (exige o "id"; não combine com outra edição da mesma etapa)
                 "restaurar": true — traz de volta, com o histórico original, uma etapa removida (pelo "id")
               Omitir um campo preserva o valor que a etapa já tinha; não o apaga.

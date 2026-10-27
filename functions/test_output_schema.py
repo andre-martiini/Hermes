@@ -629,10 +629,18 @@ class TestOutputSchema(unittest.TestCase):
         etapa = sucesso["properties"]["plano_acao"]["items"]
         self.assertEqual(
             set(etapa["properties"].keys()),
-            {"id", "texto", "estado", "data_prevista", "aguardando_de", "degradation_count"},
+            {"id", "texto", "estado", "data_prevista", "aguardando_de", "degradation_count",
+             "executor", "executor_como", "executor_definido_por"},
         )
         # aguardando_de/degradation_count só aparecem quando truthy no item
         # de origem -- por isso fora de required, ao contrário dos outros 4.
+        # executor/executor_como/executor_definido_por (painel do dia, PR 1)
+        # só aparecem na etapa que o agente faz ou prepara, ou em `humano`
+        # fixado pelo André: ausente = humano.
+        self.assertEqual(etapa["properties"]["executor"]["enum"],
+                         ["agente", "agente_aprovado", "humano"])
+        self.assertEqual(etapa["properties"]["executor_definido_por"]["enum"],
+                         ["agente", "usuario"])
         self.assertEqual(set(etapa["required"]), {"id", "texto", "estado", "data_prevista"})
         self.assertFalse(etapa["additionalProperties"])
         self.assertEqual(etapa["properties"]["texto"], {"type": "string"})
