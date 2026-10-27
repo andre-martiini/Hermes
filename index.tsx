@@ -26,7 +26,6 @@ import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 import FinanceView from './FinanceView';
 import DashboardView, { AcoesDoDiaCard } from './DashboardView';
-import MorningSummaryView, { MorningSummaryRoute } from './src/views/MorningSummaryView';
 import { MobileShortcutsView } from './src/views/MobileShortcutsView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
@@ -1788,18 +1787,18 @@ const App: React.FC = () => {
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('home');
   const [viewMode, setViewMode] = useState<'home' | 'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'contacts' | 'diario' | 'whatsapp'>('home');
-  const [morningSummaryAccessKey, setMorningSummaryAccessKey] = useState(0);
   // Navegação de módulo (sidebar/menu mobile): activeModule e viewMode precisam mudar juntos.
   // flushSync força um commit síncrono único para os dois, em vez de duas chamadas de setState
   // separadas que dependem do agrupamento automático do React — elimina qualquer janela onde
   // um dos dois estados aparente "atrasar" em relação ao outro (achado A15).
+  // O antigo "Resumo do dia" (rota 'home') foi substituído pelo Painel do dia: quem pedir
+  // 'home' cai no Dashboard. O componente MorningSummaryView segue no repositório, sem uso,
+  // até o André validar o painel; depois sai junto do seu teste.
   const navigateToModule = (module: typeof activeModule, view: typeof viewMode) => {
+    const [moduloFinal, viewFinal] = view === 'home' ? (['dashboard', 'dashboard'] as const) : ([module, view] as const);
     flushSync(() => {
-      setActiveModule(module);
-      setViewMode(view);
-      // Um novo acesso deve recalcular o resumo mesmo quando ele já está aberto
-      // e activeModule/viewMode, isoladamente, não mudariam de valor.
-      if (view === 'home') setMorningSummaryAccessKey((key) => key + 1);
+      setActiveModule(moduloFinal);
+      setViewMode(viewFinal);
     });
   };
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
@@ -1927,22 +1926,6 @@ const App: React.FC = () => {
     else if (view === 'finance') setActiveModule('financeiro');
     else if (view === 'saude') setActiveModule('saude');
     else if (view === 'diario') setActiveModule('acoes');
-  };
-  // Atalhos do Resumo Matinal — cada fila/bloco aponta para a tela onde a
-  // pendência de fato se resolve (a `rota` vem calculada de morning_summary.py).
-  const handleMorningSummaryNavigate = (route: MorningSummaryRoute) => {
-    const destinos: Record<MorningSummaryRoute, [typeof activeModule, typeof viewMode]> = {
-      gallery: ['acoes', 'gallery'],
-      finance: ['financeiro', 'finance'],
-      saude: ['saude', 'saude'],
-      diario: ['acoes', 'diario'],
-      strategy: ['estrategia', 'strategy'],
-      whatsapp: ['acoes', 'whatsapp'],
-      contacts: ['acoes', 'contacts'],
-      dashboard: ['dashboard', 'dashboard'],
-    };
-    const [modulo, view] = destinos[route];
-    navigateToModule(modulo, view);
   };
   // Sync state changes with history to enable back button
   useEffect(() => {
@@ -4700,8 +4683,7 @@ const App: React.FC = () => {
             </div>
             <nav className="flex flex-col gap-1.5">
               {[
-                { id: 'home', label: 'Resumo do dia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>, active: viewMode === 'home', onClick: () => navigateToModule('home', 'home') },
-                { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
                 { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
@@ -4997,7 +4979,7 @@ const App: React.FC = () => {
                         className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
-                          {viewMode === 'home' ? 'Resumo do Dia' :
+                          {viewMode === 'home' ? 'Dashboard' :
                             viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
@@ -5265,8 +5247,7 @@ const App: React.FC = () => {
                 <div className={`md:hidden border-t animate-in slide-in-from-top-4 duration-300 ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                   <nav className="flex flex-col p-4 gap-2">
                     {[
-                      { label: 'Resumo do dia', active: viewMode === 'home', onClick: () => navigateToModule('home', 'home') },
-                      { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                      { label: 'Dashboard', active: viewMode === 'dashboard' || viewMode === 'home' || viewMode === 'home', onClick: () => navigateToModule('dashboard', 'dashboard') },
                       { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                       { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
                       { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => navigateToModule('acoes', 'pgc') },
@@ -5326,20 +5307,7 @@ const App: React.FC = () => {
             <div className={`w-full ${(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'whatsapp') ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
               <main className={(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
-                {viewMode === 'home' ? (
-                  <MorningSummaryView
-                    key={morningSummaryAccessKey}
-                    isDark={isDarkTheme}
-                    onOpenTask={handleCopilotoOpenTask}
-                    onNavigate={handleMorningSummaryNavigate}
-                    onAskCopiloto={(prompt) => {
-                      setCopilotoMode('default');
-                      setCopilotoAutoStartMic(false);
-                      setCopilotoInitialPrompt(prompt);
-                      setIsCopilotoOpen(true);
-                    }}
-                  />
-                ) : viewMode === 'dashboard' ? (
+                {viewMode === 'home' || viewMode === 'dashboard' ? (
                   isMobileDashboardViewport ? (
                     <>
                       <div className="px-4 pt-4">

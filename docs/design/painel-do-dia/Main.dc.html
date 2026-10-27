@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Painel do dia</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f6f6f9}
+button{font-family:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:2px solid #7e22ce;outline-offset:2px}
+a{color:inherit;text-decoration:none}
+@keyframes suave{0%,100%{box-shadow:0 0 0 0 rgba(197,134,20,.40)}50%{box-shadow:0 0 0 6px rgba(197,134,20,0)}}
+@keyframes pulso{0%,100%{box-shadow:0 0 0 0 rgba(76,29,149,.55)}50%{box-shadow:0 0 0 9px rgba(76,29,149,0)}}
+.suave{animation:suave 3.2s ease-in-out infinite}
+.pulso{animation:pulso 1.2s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.suave,.pulso{animation:none}}
+</style>
+</helmet>
+<div style="font-family:'Inter',ui-sans-serif,system-ui,sans-serif;color:#151c27;background:#f6f6f9;min-height:1760px;box-sizing:border-box;padding:32px 32px 48px;display:flex;flex-direction:column;align-items:center">
+<div style="width:100%;max-width:1376px;display:flex;flex-direction:column;gap:20px">
+
+<!-- Cabeçalho -->
+<header style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px">
+<div>
+<p style="margin:0;font-size:12px;font-weight:700;color:#5f586a;text-transform:uppercase;letter-spacing:.08em">Bom dia, André · terça-feira</p>
+<h1 style="margin:2px 0 0;font-size:28px;font-weight:800;letter-spacing:-.015em">27 de outubro</h1>
+</div>
+<p style="margin:0;font-size:13px;font-weight:600;color:#5f586a">11 ações hoje · 6 em espera</p>
+</header>
+
+<!-- Decidir (vem do briefing da manhã) -->
+<section style="background:#ffffff;border:1px solid #e6e3ee;border-radius:20px;padding:18px 22px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px">
+<h2 style="margin:0;font-size:16px;font-weight:800">Decidir</h2>
+<span style="font-size:12.5px;font-weight:600;color:#5f586a">{{decidirResumo}} · do briefing de hoje</span>
+</div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{decidir}}" as="d" hint-placeholder-count="3">
+<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid #f0eff5">
+<span style="flex:0 0 24px;width:24px;height:24px;margin-top:1px;border-radius:99px;background:{{d.numBg}};color:{{d.numCor}};font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">{{d.n}}</span>
+<div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px">
+<span style="font-size:13.5px;font-weight:800;color:{{d.cor}}">{{d.quem}}</span>
+<span style="font-size:13.5px;line-height:1.4;color:{{d.cor}};text-decoration:{{d.deco}}">{{d.texto}}</span>
+<sc-if value="{{d.temTag}}" hint-placeholder-val="{{ false }}"><span style="flex:0 0 auto;font-size:11px;font-weight:700;color:{{d.tagCor}};background:{{d.tagBg}};padding:2px 8px;border-radius:99px;white-space:nowrap">{{d.tag}}</span></sc-if>
+</div>
+<sc-if value="{{d.temRec}}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:12px;line-height:1.45;color:#5f586a">{{d.rec}}</p></sc-if>
+</div>
+<button type="button" onClick="{{d.toggle}}" style="flex:0 0 auto;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid #d9d4e6;background:#ffffff;color:#4c1d95;font-size:12.5px;font-weight:700">{{d.botao}}</button>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{temMaisDecidir}}" hint-placeholder-val="{{ true }}">
+<button type="button" onClick="{{toggleDecidir}}" aria-expanded="{{decidirOpen}}" style="align-self:flex-start;min-height:44px;padding:0 4px;border:0;background:transparent;color:#4c1d95;font-size:12.5px;font-weight:700">{{decidirMaisLabel}}</button>
+</sc-if>
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;border-top:1px solid #f0eff5;padding-top:6px">
+<p style="flex:1 1 280px;min-width:0;margin:0;font-size:12.5px;line-height:1.45;color:#5a3300"><b style="font-weight:700">3 sugestões de elevação</b> esperam decisão. A varredura está parada desde 20/09.</p>
+<button type="button" onClick="{{toggleAtencao}}" aria-expanded="{{atencaoOpen}}" style="min-height:44px;padding:0 14px;border-radius:12px;border:1px solid #c9a24a;background:#fff8e6;color:#5a3300;font-size:12.5px;font-weight:700">{{atencaoLabel}}</button>
+</div>
+<sc-if value="{{atencaoOpen}}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{elevacoes}}" as="e" hint-placeholder-count="3">
+<div style="background:#fff8e6;border:1px solid #f0e2bd;border-radius:14px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center">
+<div style="flex:1 1 360px;min-width:0">
+<p style="margin:0;font-size:13.5px;font-weight:700;color:#151c27">{{e.acao}}</p>
+<p style="margin:4px 0 0;font-size:12.5px;line-height:1.5;color:#4a4455"><span style="font-weight:700">Ativo possível:</span> {{e.ativo}}</p>
+<p style="margin:2px 0 0;font-size:12.5px;line-height:1.5;color:#4a4455"><span style="font-weight:700">Falta:</span> {{e.falta}} <span style="color:#5f586a">· {{e.custo}}</span></p>
+</div>
+<div style="display:flex;gap:8px">
+<button type="button" style="min-height:44px;padding:0 16px;border-radius:12px;border:0;background:#7e22ce;color:#ffffff;font-size:13px;font-weight:700">Aceitar</button>
+<button type="button" style="min-height:44px;padding:0 16px;border-radius:12px;border:1px solid #d9d6e0;background:#ffffff;color:#4a4455;font-size:13px;font-weight:700">Descartar</button>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</section>
+
+<!-- Corpo -->
+<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+
+<!-- Coluna principal -->
+<div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px">
+
+<!-- Ações de hoje -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px">
+<h2 style="margin:0;font-size:16px;font-weight:800">Ações de hoje</h2>
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:12.5px;font-weight:600;color:#5f586a">0 de 5 concluídas</span>
+<div style="width:96px;height:6px;border-radius:99px;background:#eeeef3;overflow:hidden"><div style="width:2%;height:100%;background:{{accent}}"></div></div>
+<span style="font-size:12px;font-weight:700;color:#5f586a;white-space:nowrap">6 em espera</span>
+</div>
+</div>
+
+<sc-for list="{{agenteHoje}}" as="g" hint-placeholder-count="1">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:10px 14px;border-radius:12px;background:#f3effc;border:1px solid #e0d6f5">
+<span style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#4c1d95">O agente prepara hoje</span>
+<span style="font-size:13px;line-height:1.45;color:#2e2447"><b style="font-weight:700">{{g.acao}}:</b> {{g.texto}}</span>
+</div>
+</sc-for>
+
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px">
+<button type="button" onClick="{{toggleSoClaude}}" aria-pressed="{{soClaude}}" style="min-height:32px;padding:0 12px;border-radius:99px;border:1px solid {{filtroBorda}};background:{{filtroBg}};color:{{filtroCor}};font-size:11.5px;font-weight:700">Só o que o agente faz</button>
+<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:11.5px;color:#4a4455">
+<span style="font-weight:700;color:#0b5a43;background:#dff3ea;padding:2px 8px;border-radius:99px">Agente faz</span>
+<span style="font-weight:700;color:#4c1d95;background:#ece6fa;padding:2px 8px;border-radius:99px">Agente prepara, você aprova</span>
+<span>sem selo: só você</span>
+</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{ativas}}" as="a" hint-placeholder-count="5">
+<article style="border:1px solid #e6e3ee;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;background:#fcfbfe">
+<sc-if value="{{a.temFoco}}" hint-placeholder-val="{{ false }}"><span style="align-self:flex-start;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7a4b00;background:#fff1d6;border:1px solid #e3b865;padding:2px 9px;border-radius:99px">Foco · {{a.foco}}</span></sc-if>
+<h3 style="margin:0;font-size:14px;font-weight:700;line-height:1.35">{{a.titulo}}</h3>
+<p style="margin:0;font-size:13px;line-height:1.45;color:#3d3747"><span style="font-weight:700">Próximo passo:</span> {{a.passo}}</p>
+<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px">
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;flex:1 1 240px;min-width:0">
+<div style="flex:0 1 200px;min-width:96px;height:6px;border-radius:99px;background:#eeeef3;overflow:hidden"><div style="width:{{a.pct}};height:100%;background:{{accent}}"></div></div>
+<span style="font-size:12px;font-weight:700;color:#4a4455;white-space:nowrap">{{a.feitas}}/{{a.totais}} etapas</span>
+<sc-if value="{{a.temClaude}}" hint-placeholder-val="{{ false }}"><span style="font-size:11.5px;font-weight:700;color:#4c1d95;background:#ece6fa;padding:3px 9px;border-radius:99px;white-space:nowrap">{{a.paraClaude}}</span></sc-if>
+</div>
+<button type="button" onClick="{{a.toggle}}" aria-expanded="{{a.open}}" style="min-height:44px;padding:0 12px;border-radius:12px;border:1px solid #d9d4e6;background:#ffffff;color:#4c1d95;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">{{a.label}}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:{{a.chevron}}"><path d="M6 9l6 6 6-6"/></svg></button>
+</div>
+<sc-if value="{{a.open}}" hint-placeholder-val="{{ false }}">
+<div style="border-top:1px solid #ece9f3;margin-top:2px;padding-top:6px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column">
+<sc-for list="{{a.etapas}}" as="s" hint-placeholder-count="6">
+<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 2px">
+<span style="flex:0 0 18px;width:18px;height:18px;margin-top:1px;border-radius:99px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;background:{{s.fundo}};border:{{s.borda}}">
+<sc-if value="{{s.feito}}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></sc-if>
+<sc-if value="{{s.aguardando}}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1d4a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6v6l4 2"/></svg></sc-if>
+<sc-if value="{{s.andamento}}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:99px;background:{{accent}}"></span></sc-if>
+</span>
+<div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px">
+<p style="margin:0;font-size:12.5px;line-height:1.45;color:{{s.cor}}">{{s.texto}}</p>
+<sc-if value="{{s.temSelo}}" hint-placeholder-val="{{ false }}"><span style="flex:0 0 auto;font-size:11px;font-weight:700;color:{{s.seloCor}};background:{{s.seloBg}};padding:2px 8px;border-radius:99px;white-space:nowrap">{{s.selo}}</span></sc-if>
+</div>
+<sc-if value="{{s.temMeta}}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11.5px;font-weight:600;color:#1d4a8a">{{s.meta}}</p></sc-if>
+<sc-if value="{{s.temComo}}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11.5px;line-height:1.45;color:#4a4455">{{s.como}}</p></sc-if>
+</div>
+<span style="flex:0 0 auto;font-size:11.5px;font-weight:600;color:#5f586a;white-space:nowrap">{{s.data}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</article>
+</sc-for>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:6px;border-top:1px solid #f0eff5;padding-top:4px">
+<button type="button" onClick="{{toggleEspera}}" aria-expanded="{{esperaOpen}}" style="min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px;border:0;background:transparent;text-align:left;color:#151c27">
+<span style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Em espera <span style="margin-left:6px;font-size:11.5px;font-weight:700;letter-spacing:0;text-transform:none;color:#5f586a">{{esperaCount}}</span></span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5f586a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:{{esperaChevron}}"><path d="M6 9l6 6 6-6"/></svg>
+</button>
+<sc-if value="{{esperaOpen}}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{espera}}" as="e" hint-placeholder-count="6">
+<div style="display:flex;flex-direction:column;gap:2px;padding:6px 14px 8px;border-radius:12px;border:1px solid #eef0f4;background:#f8f9fc">
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5f586a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+<span style="flex:1 1 220px;min-width:0;font-size:13px;font-weight:600;line-height:1.35;color:#3d3747">{{e.titulo}}</span>
+<sc-if value="{{e.temFoco}}" hint-placeholder-val="{{ false }}"><span title="Foco de hoje · {{e.foco}}" aria-label="Foco de hoje · {{e.foco}}" role="img" style="flex:0 0 auto;width:26px;height:26px;border-radius:99px;background:#fff1d6;border:1px solid #e3b865;display:inline-flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7a4b00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg></span></sc-if>
+<span title="Aguardando {{e.esperaDe}}" style="flex:0 1 auto;max-width:200px;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#1d4a8a;white-space:nowrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span style="overflow:hidden;text-overflow:ellipsis">{{e.esperaDe}}</span></span>
+<sc-if value="{{e.temClaude}}" hint-placeholder-val="{{ false }}"><span title="{{e.paraClaude}}" aria-label="{{e.paraClaude}}" role="img" style="flex:0 0 auto;display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:#4c1d95;background:#ece6fa;padding:3px 8px;border-radius:99px"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2 6.2 6.2 2-6.2 2-2 6.3-2-6.3-6.2-2 6.2-2z"/></svg>{{e.nClaude}}</span></sc-if>
+<span style="flex:0 0 auto;font-size:11.5px;font-weight:700;color:#5f586a;min-width:36px;text-align:right">{{e.feitas}}/{{e.totais}}</span>
+<button type="button" onClick="{{e.toggle}}" aria-expanded="{{e.open}}" aria-label="{{e.label}}" title="{{e.label}}" style="flex:0 0 auto;width:44px;min-height:44px;border-radius:12px;border:1px solid #d9d4e6;background:#ffffff;color:#4c1d95;display:inline-flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:{{e.chevron}}"><path d="M6 9l6 6 6-6"/></svg></button>
+</div>
+<sc-if value="{{e.open}}" hint-placeholder-val="{{ false }}">
+<div style="border-top:1px solid #ece9f3;margin-top:2px;padding-top:6px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column">
+<sc-for list="{{e.etapas}}" as="s" hint-placeholder-count="6">
+<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 2px">
+<span style="flex:0 0 18px;width:18px;height:18px;margin-top:1px;border-radius:99px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;background:{{s.fundo}};border:{{s.borda}}">
+<sc-if value="{{s.feito}}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></sc-if>
+<sc-if value="{{s.aguardando}}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1d4a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6v6l4 2"/></svg></sc-if>
+<sc-if value="{{s.andamento}}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:99px;background:{{accent}}"></span></sc-if>
+</span>
+<div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px">
+<p style="margin:0;font-size:12.5px;line-height:1.45;color:{{s.cor}}">{{s.texto}}</p>
+<sc-if value="{{s.temSelo}}" hint-placeholder-val="{{ false }}"><span style="flex:0 0 auto;font-size:11px;font-weight:700;color:{{s.seloCor}};background:{{s.seloBg}};padding:2px 8px;border-radius:99px;white-space:nowrap">{{s.selo}}</span></sc-if>
+</div>
+<sc-if value="{{s.temMeta}}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11.5px;font-weight:600;color:#1d4a8a">{{s.meta}}</p></sc-if>
+<sc-if value="{{s.temComo}}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11.5px;line-height:1.45;color:#4a4455">{{s.como}}</p></sc-if>
+</div>
+<span style="flex:0 0 auto;font-size:11.5px;font-weight:600;color:#5f586a;white-space:nowrap">{{s.data}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</section>
+
+<!-- Carga semanal -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px">
+<h2 style="margin:0;font-size:16px;font-weight:800">Carga semanal de trabalho</h2>
+<span style="font-size:12.5px;font-weight:600;color:#5f586a">ações por dia, próximos 7 dias</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;align-items:end">
+<sc-for list="{{semana}}" as="d" hint-placeholder-count="7">
+<div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+<span style="font-size:14px;font-weight:{{d.peso}};color:{{d.corNum}}">{{d.total}}</span>
+<div style="width:100%;max-width:56px;height:{{d.altura}};border-radius:8px;background:{{d.cor}}"></div>
+<span style="font-size:11.5px;font-weight:600;color:{{d.corNum}};text-align:center;line-height:1.3">{{d.dia}}<br>{{d.num}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+</div>
+
+<!-- Coluna lateral -->
+<aside style="flex:1 1 400px;min-width:0;display:flex;flex-direction:column;gap:20px">
+
+<!-- Caminhada -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+<h2 style="margin:0;font-size:16px;font-weight:800">Caminhada</h2>
+<span style="font-size:12.5px;font-weight:600;color:#5f586a">hoje</span>
+</div>
+<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+<div style="display:flex;align-items:baseline;gap:6px">
+<span style="font-size:40px;font-weight:800;letter-spacing:-.02em;line-height:1">0,0</span>
+<span style="font-size:14px;font-weight:700;color:#5f586a">km</span>
+</div>
+<button type="button" style="min-height:48px;padding:0 20px;border-radius:14px;border:0;background:{{accent}};color:#ffffff;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:8px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+Registrar caminhada
+</button>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:6px">
+<div style="position:relative;height:8px;border-radius:99px;background:#eeeef3">
+<div style="position:absolute;left:37.5%;top:-3px;width:2px;height:14px;background:#8c8697"></div>
+</div>
+<div style="position:relative;height:16px;font-size:11.5px;font-weight:600;color:#5f586a">
+<span style="position:absolute;left:0">0</span>
+<span style="position:absolute;left:37.5%;transform:translateX(-50%)">mín. 3 km</span>
+<span style="position:absolute;right:0">ideal 8 km</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px">
+<p style="margin:0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f586a">Últimos 7 dias</p>
+<div style="position:relative;height:96px">
+<div style="position:absolute;left:0;right:0;bottom:46px;border-top:1.5px dashed #b4aebf"></div>
+<div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;align-items:end">
+<sc-for list="{{caminhadas}}" as="w" hint-placeholder-count="7">
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+<span style="font-size:11px;font-weight:700;color:#4a4455">{{w.km}}</span>
+<div style="width:100%;max-width:34px;height:{{w.altura}};border-radius:6px 6px 3px 3px;background:{{w.cor}};border:{{w.borda}};box-sizing:border-box"></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px">
+<sc-for list="{{caminhadas}}" as="w" hint-placeholder-count="7">
+<span style="text-align:center;font-size:11px;font-weight:600;color:#5f586a">{{w.dia}}</span>
+</sc-for>
+</div>
+</div>
+
+<p style="margin:0;padding-top:12px;border-top:1px solid #f0eff5;font-size:12.5px;line-height:1.5;color:#4a4455">Ontem <span style="font-weight:700">7,7 km</span> em 3 caminhadas · peso <span style="font-weight:700">93,4 kg</span>, alvo 80</p>
+</section>
+
+<!-- Agenda de hoje (sintetizada) -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+<div>
+<h2 style="margin:0;font-size:16px;font-weight:800">Agenda de hoje</h2>
+<p style="margin:2px 0 0;font-size:12.5px;font-weight:600;color:#5f586a">7 compromissos · 4 lembretes · agora {{horaLabel}}</p>
+</div>
+<button type="button" onClick="{{toggleAgenda}}" aria-expanded="{{agendaOpen}}" aria-label="Mostrar ou recolher a agenda completa" style="width:44px;height:44px;border-radius:12px;border:1px solid #e1dee9;background:#ffffff;color:#4a4455;display:inline-flex;align-items:center;justify-content:center">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:{{agendaChevron}}"><path d="M6 9l6 6 6-6"/></svg>
+</button>
+</div>
+
+<sc-if value="{{temConflito}}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:12px;background:#fff8e6;border:1px solid #ecd49a;color:#5a3300">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7a4b00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>
+<p style="margin:0;font-size:13px;line-height:1.45;font-weight:600">{{conflitoTexto}}</p>
+</div>
+</sc-if>
+<div class="{{proxClasse}}" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:10px 14px;border-radius:12px;background:{{proxBg}};border:1px solid {{proxBorda}};color:{{proxCor}}">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-width:0">
+<span style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">{{proxRotulo}}</span>
+<span style="font-size:14px;font-weight:700">{{proxTitulo}}</span>
+</div>
+<span style="font-size:13px;font-weight:800;white-space:nowrap">{{proxTempo}}</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:4px">
+<div style="position:relative;height:50px;border-radius:10px;background:#f6f6f9;overflow:hidden">
+<div style="position:absolute;top:0;bottom:0;left:33.33%;width:25%;background:#ebe9f2"></div>
+<sc-for list="{{blocos}}" as="b" hint-placeholder-count="5">
+<div class="{{b.classe}}" style="position:absolute;top:{{b.top}};height:20px;left:{{b.left}};width:{{b.largura}};background:{{b.cor}};border-radius:5px;border:{{b.borda}};box-sizing:border-box"></div>
+</sc-for>
+<div style="position:absolute;top:0;bottom:0;left:{{agoraLeft}};width:2px;background:{{accent}}"></div>
+</div>
+<div style="position:relative;height:16px;font-size:11px;font-weight:600;color:#5f586a">
+<span style="position:absolute;left:0">7h</span>
+<span style="position:absolute;left:16.67%;transform:translateX(-50%)">9h</span>
+<span style="position:absolute;left:33.33%;transform:translateX(-50%)">11h</span>
+<span style="position:absolute;left:50%;transform:translateX(-50%)">13h</span>
+<span style="position:absolute;left:66.67%;transform:translateX(-50%)">15h</span>
+<span style="position:absolute;left:83.33%;transform:translateX(-50%)">17h</span>
+<span style="position:absolute;right:0">19h</span>
+</div>
+</div>
+
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px">
+<span style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f586a">Preparo</span>
+<sc-for list="{{preparo}}" as="p" hint-placeholder-count="3">
+<span style="font-size:12px;line-height:1.4;color:#3d3747;background:#f6f6f9;border:1px solid #ececf1;border-radius:10px;padding:5px 10px"><b style="font-weight:700">{{p.dia}}</b> {{p.texto}}</span>
+</sc-for>
+</div>
+
+<sc-if value="{{agendaOpen}}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;border-top:1px solid #f0eff5">
+<sc-for list="{{agenda}}" as="a" hint-placeholder-count="6">
+<div style="display:flex;gap:12px;align-items:baseline;padding:10px 0;border-bottom:1px solid #f4f3f8">
+<span style="flex:0 0 96px;font-size:12.5px;font-weight:700;color:#4a4455">{{a.hora}}</span>
+<div style="flex:1 1 auto;min-width:0">
+<p style="margin:0;font-size:13.5px;font-weight:600;line-height:1.35">{{a.titulo}}</p>
+<sc-if value="{{a.conflito}}" hint-placeholder-val="{{ false }}">
+<p style="margin:2px 0 0;font-size:11.5px;font-weight:700;color:#8a4b00">Horário sobrepõe outro compromisso</p>
+</sc-if>
+</div>
+</div>
+</sc-for>
+<p style="margin:12px 0 4px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f586a">Lembretes</p>
+<sc-for list="{{lembretes}}" as="l" hint-placeholder-count="4">
+<div style="display:flex;gap:12px;align-items:baseline;padding:5px 0">
+<span style="flex:0 0 96px;font-size:12px;font-weight:600;color:#5f586a">{{l.hora}}</span>
+<span style="font-size:12.5px;line-height:1.4;color:#4a4455">{{l.titulo}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</section>
+
+<!-- Prazos finais -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:20px;padding:18px 22px;display:flex;flex-direction:column;gap:8px">
+<h2 style="margin:0;font-size:13px;font-weight:800;color:#4a4455">Prazos finais</h2>
+<sc-for list="{{prazos}}" as="p" hint-placeholder-count="2">
+<div style="display:flex;align-items:center;gap:12px;padding:6px 0">
+<span style="flex:0 0 auto;font-size:11.5px;font-weight:700;color:#4a4455;background:#f0eff5;padding:4px 9px;border-radius:8px">{{p.data}}</span>
+<span style="flex:1 1 auto;min-width:0;font-size:13px;font-weight:600;line-height:1.35">{{p.titulo}}</span>
+<span style="flex:0 0 auto;font-size:12px;font-weight:700;color:{{p.cor}}">{{p.dias}}</span>
+</div>
+</sc-for>
+</section>
+
+</aside>
+</div>
+
+<!-- Avisos do agente -->
+<section style="background:#ffffff;border:1px solid #ececf1;border-radius:16px;padding:12px 18px;display:flex;flex-direction:column;gap:2px">
+<h2 style="margin:0 0 2px;font-size:13px;font-weight:800;color:#4a4455">Avisos do agente</h2>
+<sc-for list="{{avisos}}" as="v" hint-placeholder-count="2">
+<p style="margin:0;font-size:12.5px;line-height:1.5;color:#4a4455">{{v.texto}}</p>
+</sc-for>
+</section>
+
+<!-- Menos usados: colapsados -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr));gap:20px">
+<a href="#financeiro" style="display:flex;align-items:center;gap:14px;background:#ffffff;border:1px solid #ececf1;border-radius:16px;padding:12px 18px;min-height:44px">
+<div style="flex:1 1 auto;min-width:0">
+<p style="margin:0;font-size:14px;font-weight:700">Resumo financeiro</p>
+<p style="margin:2px 0 0;font-size:12.5px;color:#5f586a">Sem pendências nas contas</p>
+</div>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f586a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+</a>
+<a href="#saude" style="display:flex;align-items:center;gap:14px;background:#ffffff;border:1px solid #ececf1;border-radius:16px;padding:12px 18px;min-height:44px">
+<div style="flex:1 1 auto;min-width:0">
+<p style="margin:0;font-size:14px;font-weight:700">Saúde e telemetria</p>
+<p style="margin:2px 0 0;font-size:12.5px;color:#5f586a">Pesagem e 2 check-ins de hoje pendentes · dor ontem 0</p>
+</div>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f586a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+</a>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#7e22ce","options":["#7e22ce","#2563eb","#0f766e","#c2410c"]},"horaSimulada":{"editor":"enum","default":"08:30","options":["07:45","08:30","08:45","09:20","09:45","13:00","13:20","15:30","15:55"],"section":"Agenda"},"relogioReal":{"editor":"boolean","default":false,"section":"Agenda"},"$preview":{"width":1440,"height":1560}}'>
+const ACOES = [
+  { id: 'sigex', espera: false, foco: 'vale até ~03/11', titulo: 'Demandas de Bolsas do SIGEX — Gustavo, Luiz e Renovação do Aditivo', passo: 'Submeter a requisição do Gustavo no SIGFAPES e cancelar no fim de outubro', etapas: [
+    'a|27/10|[Gustavo] Submeter a requisição (BPIG-VI 60%, 3 cotas Out–Dez) e cancelar no fim de outubro||v|',
+    'p||[Gustavo] Só pedir documentos se a FAPES solicitar, e apenas o que ela listar||p|O agente redige a mensagem ao Gustavo, se a FAPES pedir',
+    'p|31/10|[Gustavo] Registrar o desfecho (comprovante da 1ª cota) no diário||c|O agente registra o desfecho no diário da ação',
+    'p|30/10|[Gustavo] Cancelar a bolsa no SIGFAPES no fim de outubro (só a 1ª cota)||v|',
+    'f|16/09|[Luiz] Parar de aguardar a resposta do Elton (FAPES) sobre exceção retroativa|||',
+    'a|27/10|[Luiz] Submeter o rascunho (BPIG-IV 60%, Out/26–Mar/27) e avisar a FAPES por e-mail||v|',
+    'p|27/10|[Luiz] Acompanhar a nova análise da FAPES em 4.5 do SIGFAPES||c|O agente consulta o SIGFAPES no navegador e avisa quando mudar',
+    'p|27/10|[Luiz] Se a FAPES devolver o BPIG-IV: ressubmeter em BPIG-VI 60% (R$ 1.080)||v|',
+    'p|27/10|[Luiz] Criar a bolsa nova no Sigex como pendente_criacao||c|O agente cria no Sigex pelo conector',
+    'f|16/09|[Renovação] Lista final de bolsistas decidida: todos continuam|||',
+    'f|25/09|[Renovação] 19 requisições novas salvas em 4.4 Em edição|||',
+    't|27/10|[Renovação] Aguardar a FAPES assinar o aditivo e atualizar a vigência no SIGFAPES|FAPES||',
+    'p|27/10|[Renovação] Submeter as renovações de 01/10 (15 bolsistas)||v|',
+    'p|02/11|[Renovação] Submeter as renovações de 01/11 (Pedro H. Fonseca e Gelinton)||v|',
+    'p|01/12|[Renovação] Submeter as renovações de 01/12 (Kaio, Aristídes, Marcus Vinícius e Lívia)||v|',
+    'p|27/10|[Renovação] Corrigir divergências SIGFAPES × Sigex (Lívia, Aristídes, Pedro Riguete, Gustavo)||p|O agente compara os dois sistemas e ajusta o Sigex; o SIGFAPES é seu',
+    'a|27/10|[Caio] Requisitar bolsa de 3 cotas a partir de 01/10 (requisição preparada)||v|',
+    'p|30/10|[Caio] Cancelar a bolsa no SIGFAPES e encerrar no Sigex no fim de outubro||p|Você cancela no SIGFAPES; o agente encerra a bolsa no Sigex',
+    'p|27/10|[Caio] Avisar o Caio que receberá bolsa de 1 mês||p|O agente escreve a mensagem em 1ª pessoa; você aprova o envio',
+    'f|13/09|[Compensação] Pedro H. Fonseca e Kaio: encerrar atividades antes e manter a bolsa até mar/27|||',
+    'f|25/09|[Compensação] Gelinton e Aristídes seguem normalmente, sem compensação|||',
+    't|30/10|Confirmar a data de formatura do Pedro H. Fonseca antes de submetê-lo em 02/11|Pedro H. Fonseca||',
+    'f|20/10|Enviar o e-mail à FAPES|||',
+    'f|20/10|Confirmar com o Marcão se o TJES executou o repasse de R$ 174.604,50|||',
+    'f|26/10|Confirmar com a FAPES o recebimento do recurso e a data de assinatura do aditivo|||',
+    'p|27/10|Cobrar a FAPES direto (GEINOV/Parcerias): aditivo no SIGFAPES e retroativo de outubro||p|O agente prepara a mensagem para a GEINOV; você aprova',
+    'p|06/11|Escalar à Diretoria-Geral da FAPES e ao TJ se a vigência não estiver atualizada||p|O agente redige o e-mail de escalonamento; você aprova',
+    'p|13/11|Acionar todos os canais se a vigência (30/11) ainda não estiver atualizada||p|O agente prepara as mensagens para cada canal; você aprova',
+    'p|24/11|Confirmar a vigência atualizada e requisitar as renovações||p|O agente confere a vigência no SIGFAPES; a requisição é sua',
+    'p|07/12|Decidir o plano B (término em abril/2027) se a FAPES negar retroativo ou compensação||v|',
+    'f|21/10|Enviar à FAPES o comprovante da OB 2026OB10518|||',
+    't|30/10|Aguardar as demais assinaturas do 1º Termo Aditivo|Assinantes da FAPES e Maíra||',
+    'f|26/10|Assinar o 1º Termo Aditivo no E-Docs|||'
+  ] },
+  { id: 'alegre', espera: false, titulo: 'Workshop de Inteligência Artificial no Ifes Campus Alegre', passo: 'Adaptar o material da oficina ao público misto', etapas: [
+    'f|23/10|Propor 24 e 25/02/2027 à Angela (enviado em 23/10)|||',
+    't|30/10|Informar à Angela a GECC: 14h, R$ 4.414,17, sem planejamento|Angela / Rômulo (Campus Alegre)||',
+    'p||Passar à Angela as datas e opinar sobre a carga horária||p|O agente redige a resposta à Angela; você aprova',
+    'f||Responder à Angela sobre o sisteminha de aposentadoria|||',
+    'p||Confirmar se o Campus Alegre paga GECC pelo curso de 8h||p|O agente escreve a pergunta à Angela; você aprova',
+    'p||Se não pagar GECC, propor curso de 4h à tarde com pernoite||p|O agente redige a proposta de 4h; você aprova',
+    'p||Perguntar se o campus cobre hospedagem e deslocamento||p|O agente escreve a pergunta; você aprova',
+    'p||Confirmar data, público, carga horária, local e cadastro no SRSC||p|O agente levanta o que falta e pergunta; o cadastro no SRSC é seu',
+    'p|12/10|Adaptar o material da oficina ao público misto||c|O agente adapta slides e caderno e entrega para sua revisão'
+  ] },
+  { id: 'portao', espera: false, titulo: 'Comprar e Configurar Controles do Portão da Garagem', passo: 'Fotografar o motor e a placa receptora (marca e modelo)', etapas: [
+    'f|26/10|Aguardar o chaveiro responder sobre a chave do motor|||',
+    'p||Identificar marca e modelo do motor e da placa receptora||v|',
+    'p||Identificar frequência e tipo do controle (foto enviada, 2 botões)||c|O agente lê a foto do controle e identifica o tipo',
+    'p||Pesquisar controles compatíveis e preço||c|O agente pesquisa modelos e preços',
+    'p||Comprar os controles||v|',
+    'p||Configurar os controles no receptor||v|',
+    'p||Distribuir os controles com a vizinha e a mãe||v|',
+    'a|24/10|Fotografar o motor e a placa receptora (marca e modelo)||v|',
+    'f|24/10|Fotografar o verso do controle (frequência)|||',
+    'a|26/10|Acionar outro chaveiro para fazer a chave do motor||p|O agente acha chaveiros e prepara a mensagem; você aprova'
+  ] },
+  { id: 'integra', espera: false, titulo: 'MAGO Integra — Evolução do Sistema MAGO para Iesgo Contínuo e Multilevantamentos', passo: 'Revisar o design das telas do Integra', etapas: [
+    'a|27/10|Revisar o design das telas do Integra (branch claude/design-telas-integra)||v|',
+    'a|27/10|Desenvolver o sistema com as informações que já temos||p|O agente implementa na branch; você mescla',
+    'p|27/10|Modelar o domínio só com as premissas seguras||p|O agente modela e testa na branch; você mescla',
+    'a|27/10|Piloto: escolher a instituição e as pessoas e medir o trabalho repetido hoje||v|',
+    't|27/10|Aguardar a resposta do TCU sobre a API (ler direto do TCU ou importar arquivos)|TCU (iesgo@tcu.gov.br)||',
+    'f|27/09|Levantar os levantamentos obrigatórios da Rede Federal|||',
+    'f|19/10|Colher a opinião do Eglon sobre a ideia e o plano|||',
+    'f||Escopo inicial: só o iESGo, lendo os dados oficiais do TCU|||',
+    'f|19/10|Definir nome e repositório: MAGO Integra, andre-martiini/mago-integra|||',
+    'f|19/10|Criar o fork do MAGO com projeto Firebase próprio|||',
+    'f||Entregar firestore.rules com testes no emulador|||',
+    'f|19/10|Pedir ao TCU a documentação da API do iESGo|||',
+    'p|27/10|Desenvolvedor validar a branch claude/design-telas-integra ponta a ponta||v|'
+  ] },
+  { id: 'insumos', espera: false, titulo: 'Escolher Orçamento Mais Barato do Item Fracassado — Insumos Agrícolas', passo: 'Avisar o Ezequiel do resultado', etapas: [
+    'f|19/10|Assinar o relatório no SIPAC para o processo seguir à CLC|||',
+    'f|19/10|Achar o menor preço do item fracassado na pesquisa de preços|||',
+    'f|19/10|Enviar e-mail com os documentos à Canto da Roça|||',
+    't|27/10|Seguir com a contratação direta do item, como no processo da máquina|Canto da Roça||',
+    'p|22/10|Avisar o Ezequiel do resultado||p|O agente escreve a mensagem em 1ª pessoa; você aprova',
+    'p|23/10|Cobrar a Canto da Roça por e-mail se não houver resposta até hoje||p|O agente rascunha o e-mail; você aprova'
+  ] },
+  { id: 'enfermaria', espera: true, foco: 'decidir hoje', esperaDe: 'Thales e Iris', titulo: 'Processo de Compra de Itens de Enfermaria (23543.000431/2023-39)', passo: '', etapas: [
+    'f|16/09|Fechar o item 10 do mapa de preços|||',
+    'f|20/09|Fechar o item 24 (maca) com 3 fornecedores|||',
+    'f|16/09|Fechar o item 21 do mapa de preços|||',
+    'f|16/09|Fechar o item 28 do mapa de preços|||',
+    'f|20/09|Fechar o item 33 (aparelho de pressão)|||',
+    'f|16/09|Revisar os outliers dos itens 1, 4 e 11|||',
+    'f|17/09|Trocar o item 16 pelo glicosímetro (item 35)|||',
+    'f|17/09|Mostrar no mapa a cotação excluída pelo saneamento (DEV-2026-0012)|||',
+    'f||Sincronizar ETP 22/2026 e TR 27/2026 com o mapa|||',
+    'f||Conferir a dotação com o Hildo, via Iris|||',
+    'f||Corrigir a fonte de recursos da seção 11 do TR para 1000000000|||',
+    't|27/10|Enviar o processo à Iris (CGAC) e iniciar a instrução no SIPAC: anexar o DFD 18/2026, despachar ao Gabinete e movimentar para BSF-GABDG|Thales (CPMS) e Iris (CGAC)||',
+    'a||Concluir o ETP 22/2026 (falta assinar) e o TR 27/2026 (em espera até decidir a unidade dos itens 21, 26 e 28)||v|',
+    'p||Instruir e tramitar o processo no SIPAC||p|O agente prepara os despachos no SIPAC; você assina'
+  ] },
+  { id: 'sispnaes', espera: true, foco: 'prazo 31/10', esperaDe: 'Fernanda e Gabriela', titulo: 'Ciclo Sispnaes 2026 — Validação dos Campi e Submissão ao MEC', passo: '', etapas: [
+    'f|31/08|Entregar o sistema e os tutoriais aos campi|||',
+    'f|18/09|Corrigir os bugs e pedidos dos campi|||',
+    'f|05/10|Fechar a validação dos 22 campi|||',
+    'f|07/10|Ajustar o exportador ao modelo do MEC|||',
+    'f|15/10|Enviar benefícios e cadastros ao MEC para análise|||',
+    'f|27/10|Importar no MEC o arquivo final dos 9 pendentes da certificação e finalizar a submissão|||',
+    'f|19/10|Recuperar o exportador de 07/10 e mesclar na branch de produção|||',
+    'f|20/10|Entregar o relatório à DAE|||',
+    'p||Decidir se TEA e Altas habilidades vazios saem como "Não" no MEC||v|',
+    'f||Aguardar a Fernanda responder antes de subir a certificação no MEC|||',
+    'p||Corrigir a importação da folha que apaga o "desfeito"||p|O agente corrige na branch; você mescla',
+    'p||Decidir o que corrigir dos achados de autosave e colagem||v|',
+    'p||Decidir com a Gabriela o caso das prestadoras do NAPNE (Itapina)||v|',
+    'p||Conferir se sobrou código sem commit na SIGEX-B03||c|O agente confere o repositório e lista o que falta commitar',
+    'p||Ajudar a Gabriela a ler a planilha do SIAFI (em espera)||p|O agente analisa a planilha e prepara a explicação; você envia',
+    'a|06/11|Desenhar telas e fluxo do módulo de folha de pagamento dos campi (2ª etapa)||p|O agente desenha as telas e o fluxo; você valida',
+    'a||Avaliar a integração do Atlas com o sistema da PROEN||p|O agente avalia e escreve o parecer; você decide',
+    'p||Tratar a segurança do Atlas antes de integrar||p|O agente corrige na branch; você mescla',
+    'f||Limpar os arquivos de debug ao fechar o ciclo|||',
+    't|28/10|Aguardar a avaliação do relatório de lições aprendidas e, com o ok, fazer a versão executiva|Fernanda Nogueira e Gabriela (DAE)||',
+    'p|30/11|Testar a folha no sistema com a Piúma (Rosiane)||v|',
+    'p|30/11|Conversar com a PROAD antes de avançar com os campi||p|O agente redige a mensagem à PROAD; você aprova',
+    'p||Mais para frente: mapa de processo da folha de pagamento no Live Ideas (lembrete)||c|O agente gera o mapa no Live Ideas',
+    'p|06/11|Folha: confirmar com a DAE os campos obrigatórios do cadastro e o aviso ao financeiro||p|O agente redige a pergunta à DAE; você aprova',
+    'p|06/11|Folha: definir o segundo campus de teste e o substituto da Rosiane||v|',
+    'p|16/11|Folha: pedir à Qualidata a data de nascimento dos 4.277 CPFs de 2026/1||p|O agente redige o pedido; você aprova',
+    'p|30/11|Folha, marco 30/11: escopo congelado; cadastro por CPF e carregar folha anterior testados||p|O agente implementa e testa na branch; você mescla',
+    'p|15/12|Folha, marco 15/12: folha nova, liberar e fila do financeiro completas e testadas||p|O agente implementa e testa na branch; você mescla',
+    'p|31/12|Folha, marco 31/12: escopo fechado; janeiro e fevereiro só para correção e testes||v|',
+    'p|31/01|Folha, decisão em 31/01: se não estiver estável, a folha 2027/1 segue no formato de hoje||v|',
+    'p|15/02|Folha: data de corte do bloqueio por campo obrigatório (sugerida 15/02/2027)||v|',
+    'p||Folha, fase 2 após a PROAD: Reitoria como unidade pagadora de Viana; fase 3: benefícios indiretos||v|',
+    'p||Estudar o preenchimento por CPF dos beneficiários indiretos||c|O agente estuda e escreve a proposta',
+    't|30/10|Acompanhar o relatório descritivo da DAE e agendar a apresentação dos próximos passos|Fernanda (DAE)||'
+  ] },
+  { id: 'sgch', espera: true, esperaDe: 'Nathália', titulo: 'Expandir o Sistema de Carga Horária Docente (SGCH) — Piloto em Barra de São Francisco', passo: '', etapas: [
+    'f|26/10|Nathália: confirmar quais cursos o campus oferece hoje (os 7 dos PPCs)|||',
+    'f|26/10|Nathália: mandar o PPC vigente do Técnico em Administração integrado|||',
+    't|09/11|Nathália: preencher a planilha dos professores (Professores, Coordenadorias e Acessos)|Nathália (Ifes BSF)||',
+    'p||Carga única de BSF: conferir cursos, rodar o conversor, ensaiar no banco de teste e importar em produção||p|O agente prepara e ensaia no banco de teste; você autoriza a produção',
+    'a||Fase 5 — Piloto em BSF: falta confirmar cursos, PPC do Adm integrado e a planilha de professores||v|',
+    'f|24/10|Apagar as coleções antigas da raiz do Firestore|||',
+    'p||Fase 6 — Abertura para a rede: roteiro de cadastro de novas unidades e documentação por perfil||p|O agente escreve o roteiro e a documentação; você revisa',
+    'f|24/10|Trocar os avisos do navegador por janelas do próprio sistema|||',
+    'f|24/10|Cadastrar o tipo de curso "Técnico Subsequente" no sistema|||',
+    'f||Fase 0 — Rede de segurança: testes das regras do Firestore no emulador|||',
+    'f||Fase 1 — Modelo de dados por unidade e regras novas, com testes de isolamento|||',
+    'f||Fase 2 — Contexto de unidade no sistema|||',
+    'f||Fase 3 — Telas novas: Unidades, Usuários, Configurações, seletor de unidade e catálogo de cursos|||',
+    'f|22/10|Revisão independente da branch feat/multi-unidades e correções|||',
+    'f||Fase 4 — Migração de Nova Venécia para a estrutura nova|||',
+    'f|22/10|Tutorial em vídeo do SGCH para a população inicial de uma unidade|||',
+    'f|23/10|Avisar a Nathália pelo WhatsApp (acesso, cursos, planilha e tutorial)|||',
+    'p||Tirar do código o que ficou sem uso depois de apagar a estrutura antiga||p|O agente limpa na branch; você mescla'
+  ] },
+  { id: 'feira', espera: true, esperaDe: 'Wellington', titulo: 'Feira Digital — Reativar o Site-Catálogo de Agricultura Familiar', passo: '', etapas: [
+    'f|27/10|Localizar a pasta "Project Form" compartilhada pelo Wellington|||',
+    'f|27/10|Usar o site original como referência (visual, categorias e campos)|||',
+    'f|27/10|Definir a tecnologia e o modelo de dados (Firebase)|||',
+    'f|27/10|Implementar o cadastro e o login do produtor|||',
+    'f|27/10|Implementar o cadastro dos itens pelo produtor (dados e fotos)|||',
+    'f|27/10|Implementar a exposição no catálogo (categoria, busca, páginas do produtor e do item)|||',
+    'f|27/10|Publicar a demonstração no Firebase e enviar o link ao Wellington|||',
+    't|27/10|Aguardar o Wellington retornar sobre a demonstração e os próximos passos|Wellington||',
+    'p|27/10|Listar as melhorias com o Wellington e aplicar as que couberem||p|O agente lista e aplica na branch; você mescla',
+    'p|27/10|Levantar a situação do domínio feiradigital.com.br||p|O agente consulta o Registro.br; o contato com o Wellington você aprova',
+    'p|27/10|Criar o projeto Firebase real, publicar a versão final e apontar o domínio||v|'
+  ] },
+  { id: 'pso', espera: true, esperaDe: 'Eva e equipe', titulo: 'Integrar o PSO (Perfil Sensorial Online) ao Sistema Reforço Positivo', passo: '', etapas: [
+    't|27/10|Aguardar o retorno da Eva e equipe sobre o teste do módulo PSO|Eva e equipe da Reforço Positivo||',
+    'p|27/10|Validar com a terapeuta ocupacional a escala de pontuação e as tabelas de corte||p|O agente redige a pergunta à terapeuta; você aprova',
+    'p|27/10|Confirmar direitos de uso do instrumento (Perfil Sensorial, Winnie Dunn)||p|O agente redige a consulta; você aprova',
+    'p|27/10|Decidir com a clínica quem preenche (família ou profissional) e como acessa||v|',
+    'p|27/10|Aprovar a proposta e abrir ações de implementação||v|',
+    'p|27/10|Migrar as planilhas ativas (38) e depois as inativas, com conferência dos totais||p|O agente migra e confere os totais; você autoriza',
+    'p|27/10|Pôr as planilhas antigas em somente leitura, remover acessos amplos e avisar a clínica||p|O agente ajusta as permissões; você autoriza',
+    'f|27/10|Ajustar o seletor Resultados!O5 para o nome corrigido|||',
+    'f|27/10|Modelar o PSO no Firestore e escrever as regras de segurança|||',
+    'f|27/10|Implementar o cálculo de seções e fatores com testes|||',
+    'f|27/10|Criar formulário de preenchimento, tela de resultados e PDF|||',
+    'f|27/10|Criar o painel de acompanhamento por paciente|||'
+  ] },
+  { id: 'rede', espera: true, esperaDe: 'Ezequiel', titulo: 'Inserir Documentos Atualizados no Processo 23543.000495/2026-82 (Rede Elétrica)', passo: '', etapas: [
+    't|27/10|Aguardar o Ezequiel elaborar o edital|Ezequiel||',
+    'f|23/10|Aguardar o Hildo compartilhar o TR e o ETP 9/2026 para edição|||',
+    'f||Avisar o Hildo que ETP e TR foram atualizados|||',
+    'f|23/10|Revisar o TR no compras.gov|||',
+    'f||Conferir os documentos recebidos do Hildo|||',
+    'f||Finalizar a inserção dos 8 documentos no SIPAC|||',
+    'f||Enviar o processo ao Gabinete da DG pedindo aprovação|||',
+    'f||Avisar o Hildo|||',
+    'f||Aguardar o Hildo compartilhar o TR e o ETP no compras.gov|||',
+    'f|26/10|Ajustar o TR 17/2026 no compras.gov|||',
+    'f|26/10|Trocar os anexos do ETP 9/2026 pela rev. 06 e concluir o ETP|||',
+    'f|27/10|Baixar o ETP 9/2026 e o TR 17/2026 assinados e inserir no processo SIPAC|||',
+    'f||Baixar o ETP 9/2026 e o TR 17/2026 assinados no compras.gov|||',
+    'f||Inserir o ETP e o TR assinados no processo SIPAC|||'
+  ] }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { atencaoOpen: false, decidirOpen: false, feitos: {}, esperaOpen: true, agendaOpen: false, abertas: {}, soClaude: false };
+  }
+
+  componentDidMount() {
+    this._t = setInterval(() => { if (this.props.relogioReal) this.forceUpdate(); }, 30000);
+  }
+
+  componentWillUnmount() {
+    if (this._t) clearInterval(this._t);
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#7e22ce';
+    const s = this.state;
+
+    const abertas = this.state.abertas || {};
+    const soClaude = !!this.state.soClaude;
+    const parse = (linhas) => linhas.map((l) => { const p = l.split('|'); return { e: p[0], d: p[1], t: p[2], q: p[3], m: p[4], c: p[5] }; });
+    const SELO = { c: ['Agente faz', '#0b5a43', '#dff3ea'], p: ['Agente prepara', '#4c1d95', '#ece6fa'] };
+    const monta = (a) => {
+      const todas = parse(a.etapas).map((p, i) => {
+        const chave = a.id + ':' + i;
+        const claude = (p.m === 'c' || p.m === 'p') && p.e !== 'f';
+        return {
+          claude,
+          texto: p.t, data: p.d,
+          feito: p.e === 'f', andamento: p.e === 'a', aguardando: p.e === 't',
+          temMeta: p.e === 't' && !!p.q, meta: p.e === 't' && p.q ? 'Aguardando ' + p.q : '',
+          cor: p.e === 'f' ? '#6b6577' : '#151c27',
+          fundo: p.e === 'f' ? '#0f7a5a' : (p.e === 't' ? '#e8f0fc' : '#ffffff'),
+          borda: p.e === 'f' ? '2px solid #0f7a5a' : (p.e === 't' ? '2px solid #1d4a8a' : (p.e === 'a' ? '2px solid ' + accent : '2px solid #a9a3b8')),
+          temSelo: claude, selo: claude ? SELO[p.m][0] : '', seloCor: claude ? SELO[p.m][1] : '', seloBg: claude ? SELO[p.m][2] : '',
+          temComo: claude && !!p.c, como: p.c || '',
+        };
+      });
+      const feitas = todas.filter((x) => x.feito).length;
+      const totais = todas.length;
+      const nClaude = todas.filter((x) => x.claude).length;
+      const open = soClaude ? true : !!abertas[a.id];
+      return {
+        id: a.id, titulo: a.titulo, passo: a.passo, esperaDe: a.esperaDe || '',
+        feitas, totais, pct: Math.round(feitas / totais * 100) + '%', temFoco: !!a.foco, foco: a.foco || '',
+        etapas: soClaude ? todas.filter((x) => x.claude) : todas, open, nClaude,
+        temClaude: nClaude > 0, paraClaude: nClaude + (nClaude === 1 ? ' etapa para o agente' : ' etapas para o agente'),
+        label: open ? 'Ocultar etapas' : 'Ver etapas', chevron: open ? 'rotate(180deg)' : 'none',
+        toggle: () => this.setState({ abertas: { ...this.state.abertas, [a.id]: !this.state.abertas[a.id] } })
+      };
+    };
+    const filtra = (l) => (soClaude ? l.filter((x) => x.nClaude > 0) : l);
+    const ativas = filtra(ACOES.filter((a) => !a.espera).map(monta));
+    const espera = filtra(ACOES.filter((a) => a.espera).map(monta));
+
+    const dias = [['ter', '27', 11], ['qua', '28', 3], ['qui', '29', 6], ['sex', '30', 8], ['sáb', '31', 1], ['dom', '01', 2], ['seg', '02', 0]];
+    const semana = dias.map((d, i) => ({
+      dia: d[0], num: d[1], total: d[2],
+      altura: Math.max(4, Math.round(d[2] / 11 * 84)) + 'px',
+      cor: i === 0 ? accent : '#cfc9dd',
+      corNum: i === 0 ? '#151c27' : '#4a4455',
+      peso: i === 0 ? 800 : 600
+    }));
+
+    const kms = [['qua', 4.35], ['qui', 6.41], ['sex', 2.75], ['sáb', 3.03], ['dom', 1.35], ['seg', 7.69], ['hoje', 0]];
+    const caminhadas = kms.map((k, i) => {
+      const hoje = i === kms.length - 1;
+      return {
+        dia: k[0],
+        km: hoje ? '0' : String(k[1]).replace('.', ','),
+        altura: hoje ? '6px' : Math.max(4, Math.round(k[1] / 8 * 72)) + 'px',
+        cor: hoje ? 'transparent' : (k[1] >= 3 ? accent : '#cfc9dd'),
+        borda: hoje ? '1.5px dashed ' + accent : '0'
+      };
+    });
+
+    const EVENTOS = [
+      { t: 'Sessão de pilates', ini: 540, fim: 590, lane: 0 },
+      { t: 'Buscar Alexandre na escola', ini: 575, fim: 595, lane: 1 },
+      { t: 'Acupuntura', ini: 810, fim: 870, lane: 0 },
+      { t: 'Conselho de Escola — EMEF (fora da agenda)', ini: 830, fim: 890, lane: 1, sem: true },
+      { t: 'Cirurgia da Nenci — Hospital Santa Rita', ini: 940, fim: 1020, lane: 0 },
+      { t: 'Fisioterapia', ini: 990, fim: 1080, lane: 1 }
+    ];
+    const fmt = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    let agoraMin;
+    if (this.props.relogioReal) { const d = new Date(); agoraMin = d.getHours() * 60 + d.getMinutes(); }
+    else { const hm = String(this.props.horaSimulada ?? '08:30').split(':').map(Number); agoraMin = hm[0] * 60 + hm[1]; }
+    const ativo = EVENTOS.find((e) => e.ini <= agoraMin && agoraMin < e.fim);
+    const prox = EVENTOS.find((e) => e.ini > agoraMin);
+    const diff = prox ? prox.ini - agoraMin : 9999;
+    let alvo = null, nivel = 'normal';
+    if (prox && diff <= 15) { alvo = prox; nivel = 'urgente'; }
+    else if (prox && diff <= 30) { alvo = prox; nivel = 'atencao'; }
+    else if (ativo) { alvo = ativo; nivel = 'agora'; }
+    else if (prox) { alvo = prox; nivel = 'normal'; }
+    const dur = (m) => (m >= 60 ? 'em ' + Math.floor(m / 60) + 'h' + (m % 60 ? String(m % 60).padStart(2, '0') : '') : (m <= 1 ? 'agora' : 'em ' + m + ' min'));
+    const EST = {
+      normal:  { bg: '#f6f6f9', borda: '#ececf1', cor: '#151c27', rotulo: 'Próximo', classe: '' },
+      atencao: { bg: '#fff1d6', borda: '#e3b865', cor: '#5a3300', rotulo: 'Em breve', classe: 'suave' },
+      urgente: { bg: '#4c1d95', borda: '#4c1d95', cor: '#ffffff', rotulo: 'Já vai começar', classe: 'pulso' },
+      agora:   { bg: '#e3f4ec', borda: '#9fd6c0', cor: '#0b5a43', rotulo: 'Agora', classe: '' }
+    };
+    const est = EST[nivel];
+    const proxTitulo = alvo ? (nivel === 'agora' ? alvo.t : fmt(alvo.ini) + ' · ' + alvo.t) : 'Sem mais compromissos hoje';
+    const proxTempo = !alvo ? '' : (nivel === 'agora' ? 'até ' + fmt(alvo.fim) : dur(alvo.ini - agoraMin));
+    const blocos = EVENTOS.map((e) => {
+      const marcado = alvo === e && nivel !== 'normal';
+      return {
+        left: ((e.ini - 420) / 720 * 100).toFixed(2) + '%', largura: ((e.fim - e.ini) / 720 * 100).toFixed(2) + '%',
+        top: e.lane === 0 ? '6px' : '26px', cor: e.sem ? '#f3d58a' : (e.lane === 0 ? accent : '#2f6f5e'),
+        borda: marcado ? '2px solid #151c27' : (e.sem ? '2px dashed #8a4b00' : '0'),
+        classe: marcado ? est.classe : ''
+      };
+    });
+    const agoraLeft = Math.max(0, Math.min(100, (agoraMin - 420) / 720 * 100)).toFixed(2) + '%';
+
+    const agenda = [
+      { hora: 'Dia todo', titulo: 'Cirurgia da Avó', conflito: false },
+      { hora: '09:00–09:50', titulo: 'Sessão de pilates', conflito: true },
+      { hora: '09:35–09:55', titulo: 'Buscar Alexandre na escola', conflito: true },
+      { hora: '13:30–14:30', titulo: 'Acupuntura', conflito: true },
+      { hora: '13:50', titulo: 'Conselho de Escola — EMEF (não está na agenda)', conflito: true },
+      { hora: '15:40–17:00', titulo: 'Cirurgia da Nenci — Hospital Santa Rita (confirmada)', conflito: true },
+      { hora: '16:30–18:00', titulo: 'Fisioterapia', conflito: true }
+    ];
+
+    const lembretes = [
+      { hora: '07:00', titulo: 'Avisar a escola: busco o Alexandre' },
+      { hora: '08:30', titulo: 'Pilates na Elevar Fisio às 9h' },
+      { hora: '09:00', titulo: 'Comprar pote de café' },
+      { hora: '14:30', titulo: 'SIGEX: checkpoint antes de 01/11 — aditivo assinado?' }
+    ];
+
+    const prazos = [
+      { data: '29/out', titulo: 'Remoção Interna 59/2026 — inscrição (Administrador, Reitoria)', dias: 'em 2 dias', cor: '#9b1c1c' },
+      { data: '31/out', titulo: 'Ciclo Sispnaes 2026 — Submissão ao MEC', dias: 'em 4 dias', cor: '#8a4b00' }
+    ];
+
+    const DECIDIR = [
+      { id: 'd1', quem: 'Enfermaria', texto: 'TR, itens 21, 26 e 28: converter para UNIDADE, com quantidade e valor proporcionais', rec: 'É o que o diário recomenda. A Dani passa o processo à Iris hoje.', tag: 'hoje', tom: 'a' },
+      { id: 'd2', quem: 'Workshop Piúma', texto: 'Responder as 3 perguntas do Fabrício', rec: 'A etapa de GECC depende disso.', tag: 'hoje', tom: 'a' },
+      { id: 'd3', quem: 'Hildo', texto: 'Avisar que o ETP e o TR já estão inseridos no processo e fechar a promessa', rec: 'Ele espera você inserir.', tag: '', tom: '' },
+      { id: 'd4', quem: 'Geraldo / STIC', texto: 'Cobrar o retorno do pacote de 22/10', rec: '', tag: 'venceu ontem', tom: 'r' },
+      { id: 'd5', quem: 'Raquel', texto: 'Responder a mensagem “Tá de descrevendo”', rec: '', tag: '', tom: '' },
+      { id: 'd6', quem: 'Nathália (BSF)', texto: 'Cobrar a planilha dos professores', rec: 'Prometida para o fim de semana.', tag: '', tom: '' },
+      { id: 'd7', quem: 'Ciro', texto: 'Pendência menor', rec: 'Detalhe no briefing de hoje.', tag: '', tom: '' },
+      { id: 'd8', quem: 'Chaveiro', texto: 'Pendência menor', rec: 'Detalhe no briefing de hoje.', tag: '', tom: '' }
+    ];
+    const feitosD = this.state.feitos || {};
+    const TAG = { a: ['#5a3300', '#fff1d6'], r: ['#9b1c1c', '#fde8e8'], '': ['#4a4455', '#f0eff5'] };
+    const todosD = DECIDIR.map((d) => ({ ...d, feito: !!feitosD[d.id] }));
+    const ordenadosD = todosD.filter((d) => !d.feito).concat(todosD.filter((d) => d.feito));
+    const pendD = todosD.filter((d) => !d.feito).length;
+    const visD = this.state.decidirOpen ? ordenadosD : ordenadosD.slice(0, 3);
+    const decidir = visD.map((d) => ({
+      n: DECIDIR.findIndex((x) => x.id === d.id) + 1,
+      quem: d.quem, texto: d.texto, rec: d.rec, temRec: !!d.rec && !d.feito,
+      tag: d.tag, temTag: !!d.tag && !d.feito, tagCor: TAG[d.tom][0], tagBg: TAG[d.tom][1],
+      cor: d.feito ? '#8b8497' : '#151c27', deco: d.feito ? 'line-through' : 'none',
+      numBg: d.feito ? '#0f7a5a' : '#ece6fa', numCor: d.feito ? '#ffffff' : '#4c1d95',
+      botao: d.feito ? 'Desfazer' : 'Feito',
+      toggle: () => this.setState({ feitos: { ...this.state.feitos, [d.id]: !this.state.feitos[d.id] } })
+    }));
+    const decidirResumo = pendD === 0 ? 'tudo decidido' : pendD + (pendD === 1 ? ' pendência' : ' pendências');
+    const agenteHoje = [
+      { acao: 'Sispnaes', texto: 'ler o relatório de lições aprendidas e montar a versão executiva em rascunho, para você revisar e entregar à DAE.' }
+    ];
+    const preparo = [
+      { dia: 'Qua', texto: 'retirar o carro na Localiza, 9h' },
+      { dia: 'Qui', texto: 'Dia do Servidor em BSF, 9h · devolver o carro, 17h30' },
+      { dia: 'Sex', texto: 'folga (ponto facultativo)' }
+    ];
+    const avisos = [
+      { texto: 'Grupo “Prod em números”: recebe às 8h a mensagem sobre o ponto facultativo, se você ainda quiser.' },
+      { texto: 'Não li hoje: e-mail e SIGFAPES.' }
+    ];
+
+    const elevacoes = [
+      { acao: 'Elaborar Workshop de IA com Google Workspace (IFTO Gurupi)', ativo: 'Guia de capacitação “IA no Google Workspace para Gestão Pública” (slides, dinâmica CCF e caderno de exercícios)', falta: 'exportar os artefatos v20/v17 como kit aberto (PDF ou Markdown)', custo: 'uma tarde' },
+      { acao: 'Estudar Concurso de Inovação do Setor Público da ENAP', ativo: 'Estudo de caso e relato técnico da submissão do MAGO ao concurso', falta: 'revisar o Google Doc, remover dados sensíveis e publicar', custo: 'uma tarde' },
+      { acao: 'Catálogo Local — Produto Digital de Renda Complementar', ativo: 'Checklist de integridade e LGPD para servidores que criam soluções com IA', falta: 'compilar as respostas do formulário SeCI em um checklist prático', custo: 'uma tarde' }
+    ];
+
+    return {
+      proxBg: est.bg, proxBorda: est.borda, proxCor: est.cor, proxRotulo: est.rotulo, proxClasse: est.classe, proxTitulo, proxTempo, agoraLeft, horaLabel: fmt(agoraMin),
+      decidir, decidirResumo, agenteHoje, preparo, avisos,
+      decidirOpen: !!s.decidirOpen, temMaisDecidir: todosD.length > 3,
+      decidirMaisLabel: s.decidirOpen ? 'Mostrar só 3' : 'Ver mais ' + (todosD.length - 3),
+      toggleDecidir: () => this.setState({ decidirOpen: !this.state.decidirOpen }),
+      temConflito: true, conflitoTexto: 'Conselho de Escola 13h50 bate com a acupuntura 13h30. A reunião não está na agenda.',
+      accent, ativas, espera, semana, caminhadas, blocos, agenda, lembretes, prazos, elevacoes,
+      atencaoOpen: s.atencaoOpen, atencaoLabel: s.atencaoOpen ? 'Recolher' : 'Ver sugestões',
+      esperaOpen: s.esperaOpen, esperaChevron: s.esperaOpen ? 'rotate(180deg)' : 'none',
+      esperaCount: espera.length, soClaude: !!s.soClaude,
+      filtroBg: s.soClaude ? '#4c1d95' : '#ffffff', filtroCor: s.soClaude ? '#ffffff' : '#4c1d95', filtroBorda: s.soClaude ? '#4c1d95' : '#c9bfe6',
+      toggleSoClaude: () => this.setState({ soClaude: !this.state.soClaude }),
+      agendaOpen: s.agendaOpen, agendaChevron: s.agendaOpen ? 'rotate(180deg)' : 'none',
+      toggleAtencao: () => this.setState({ atencaoOpen: !this.state.atencaoOpen }),
+      toggleEspera: () => this.setState({ esperaOpen: !this.state.esperaOpen }),
+      toggleAgenda: () => this.setState({ agendaOpen: !this.state.agendaOpen })
+    };
+  }
+}
+</script>
+</body>
+</html>

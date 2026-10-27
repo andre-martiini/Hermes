@@ -1,0 +1,30 @@
+{
+  "name": "resolver_item_briefing",
+  "description": "Marca um item de decidir do briefing do dia como 'feito' ou 'dispensado' (grava resolvido_em), ou o devolve a 'pendente' (desfazer). Use depois de executar o que o item pedia, ou quando o André disser que já resolveu. Repetir a mesma marca não muda nada. Não altera a ação, a etapa nem a fila de origem: isso é por editar_etapa, resolver_item_atencao etc.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "YYYY-MM-DD. Padrão: hoje (fuso de Brasília)"
+      },
+      "id": {
+        "type": "string",
+        "description": "Id do item em decidir (visível em obter_briefing_dia)"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "feito",
+          "dispensado",
+          "pendente"
+        ],
+        "description": "'pendente' desfaz"
+      }
+    },
+    "required": [
+      "id",
+      "status"
+    ]
+  }
+}

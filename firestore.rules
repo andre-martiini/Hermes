@@ -70,6 +70,20 @@ service cloud.firestore {
       return collectionId in ['atencao', 'promessas_abertas'];
     }
 
+    // briefing_dia/{YYYY-MM-DD}: o briefing das 05:00 em itens, escrito pelo
+    // agente (Admin SDK) e lido pelo Painel do dia. O cliente do dono só
+    // enriquece o que já existe e só em `decidir` (botão Feito/Desfazer, que
+    // grava status e resolvido_em): não cria o documento, não apaga e não mexe
+    // em foco, preparo, avisos nem no resto — esse conteúdo nasce no servidor.
+    // A condição vive DENTRO do catch-all abaixo (um bloco `match` irmão com
+    // `if false` seria um no-op, como explicado mais adiante).
+    function escritaDoDonoEmBriefingDia() {
+      return resource != null
+        && request.resource != null
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['decidir', 'atualizado_em']);
+    }
+
     // Exceção pontual e explícita dentro de "system" (achado do Codex na
     // revisão da PR #190, não coberto pela busca inicial da sub-entrega
     // 5/N — ver decisão registrada em docs/autonomia/execucao.md): dois
@@ -122,7 +136,8 @@ service cloud.firestore {
         && !isColecaoNegadaPorCompleto(collectionId);
       allow write: if internalUser()
         && !isColecaoNegadaPorCompleto(collectionId)
-        && !isColecaoSomenteLeitura(collectionId);
+        && !isColecaoSomenteLeitura(collectionId)
+        && (collectionId != 'briefing_dia' || escritaDoDonoEmBriefingDia());
     }
   }
 }

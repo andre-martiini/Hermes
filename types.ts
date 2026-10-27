@@ -30,6 +30,16 @@ export type TipoAcao = 'fast' | 'deep';
 
 export type SubtarefaEstado = 'pendente' | 'em_andamento' | 'aguardando_terceiro' | 'feito';
 
+/**
+ * Quem executa a etapa. Ausente = `humano`.
+ * `agente`: o agente faz sozinho. `agente_aprovado`: o agente prepara e o André aprova.
+ * O texto na tela é "agente", nunca o nome de um produto: qualquer IA com o conector pode executar.
+ */
+export type EtapaExecutor = 'agente' | 'agente_aprovado' | 'humano';
+
+/** Quem fixou o executor. Etapa fixada pelo André (`usuario`) o agente não sobrescreve. */
+export type EtapaExecutorDefinidoPor = 'agente' | 'usuario';
+
 export interface ActionPlanItem {
     id: string;
     text: string;
@@ -43,6 +53,12 @@ export interface ActionPlanItem {
     data_prevista?: string;
     /** Adiamentos desta etapa. Etapa aguardando terceiro não acumula. */
     degradation_count?: number;
+    /** Ausente = `humano`. Valor desconhecido também lê como `humano`. */
+    executor?: EtapaExecutor;
+    /** Como o agente faria, em uma frase (até 140 caracteres). */
+    executor_como?: string;
+    /** Corrigido na tela => `usuario`; o agente não sobrescreve. */
+    executor_definido_por?: EtapaExecutorDefinidoPor;
 }
 
 export interface ChatMessage {
@@ -1278,6 +1294,9 @@ export interface ResumoAcao {
         data_prevista: string | null;
         aguardando_de: string | null;
         degradation_count: number;
+        /** Só quando o agente faz ou prepara a etapa; ausente = `humano`. */
+        executor?: EtapaExecutor;
+        executor_como?: string;
     } | null;
     /**
      * Toda subtarefa da ação (não só a de hoje) que está aguardando terceiro —
@@ -1289,6 +1308,8 @@ export interface ResumoAcao {
         texto: string | null;
         aguardando_de: string | null;
         data_prevista: string | null;
+        executor?: EtapaExecutor;
+        executor_como?: string;
     }>;
 }
 
@@ -1460,4 +1481,56 @@ export interface ResumoMatinal {
     };
     /** Gravado pela UI na primeira abertura do dia. */
     visto_em?: string;
+}
+
+// ---------------------------------------------------------------------------
+// briefing_dia/{YYYY-MM-DD} — o briefing das 05:00 em itens (Painel do dia)
+// ---------------------------------------------------------------------------
+
+/** De onde vem um item de Decidir. A tela confere a origem ao vivo e esconde o item resolvido. */
+export type BriefingOrigem = 'fila_atencao' | 'whatsapp' | 'etapa' | 'acao';
+
+export type BriefingDecidirStatus = 'pendente' | 'feito' | 'dispensado';
+
+export interface BriefingDecidirItem {
+    id: string;
+    ordem?: number;
+    quem: string;
+    texto: string;
+    recomendacao?: string;
+    tag?: string;
+    origem: BriefingOrigem;
+    /** Id do item de origem (item da fila, conversa, etapa ou ação). */
+    ref: string;
+    /** Ação ligada ao item. Obrigatório com origem `etapa` (então `ref` é o id da etapa). */
+    acao_id?: string;
+    status?: BriefingDecidirStatus;
+    /** Texto ISO. Nunca um sentinela de servidor: o Firestore não aceita dentro de array. */
+    resolvido_em?: string | null;
+}
+
+export interface BriefingEuFaco {
+    id?: string;
+    acao_id: string;
+    texto: string;
+    status?: 'proposto' | 'aprovado' | 'pronto' | 'recusado';
+}
+
+export interface BriefingForaDaAgenda {
+    titulo: string;
+    inicio: string;
+    fim?: string | null;
+    motivo?: string;
+}
+
+export interface BriefingDia {
+    data: string;
+    hoje?: Array<{ acao_id: string; motivo?: string }>;
+    decidir?: BriefingDecidirItem[];
+    eu_faco?: BriefingEuFaco[];
+    /** `dia` é YYYY-MM-DD; o "em N dias" a tela calcula, nunca vem gravado. */
+    preparo?: Array<{ dia: string; texto: string }>;
+    fora_da_agenda?: BriefingForaDaAgenda[];
+    avisos?: Array<{ tipo: 'nao_li' | 'conversa' | 'dado_suspeito'; texto: string }>;
+    menores?: number;
 }

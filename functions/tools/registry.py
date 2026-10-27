@@ -31,7 +31,7 @@ _CATALOG: dict[str, str] = {
     "atualizar_personalidade": "Atualiza a personalidade dinamica do copiloto Gaspar",
     "resolver_conflito_procedimento": "Valida ou resolve um procedimento marcado para revisao",
     "editar_plano_acao": "Edita etapas do plano de acao: so as etapas enviadas mudam (as outras ficam intactas); remover exige remover=true ou modo=substituir com confirmar_remocao",
-    "editar_etapa": "Altera uma unica etapa do plano de acao (estado, texto, data prevista, de quem se espera) sem tocar nas outras",
+    "editar_etapa": "Altera uma unica etapa do plano de acao (estado, texto, data prevista, de quem se espera, quem executa) sem tocar nas outras",
     "preparar_edicao_acao": "Prepara uma proposta de edicao de campos de uma tarefa sem gravar no banco",
     "preparar_edicao_em_lote": "Prepara proposta de edicao de campos para multiplas tarefas simultaneamente sem gravar no banco",
     "gerar_relatorio": "Gera um relatorio estruturado em Markdown e salva no sistema",
@@ -51,6 +51,10 @@ _CATALOG: dict[str, str] = {
     # Detector de subproduto: o trabalho ja feito que rende um ativo com um passo
     # a mais. Sem a alca de decisao as sugestoes ficam na fila sem resposta, e a
     # que mais importa e "nunca" — sem ela o sistema repete e vira barulho.
+    # Painel do dia: o briefing das 05:00 em itens estruturados (coleção briefing_dia).
+    "registrar_briefing_dia": "Grava ou atualiza o briefing do dia (Decidir, Foco, o que o agente prepara, Preparo, fora da agenda, Avisos) para o Painel do dia; decidir e eu_faco mesclam por id e cada item aponta para a origem",
+    "obter_briefing_dia": "Le o briefing estruturado de um dia (somente leitura): itens de Decidir com status, Foco, o que o agente prepara, Preparo e Avisos",
+    "resolver_item_briefing": "Marca um item de Decidir do briefing do dia como feito, dispensado ou de volta a pendente, com a hora da resolucao",
     "consultar_elevacoes_sugeridas": "Lista as elevacoes sugeridas que esperam decisao, com o material que ja existe e o objetivo servido",
     "decidir_elevacao": "Aceita, adia ou descarta para sempre uma elevacao sugerida",
     "consultar_promocoes_autonomia_sugeridas": "Lista sugestões de promoção de autonomia por tipo de rascunho WhatsApp que esperam decisão",
@@ -251,6 +255,8 @@ _NEEDS_CONFIRMATION: set[str] = {
     "guardar_ideia",
     "anotar_no_diario",
     "registrar_observacao_externa",
+    "registrar_briefing_dia",
+    "resolver_item_briefing",
     "criar_objetivo_estrategico",
     "editar_objetivo_estrategico",
     "gerenciar_item_estrategico",
@@ -1743,6 +1749,15 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                                 "data_prevista": {"type": ["string", "null"]},
                                 "aguardando_de": {"type": "string"},
                                 "degradation_count": {"type": "integer"},
+                                "executor": {
+                                    "type": "string",
+                                    "enum": ["agente", "agente_aprovado", "humano"],
+                                },
+                                "executor_como": {"type": "string"},
+                                "executor_definido_por": {
+                                    "type": "string",
+                                    "enum": ["agente", "usuario"],
+                                },
                             },
                             "required": ["id", "texto", "estado", "data_prevista"],
                             "additionalProperties": False,

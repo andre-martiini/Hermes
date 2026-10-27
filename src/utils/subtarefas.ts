@@ -14,7 +14,7 @@
  * tela passa por `comEstado`, que mantém `completed` espelhando `feito`.
  */
 
-import type { ActionPlanItem, SubtarefaEstado } from '../../types';
+import type { ActionPlanItem, EtapaExecutor, SubtarefaEstado } from '../../types';
 
 export const ESTADOS: SubtarefaEstado[] = [
   'pendente',
@@ -74,6 +74,60 @@ export const estaFeita = (item: any): boolean => estadoDaSubtarefa(item) === 'fe
 /** Texto da etapa, aceitando as duas chaves que circulam no sistema. */
 export const textoDaSubtarefa = (item: any): string =>
   String(item?.text || item?.texto || '').trim();
+
+export const EXECUTORES: EtapaExecutor[] = ['agente', 'agente_aprovado', 'humano'];
+
+/** Teto de `executor_como`, igual a `LIMITE_EXECUTOR_COMO` em `subtarefas.py`. */
+export const LIMITE_EXECUTOR_COMO = 140;
+
+/** Etiquetas da etapa. `humano` não tem: a etapa só do André fica sem marca. */
+export const ROTULO_EXECUTOR: Record<EtapaExecutor, string> = {
+  agente: 'Agente faz',
+  agente_aprovado: 'Agente prepara, você aprova',
+  humano: 'Só você',
+};
+
+/**
+ * Executor da etapa; ausente ou desconhecido lê como `humano`.
+ * Espelho de `subtarefas.executor_de`.
+ */
+export const executorDaEtapa = (item: any): EtapaExecutor => {
+  const bruto = String(item?.executor || '').trim().toLowerCase();
+  return (EXECUTORES as string[]).includes(bruto) ? (bruto as EtapaExecutor) : 'humano';
+};
+
+/** Se o agente faz ou prepara a etapa. Espelho de `subtarefas.e_do_agente`. */
+export const eDoAgente = (item: any): boolean => executorDaEtapa(item) !== 'humano';
+
+/**
+ * Etapas EM ABERTO que o agente faz ou prepara.
+ *
+ * Calculado na leitura, nunca gravado: espelho de `subtarefas.contar_para_agente`.
+ */
+export const contarParaAgente = (plano?: ActionPlanItem[] | null): number =>
+  (plano || []).filter(i => textoDaSubtarefa(i) && !estaFeita(i) && eDoAgente(i)).length;
+
+/**
+ * A etapa com o executor corrigido pelo André na tela.
+ *
+ * Grava `executor_definido_por: 'usuario'` — é a marca que impede o agente de
+ * reescrever a escolha. `humano` explícito fica gravado de propósito (apagar o
+ * campo perderia a marca). `executor_como` é mantido, a menos que a etapa
+ * passe a ser do André: aí a frase "como o agente faria" perde o sentido e sai.
+ */
+export const comExecutor = (item: ActionPlanItem, executor: EtapaExecutor): ActionPlanItem => {
+  const saida: ActionPlanItem = { ...item, executor, executor_definido_por: 'usuario' };
+  if (executor === 'humano') delete saida.executor_como;
+  else if (saida.executor_como) saida.executor_como = saida.executor_como.slice(0, LIMITE_EXECUTOR_COMO);
+  return saida;
+};
+
+/** O plano com o executor de UMA etapa corrigido pelo André; as outras ficam como estão. */
+export const comExecutorNoPlano = (
+  plano: ActionPlanItem[],
+  etapaId: string,
+  executor: EtapaExecutor,
+): ActionPlanItem[] => plano.map(i => (i.id === etapaId ? comExecutor(i, executor) : i));
 
 /**
  * Precedência da aparência.
@@ -145,6 +199,48 @@ export const comEstadoExplicito = (item: ActionPlanItem): ActionPlanItem =>
 export const contarSubtarefas = (plano?: ActionPlanItem[] | null): [number, number] => {
   const itens = (plano || []).filter(i => textoDaSubtarefa(i));
   return [itens.filter(estaFeita).length, itens.length];
+};
+
+/** Se alguma etapa marcou data própria. Espelho de `subtarefas.plano_tem_datas`. */
+export const planoTemDatas = (plano?: ActionPlanItem[] | null): boolean =>
+  (plano || []).some(i => String(i?.data_prevista || '').trim());
+
+/**
+ * Data da etapa, herdando a da macroação quando cabe. Espelho de
+ * `subtarefas.data_prevista_de`: num plano misto (algumas etapas com data, outras
+ * sem) a etapa sem data não herda — é a que ainda não foi posicionada.
+ */
+export const dataPrevistaDe = (
+  item: ActionPlanItem,
+  dataLimiteAcao?: string | null,
+  plano?: ActionPlanItem[] | null,
+): string => {
+  const propria = String(item?.data_prevista || '').trim();
+  if (propria) return propria;
+  if (plano && planoTemDatas(plano)) return '';
+  return String(dataLimiteAcao || '').trim();
+};
+
+/**
+ * A etapa que vale agora: a de menor data ainda não concluída; empate pela ordem
+ * do plano; etapa sem dia num plano com datas vai para o fim da fila. Espelho de
+ * `subtarefas.subtarefa_corrente` — é ela que decide se a ação está em espera
+ * (`estado === 'aguardando_terceiro'`), e o painel e o resumo precisam concordar.
+ */
+export const subtarefaCorrente = (
+  plano?: ActionPlanItem[] | null,
+  dataLimiteAcao?: string | null,
+): ActionPlanItem | null => {
+  const itens = plano || [];
+  let melhor: { data: string; ordem: number; item: ActionPlanItem } | null = null;
+  itens.forEach((item, ordem) => {
+    if (!item || !textoDaSubtarefa(item) || estaFeita(item)) return;
+    const data = dataPrevistaDe(item, dataLimiteAcao, itens) || '9999-12-31';
+    if (!melhor || data < melhor.data || (data === melhor.data && ordem < melhor.ordem)) {
+      melhor = { data, ordem, item };
+    }
+  });
+  return melhor ? (melhor as { item: ActionPlanItem }).item : null;
 };
 
 export type ExecutionLane = 'avanco' | 'continuo' | 'aguardando_terceiro';

@@ -1,6 +1,6 @@
 {
   "name": "editar_etapa",
-  "description": "Altera UMA etapa do plano de ação sem tocar nas outras — o jeito certo de marcar uma etapa como feita, em andamento ou aguardando terceiro, dar data própria a ela ou reescrever seu texto. Envie só os campos que mudam; campo omitido preserva o valor atual; null (ou \"\") em data_prevista ou aguardando_de apaga o campo. etapa_id é o id da etapa (visível em obter_acao); id desconhecido é recusado listando as etapas existentes. Devolve 'OK|' seguido do que mudou ({\"alteradas\": {id: {campo: [antes, depois]}}}) ou 'OK|Nenhuma etapa mudou'. Para adicionar, remover ou reordenar etapas use editar_plano_acao.",
+  "description": "Altera UMA etapa do plano de ação sem tocar nas outras — o jeito certo de marcar uma etapa como feita, em andamento ou aguardando terceiro, dar data própria a ela, reescrever seu texto ou dizer quem a executa (executor: agente, agente_aprovado ou humano, com executor_como em uma frase). Envie só os campos que mudam; campo omitido preserva o valor atual; null (ou \"\") em data_prevista, aguardando_de ou executor_como apaga o campo. etapa_id é o id da etapa (visível em obter_acao); id desconhecido é recusado listando as etapas existentes. Devolve 'OK|' seguido do que mudou ({\"alteradas\": {id: {campo: [antes, depois]}}}) ou 'OK|Nenhuma etapa mudou'. Para adicionar, remover ou reordenar etapas use editar_plano_acao.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -39,6 +39,20 @@
       "justificativa_diario": {
         "type": "string",
         "description": "Motivo, gravado no diário da ação. Opcional: sem ele o diário registra o que mudou"
+      },
+      "executor": {
+        "type": "string",
+        "enum": [
+          "agente",
+          "agente_aprovado",
+          "humano"
+        ],
+        "description": "Quem executa a etapa: 'agente' (o agente faz sozinho), 'agente_aprovado' (o agente prepara e o André aprova: mensagem a terceiro, rascunho, merge) ou 'humano' (só o André; é o padrão quando omitido). Omitir preserva. Etapa cujo executor o André fixou na tela é recusada: não tente mudá-la."
+      },
+      "executor_como": {
+        "type": "string",
+        "nullable": true,
+        "description": "Como o agente faria, em UMA frase curta (até 140 caracteres), verbo no infinitivo. Ex.: 'Ler o relatório e montar a versão executiva em rascunho'. null (ou \"\") apaga; omitir preserva."
       }
     },
     "required": [

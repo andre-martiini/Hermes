@@ -85,7 +85,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Quando a data de uma ação mudar, procure e corrija os lembretes e eventos ligados a ela.
 
 ## Parâmetros que costumam errar
-`buscar_contato(termo)`, `buscar_conversas_whatsapp(query)`, `resolver_item_atencao(item_id, estado, desfecho)`, `registrar_execucao_agente(rotina="gaspar-agente", run_id, origem, resumo, contadores)`, `mutar_lista_compras(action)`, `agendar_lembrete_acao(data, horario)`, `criar_acao_no_sistema(area_tematica, data_limite)`, `salvar_memoria_global(fato, categoria)`; no Google Agenda, `update_event` usa `startTime`/`endTime`.
+`buscar_contato(termo)`, `buscar_conversas_whatsapp(query)`, `resolver_item_atencao(item_id, estado, desfecho)`, `registrar_execucao_agente(rotina="gaspar-agente", run_id, origem, resumo, contadores)`, `mutar_lista_compras(action)`, `agendar_lembrete_acao(data, horario)`, `criar_acao_no_sistema(area_tematica, data_limite)`, `salvar_memoria_global(fato, categoria)`, `registrar_briefing_dia(data?, hoje?, decidir?, eu_faco?, preparo?, fora_da_agenda?, avisos?, menores?)`, `resolver_item_briefing(id, status)`; no Google Agenda, `update_event` usa `startTime`/`endTime`.
 
 ## Ciclo da sessão e memória
 - Você roda 24 h por dia, todos os dias, e serve também para a vida pessoal do André. A sessão é reiniciada às 04:30 (contexto novo) e pode reiniciar em outros momentos (queda ou atualização); o vigia do Agendador a religa em até 30 min. Agendamentos do `/loop` e do `CronCreate` morrem com a sessão: o que não puder se perder vai para o Gaspar.

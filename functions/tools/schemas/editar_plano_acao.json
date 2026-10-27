@@ -42,6 +42,20 @@
               "nullable": true,
               "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'. null (ou \"\") apaga; omitir preserva."
             },
+            "executor": {
+              "type": "string",
+              "enum": [
+                "agente",
+                "agente_aprovado",
+                "humano"
+              ],
+              "description": "Quem executa a etapa: 'agente' (o agente faz sozinho), 'agente_aprovado' (o agente prepara e o André aprova: mensagem a terceiro, rascunho, merge) ou 'humano' (só o André; é o padrão quando omitido). Omitir preserva. Etapa cujo executor o André fixou na tela é recusada: não tente mudá-la."
+            },
+            "executor_como": {
+              "type": "string",
+              "nullable": true,
+              "description": "Como o agente faria, em UMA frase curta (até 140 caracteres), verbo no infinitivo. Ex.: 'Ler o relatório e montar a versão executiva em rascunho'. null (ou \"\") apaga; omitir preserva."
+            },
             "remover": {
               "type": "boolean",
               "description": "true remove esta etapa do plano (exige o 'id'; não combine com outra edição da mesma etapa). Ela fica recuperável em etapas_removidas"

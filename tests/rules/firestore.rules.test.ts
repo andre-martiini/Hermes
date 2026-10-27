@@ -61,7 +61,7 @@
  * máquina do André, ou um runner de CI com rede irrestrita) antes de
  * considerar este teste validado de ponta a ponta.
  */
-import { afterAll, beforeAll, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -70,7 +70,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 const PROJECT_ID = 'demo-hermes-rules-test';
 const DONO_EMAIL = 'andre.martiini@gmail.com';
@@ -266,5 +266,64 @@ describe('firestore.rules — fluxos legítimos do frontend não quebram (achado
     const ref = doc(db, 'promessas_abertas', 'item-teste');
     await assertSucceeds(getDoc(ref));
     await assertFails(setDoc(ref, { titulo: 'teste' }));
+  });
+});
+
+
+describe('firestore.rules — briefing_dia (Painel do dia)', () => {
+  const dia = '2026-10-27';
+  const donoDb = () =>
+    testEnv
+      .authenticatedContext('dono-uid', { email: DONO_EMAIL, email_verified: true })
+      .firestore();
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'briefing_dia', dia), {
+        data: dia,
+        decidir: [{ id: 'd1', status: 'pendente', resolvido_em: null }],
+        avisos: [{ tipo: 'nao_li', texto: 'Não li hoje: e-mail.' }],
+        atualizado_em: '2026-10-27T08:00:00Z',
+      });
+    });
+  });
+
+  it('o dono lê o briefing', async () => {
+    await assertSucceeds(getDoc(doc(donoDb(), 'briefing_dia', dia)));
+  });
+
+  it('o dono marca Feito: só decidir e atualizado_em mudam', async () => {
+    await assertSucceeds(
+      updateDoc(doc(donoDb(), 'briefing_dia', dia), {
+        decidir: [{ id: 'd1', status: 'feito', resolvido_em: '2026-10-27T09:00:00Z' }],
+        atualizado_em: '2026-10-27T09:00:00Z',
+      }),
+    );
+  });
+
+  it('o dono não altera o que o agente escreve (avisos) nem acrescenta campo', async () => {
+    const ref = doc(donoDb(), 'briefing_dia', dia);
+    await assertFails(updateDoc(ref, { avisos: [] }));
+    await assertFails(updateDoc(ref, { hoje: [{ acao_id: 'x' }] }));
+    await assertFails(
+      updateDoc(ref, { decidir: [{ id: 'd1', status: 'feito' }], avisos: [] }),
+    );
+  });
+
+  it('o dono não cria nem apaga o documento pelo cliente', async () => {
+    await assertFails(setDoc(doc(donoDb(), 'briefing_dia', '2026-10-28'), { decidir: [] }));
+    await assertFails(deleteDoc(doc(donoDb(), 'briefing_dia', dia)));
+  });
+
+  it('usuário público e não-dono não leem nem escrevem', async () => {
+    const publico = testEnv.unauthenticatedContext().firestore();
+    const terceiro = testEnv
+      .authenticatedContext('terceiro-uid', { email: 'terceiro@example.com', email_verified: true })
+      .firestore();
+    for (const db of [publico, terceiro]) {
+      const ref = doc(db, 'briefing_dia', dia);
+      await assertFails(getDoc(ref));
+      await assertFails(updateDoc(ref, { decidir: [] }));
+    }
   });
 });

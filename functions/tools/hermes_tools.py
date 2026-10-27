@@ -2615,6 +2615,17 @@ def obter_acao(ctx: ToolContext, args: dict):
             etapa["aguardando_de"] = i["aguardando_de"]
         if int(i.get("degradation_count") or 0):
             etapa["degradation_count"] = int(i["degradation_count"])
+        # Ausente = humano: so a etapa que o agente faz ou prepara carrega a marca.
+        if subtarefas.e_do_agente(i):
+            etapa["executor"] = subtarefas.executor_de(i)
+            if str(i.get("executor_como") or "").strip():
+                etapa["executor_como"] = str(i["executor_como"]).strip()
+            if subtarefas.definido_por_de(i):
+                etapa["executor_definido_por"] = subtarefas.definido_por_de(i)
+        elif subtarefas.definido_por_de(i) == subtarefas.DEFINIDO_POR_USUARIO:
+            # `humano` fixado pelo Andre: o agente precisa saber que nao pode mudar.
+            etapa["executor"] = subtarefas.EXECUTOR_HUMANO
+            etapa["executor_definido_por"] = subtarefas.DEFINIDO_POR_USUARIO
         etapas.append(etapa)
 
     return {
@@ -2657,6 +2668,24 @@ def _registrar_saude(ctx: ToolContext, args: dict):
     from tools.registrar_saude import registrar
 
     return registrar(ctx, args)
+
+
+def _registrar_briefing_dia(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.registrar(ctx.db, args)
+
+
+def _obter_briefing_dia(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.obter(ctx.db, args)
+
+
+def _resolver_item_briefing(ctx: ToolContext, args: dict):
+    import briefing_dia
+
+    return briefing_dia.resolver_item(ctx.db, args)
 
 
 def _registrar_observacao_externa(ctx: ToolContext, args: dict):
@@ -3204,6 +3233,9 @@ _HANDLERS: dict = {
     "consultar_saude": _consultar_saude,
     "registrar_saude": _registrar_saude,
     "registrar_observacao_externa": _registrar_observacao_externa,
+    "registrar_briefing_dia": _registrar_briefing_dia,
+    "obter_briefing_dia": _obter_briefing_dia,
+    "resolver_item_briefing": _resolver_item_briefing,
     "consultar_atividades_mes": _consultar_atividades_mes,
     "consultar_saude_integracoes": _consultar_saude_integracoes,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,

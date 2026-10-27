@@ -166,7 +166,8 @@ def editar_plano_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar",
             if modo == subtarefas.MODO_PARCIAL and not entrada:
                 return None, ("ERRO|novo_plano veio vazio e nada foi gravado. As etapas vao em "
                               "`novo_plano` (lista de objetos {id?, text?, estado?, data_prevista?, "
-                              "aguardando_de?, remover?}); no modo padrao so as etapas enviadas mudam.")
+                              "aguardando_de?, executor?, executor_como?, remover?}); no modo padrao so as etapas "
+                              "enviadas mudam.")
             if copiloto and modo == subtarefas.MODO_PARCIAL:
                 itens = [i for i in entrada if isinstance(i, dict)]
                 ids_enviados = {str(i.get("id") or "").strip() for i in itens}
@@ -282,7 +283,8 @@ def editar_plano_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar",
     return _na_transacao(db.transaction())
 
 
-_CAMPOS_EDITAR_ETAPA = ("text", "estado", "data_prevista", "aguardando_de")
+_CAMPOS_EDITAR_ETAPA = ("text", "estado", "data_prevista", "aguardando_de",
+                        "executor", "executor_como")
 
 
 def editar_etapa_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar") -> str:
@@ -308,8 +310,8 @@ def editar_etapa_da_tarefa(db, slots: dict, *, origem: str = "Telegram Gaspar") 
     if "texto" in slots and "text" not in item:
         item["text"] = slots["texto"]
     if len(item) == 1:
-        return ("ERRO|Nada para mudar: envie ao menos um de estado, text, data_prevista "
-                "ou aguardando_de.")
+        return ("ERRO|Nada para mudar: envie ao menos um de estado, text, data_prevista, "
+                "aguardando_de, executor ou executor_como.")
     estado = str(item.get("estado") or "").strip().lower()
     if "estado" in item and item["estado"] is not None and estado not in subtarefas.ESTADOS:
         return (f"ERRO|estado {item['estado']!r} invalido. Use um de: "

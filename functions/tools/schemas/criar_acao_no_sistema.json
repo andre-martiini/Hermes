@@ -41,7 +41,7 @@
       },
       "plano_acao": {
         "type": "array",
-        "description": "Etapas do plano. Aceita texto simples (\"Passo 1\") ou objeto com campos opcionais: data_prevista (YYYY-MM-DD, herda a data da ação se omitida), estado (pendente|em_andamento|aguardando_terceiro|feito) e aguardando_de.",
+        "description": "Etapas do plano. Aceita texto simples (\"Passo 1\") ou objeto com campos opcionais: data_prevista (YYYY-MM-DD, herda a data da ação se omitida), estado (pendente|em_andamento|aguardando_terceiro|feito) aguardando_de, executor (agente|agente_aprovado|humano) e executor_como.",
         "items": {
           "anyOf": [
             {
@@ -70,6 +70,19 @@
                 "aguardando_de": {
                   "type": "string",
                   "description": "De quem se espera"
+                },
+                "executor": {
+                  "type": "string",
+                  "enum": [
+                    "agente",
+                    "agente_aprovado",
+                    "humano"
+                  ],
+                  "description": "Quem executa a etapa: 'agente' (o agente faz sozinho), 'agente_aprovado' (o agente prepara e o André aprova: mensagem a terceiro, rascunho, merge) ou 'humano' (só o André; é o padrão quando omitido). Omitir preserva. Etapa cujo executor o André fixou na tela é recusada: não tente mudá-la."
+                },
+                "executor_como": {
+                  "type": "string",
+                  "description": "Como o agente faria, em UMA frase curta (até 140 caracteres), verbo no infinitivo. Ex.: 'Ler o relatório e montar a versão executiva em rascunho'. null (ou \"\") apaga; omitir preserva."
                 }
               },
               "required": [
