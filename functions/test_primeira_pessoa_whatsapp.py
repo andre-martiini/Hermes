@@ -24,9 +24,6 @@ class TestConferencia(unittest.TestCase):
 
     def test_barra_cada_regra_do_dono(self):
         casos = {
-            "Sou o assistente do André": "assistente",
-            "Aqui é o Gaspar": "assistente",
-            "Resposta da IA": "assistente",
             "Pode me ligar amanhã?": "ligação",
             "Fazemos uma videochamada?": "ligação",
             "Pode deixar que eu pago amanhã": "pagamento",
@@ -38,11 +35,13 @@ class TestConferencia(unittest.TestCase):
             with self.subTest(texto=texto):
                 self.assertTrue(any(motivo in p for p in problemas(texto)), problemas(texto))
 
-    def test_secretario_pode_se_identificar_mas_as_outras_regras_valem(self):
-        self.assertEqual(problemas("Sou o Gaspar, assistente virtual do André.", permite_identidade=True), [])
-        self.assertTrue(problemas("Sou o assistente do André, pode me ligar?", permite_identidade=True))
-        # sem o parâmetro (Modo Objetivo) a identidade continua barrada
-        self.assertTrue(problemas("Sou o assistente do André"))
+    def test_identificar_se_como_assistente_nao_e_barrado_mas_as_outras_regras_valem(self):
+        # Desde 28/10/2026 o Gaspar se identifica nos dois modos: a trava de identidade saiu.
+        for texto in ("Sou o Gaspar, assistente virtual do André.", "Aqui é um robô, falo em nome do André.",
+                      "Resposta da IA do André."):
+            with self.subTest(texto=texto):
+                self.assertEqual(problemas(texto), [])
+        self.assertTrue(problemas("Sou o assistente do André, pode me ligar?"))
 
     def test_numero_liberado_passa_e_dado_vetado_nao(self):
         self.assertEqual(problemas("A carteirinha é 123456789012", pode_informar="carteirinha 123456789012"), [])
@@ -53,6 +52,56 @@ class TestConferencia(unittest.TestCase):
                       problemas("Pode ser quinta às 9h?", ja_enviadas=["pode ser quinta às 9h?"]))
         self.assertEqual(problemas("   "), ["mensagem vazia"])
         self.assertTrue(any("longa" in p for p in problemas("a" * 1300)))
+
+
+class TestComoAssistente(unittest.TestCase):
+    """`schedule_whatsapp_message(como_assistente=True)`: o agente residente manda com a identificação do Gaspar."""
+
+    def _enviada(self, texto="Oi, Carlos", **kw):
+        from tools.schedule_whatsapp_message import schedule_whatsapp_message
+
+        db = _MockDb()
+        agora = dt.datetime.now(dt.timezone.utc).isoformat()
+        resposta = schedule_whatsapp_message(db, CHAT, texto, agora, idempotency_key="job", **kw)
+        doc = db.collection(oa.COLLECTION)._docs.get("job")
+        return (doc or {}).get("content"), resposta
+
+    def test_com_o_parametro_sai_com_o_prefixo_uma_vez_so(self):
+        esperado = f"{mensagens_gaspar.PREFIXO_IDENTIFICACAO}\nOi, Carlos"
+        self.assertEqual(self._enviada(como_assistente=True)[0], esperado)
+        self.assertEqual(self._enviada(texto=esperado, como_assistente=True)[0], esperado)
+
+    def test_sem_o_parametro_a_mensagem_sai_como_veio(self):
+        # As sessões do próprio André escrevem com as palavras e o sim dele: nada muda para elas.
+        self.assertEqual(self._enviada()[0], "Oi, Carlos")
+        self.assertEqual(self._enviada(como_assistente=False)[0], "Oi, Carlos")
+
+    def test_mensagem_vazia_continua_recusada_com_o_parametro(self):
+        conteudo, resposta = self._enviada(texto="   ", como_assistente=True)
+        self.assertIsNone(conteudo)
+        self.assertTrue(resposta.startswith("ERRO|"))
+
+    def test_eco_da_mensagem_com_prefixo_e_reconhecido_como_do_bot(self):
+        # O prefixo sozinho basta para o secretário não achar que o André assumiu a conversa.
+        conteudo, _ = self._enviada(como_assistente=True)
+        self.assertTrue(sec.eh_mensagem_do_bot({"from_me": True, "content": conteudo}))
+
+    def test_handler_aceita_true_em_texto_e_a_previa_mostra_o_texto_final(self):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+
+        destinatario = {"encontrado": True, "tipo": "contato", "nome": "Carlos", "chat_id": CHAT}
+        for valor in (True, "true", "True", "sim"):
+            with self.subTest(como_assistente=valor), \
+                    mock.patch.object(hermes_tools, "_destinatario_whatsapp_previa", return_value=destinatario):
+                previa = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=_MockDb()), {
+                    "contact_number": CHAT, "message": "Oi, Carlos", "scheduled_time": "2026-10-29T10:00:00Z",
+                    "como_assistente": valor})
+                self.assertEqual(previa["mensagem"], f"{mensagens_gaspar.PREFIXO_IDENTIFICACAO}\nOi, Carlos")
+        with mock.patch.object(hermes_tools, "_destinatario_whatsapp_previa", return_value=destinatario):
+            previa = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=_MockDb()), {
+                "contact_number": CHAT, "message": "Oi, Carlos", "scheduled_time": "2026-10-29T10:00:00Z"})
+        self.assertEqual(previa["mensagem"], "Oi, Carlos")
 
 
 class TestRegistroDoGaspar(unittest.TestCase):

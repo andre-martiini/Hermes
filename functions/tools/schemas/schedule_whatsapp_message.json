@@ -15,6 +15,10 @@
       "scheduled_time": {
         "type": "string",
         "description": "Data e hora no formato ISO 8601. Se for envio imediato, envie a hora atual."
+      },
+      "como_assistente": {
+        "type": "boolean",
+        "description": "true: a mensagem sai com a identificação do Gaspar na primeira linha (\"*Gaspar Bot (assistente virtual do André):*\"). O agente residente do Telegram passa sempre true; escreva a mensagem como assistente (o André em terceira pessoa) e sem o prefixo, que o sistema acrescenta. Omitido ou false: a mensagem sai exatamente como veio (uso das sessões do próprio André, que escrevem com as palavras e o sim dele)."
       }
     },
     "required": ["contact_number", "message", "scheduled_time"]

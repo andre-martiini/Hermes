@@ -1,10 +1,12 @@
 """Reconhece as mensagens que o próprio Gaspar mandou no WhatsApp em nome do André.
 
-O Modo Secretário e o Modo Objetivo escrevem pela conta do André: o Objetivo em
-primeira pessoa, sem assinatura (decisão do dono, 14/10/2026); o Secretário, desde
-28/10/2026, com o prefixo de identificação. A resposta volta capturada
-como `from_me`, igual a uma mensagem que o André digitou; sem este registro o
-sistema acharia que o André assumiu a conversa a cada resposta do Gaspar.
+O Modo Secretário e o Modo Objetivo escrevem pela conta do André e, desde 28/10/2026
+(decisão do dono, que revoga a primeira pessoa sem assinatura de 14/10), com o prefixo
+de identificação PREFIXO_IDENTIFICACAO, que o código acrescenta no ponto de saída de cada
+modo. O agente residente o pede (`como_assistente`) nas mensagens que manda com o sim do
+André. A resposta volta capturada como `from_me`, igual a uma mensagem que o André
+digitou; sem este registro o sistema acharia que o André assumiu a conversa a cada
+resposta do Gaspar.
 
 O registro é gravado ANTES do envio (na criação do rascunho de envio imediato ou
 na aprovação), então o eco sempre o encontra. A chave é só o texto: o eco pode
@@ -13,11 +15,36 @@ em poucos minutos, uma do André e outra do Gaspar, é caso desprezível.
 """
 
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 
 COLECAO = "whatsapp_enviados_gaspar"
 ORIGENS_AUTONOMAS = frozenset({"secretario_whatsapp", "objetivo_whatsapp"})
 _VALIDADE = timedelta(hours=6)
+
+# Toda mensagem do Gaspar a terceiros começa com este prefixo, que o código acrescenta (decisão do
+# dono, 28/10/2026: o Gaspar precisa se identificar como bot, não falar como o André).
+PREFIXO_IDENTIFICACAO = "*Gaspar Bot (assistente virtual do André):*"
+# Reconhece o prefixo e as assinaturas antigas ("**Gaspar Bot:**", antes "**Hermes Bot:**"),
+# inclusive com descrição entre parênteses: `secretario_whatsapp.eh_mensagem_do_bot` a usa no eco
+# `from_me` e `sem_assinatura` a remove se o modelo a escrever (o código põe o prefixo uma vez só).
+# "Gaspar" sem "Bot" só conta com os dois-pontos: Gaspar também é nome de gente, e uma
+# mensagem do André que comece com "Gaspar, ..." não pode ser lida como do bot.
+_RE_ASSINATURA_BOT = re.compile(
+    r"^\*{0,2}\s*(?:(?:Hermes|Gaspar) Bot(?:\s*\([^)\n]{0,60}\))?(?:\s*(?::|\*{1,2}\s*:))?"
+    r"|Gaspar\s*(?::|\*{1,2}\s*:))\*{0,2}\s*",
+    re.IGNORECASE,
+)
+
+
+def sem_assinatura(texto: str) -> str:
+    """Tira o prefixo de identificação e as assinaturas antigas ("**Gaspar Bot:**" e variações), se o modelo as escrever."""
+    return _RE_ASSINATURA_BOT.sub("", str(texto or "").strip()).strip()
+
+
+def com_identificacao(texto: str) -> str:
+    """O texto como vai ao contato: PREFIXO_IDENTIFICACAO, quebra de linha e a mensagem, uma vez só."""
+    return f"{PREFIXO_IDENTIFICACAO}\n{sem_assinatura(texto)}"
 
 
 def _chave(texto: str) -> str:

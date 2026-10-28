@@ -1,10 +1,9 @@
 """Conferência de uma mensagem que o Gaspar vai mandar no WhatsApp em nome do André.
 
 Vale para o Modo Secretário e o Modo Objetivo. O prompt já pede tudo isto; a
-conferência é a trava do código para quando o modelo erra (regras do dono, 14/10/2026):
-- nunca revelar que é assistente, robô ou IA (só no Modo Objetivo, que escreve como o André:
-  o secretário passou a se identificar como assistente em 28/10/2026 e chama com
-  `permite_identidade=True`);
+conferência é a trava do código para quando o modelo erra (regras do dono, 14/10/2026).
+Até 28/10/2026 havia também a trava "nunca revelar que é assistente, robô ou IA": saiu, porque
+o Gaspar se identifica nos dois modos (prefixo de `mensagens_gaspar`).
 - nunca sugerir ligação, chamada ou videoconferência;
 - nunca pagar, transferir, assinar nem aceitar termos ou valores;
 - nunca chamar a esposa de "Tininha";
@@ -19,13 +18,6 @@ from difflib import SequenceMatcher
 _TAMANHO_MAX = 1200
 _SEMELHANCA_REPETICAO = 0.92
 
-_IDENTIDADE = re.compile(
-    r"\b(assistente|rob[oô]s?|bot|chatbot|intelig[eê]ncia artificial|gaspar|hermes|"
-    r"sistema autom[aá]tico|mensagem autom[aá]tica|resposta autom[aá]tica|secret[aá]ri[oa] virtual)\b",
-    re.IGNORECASE,
-)
-# Só a sigla em maiúsculas: "ia" minúsculo é verbo ("eu ia te falar").
-_SIGLA_IA = re.compile(r"\bIA\b")
 _CHAMADA = re.compile(
     r"\b(lig(ar|o|a|ue|uem|amos|aremos)|liga[çc](ão|ao|ões|oes)|chamada|videochamada|v[ií]deo ?chamada|"
     r"videoconfer[eê]ncia|telefonar|telefonema)\b",
@@ -61,18 +53,14 @@ def itens(texto) -> list[str]:
 
 
 def problemas(texto: str, *, nunca_informar=None, pode_informar: str = "",
-              ja_enviadas: list[str] | None = None, permite_identidade: bool = False) -> list[str]:
-    """Motivos para NÃO enviar `texto`; lista vazia quando pode sair.
-
-    `permite_identidade` deixa o texto dizer que é assistente, robô ou IA; as outras regras seguem valendo."""
+              ja_enviadas: list[str] | None = None) -> list[str]:
+    """Motivos para NÃO enviar `texto`; lista vazia quando pode sair."""
     texto = str(texto or "").strip()
     if not texto:
         return ["mensagem vazia"]
     achados = []
     if len(texto) > _TAMANHO_MAX:
         achados.append(f"mensagem longa demais ({len(texto)} caracteres)")
-    if not permite_identidade and (_IDENTIDADE.search(texto) or _SIGLA_IA.search(texto)):
-        achados.append("revela que é assistente, robô ou sistema")
     if _CHAMADA.search(texto):
         achados.append("fala em ligação ou chamada")
     if _COMPROMISSO.search(texto):
