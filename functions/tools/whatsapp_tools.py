@@ -333,6 +333,9 @@ def consolidar(ctx, args: dict) -> dict:
     _exigir_monitorado(ctx.db, chat_id)
 
     ids = [str(m).strip() for m in (args.get("message_ids") or []) if str(m).strip()]
+    # O doc da mensagem se chama "<chat_id>_<id curto>"; itens de atencao e
+    # pedidos trazem so o id curto, entao completa o prefixo quando falta.
+    ids = [m if m.startswith(f"{chat_id}_") else f"{chat_id}_{m}" for m in ids]
     if not ids:
         # Sem selecao explicita, o periodo define o recorte — evita obrigar o
         # cliente a listar as mensagens so para repetir os ids de volta.
