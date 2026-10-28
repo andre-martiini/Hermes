@@ -70,6 +70,7 @@ from autonomy.runs import run_esta_ativo
 #: Estados a partir dos quais `varrer_lease_vencida` sabe agir -- ver a
 #: docstring do módulo para por que `VERIFICANDO`/`AGUARDANDO_APROVACAO`/
 #: `AGUARDANDO_EXTERNO` ficam de fora desta fatia, mesmo sustentando lease.
+#: (`VERIFICANDO`/`AGUARDANDO_EXTERNO` vencidos: ver `varrer_espera_vencida`.)
 _STATUS_LEASE_VENCIDA_TRATADOS: frozenset[RequestStatus] = frozenset({
     RequestStatus.RESERVADO,
     RequestStatus.EM_ANDAMENTO,
@@ -336,3 +337,72 @@ def promover_retentativa_pronta(
     if not ok:
         raise ValueError(motivo)
     return dataclasses.replace(pedido, status=RequestStatus.PENDENTE, proximo_tentativa_em=None)
+
+
+def varrer_espera_vencida(
+    pedido: PedidoDuravel, agora: datetime | None = None
+) -> ResultadoSweepLeaseVencida:
+    """`AGUARDANDO_EXTERNO`/`VERIFICANDO` com lease vencida (e, na espera,
+    horário de acordar já alcançado ou nunca definido) ->
+    `RESULTADO_DESCONHECIDO` (P08 sub 8).
+
+    Ninguém acordou o pedido: não se sabe se a condição externa ocorreu
+    (espera) nem se o efeito já feito foi confirmado (verificação). Retentar
+    às cegas poderia duplicar efeitos (achado do Codex, PR #550): o desfecho é
+    reconciliação, via `RESULTADO_DESCONHECIDO`; nada é reexecutado e `tentativas` não muda (nenhuma execução nova ocorreu). A
+    `condicao_espera` é preservada para a reconciliação. Lease vencida ANTES
+    de `proximo_tentativa_em` é o caso normal de espera (ninguém renova
+    durante ela) e NÃO é sweep: levanta `ValueError`, como os demais
+    estados fora de escopo. Run ativo é fechado por timeout.
+
+    Devolve `diagnostico` (pedido precisa de reconciliação)."""
+    if pedido.status not in (RequestStatus.AGUARDANDO_EXTERNO, RequestStatus.VERIFICANDO):
+        raise ValueError(
+            f"pedido '{pedido.request_id}' está em '{pedido.status.value}', não "
+            "'aguardando_externo' nem 'verificando'."
+        )
+    if pedido.lease is None:
+        raise ValueError(f"pedido '{pedido.request_id}' não tem lease -- nada para varrer.")
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
+    agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if not lease_expirada(pedido.lease, agora=agora_resolvido):
+        raise ValueError(
+            f"pedido '{pedido.request_id}' tem lease ainda válida (expira em "
+            f"{pedido.lease.expires_at.isoformat()}) -- não é um caso de sweep."
+        )
+    if (
+        pedido.status == RequestStatus.AGUARDANDO_EXTERNO
+        and pedido.proximo_tentativa_em is not None
+        and agora_resolvido < pedido.proximo_tentativa_em
+    ):
+        raise ValueError(
+            f"pedido '{pedido.request_id}' ainda está dentro da espera (acorda em "
+            f"{pedido.proximo_tentativa_em.isoformat()}) -- lease vencida aqui é normal."
+        )
+    ok, motivo = validar_transicao(pedido.status, RequestStatus.RESULTADO_DESCONHECIDO)
+    if not ok:
+        raise ValueError(motivo)
+    run_atualizado = pedido.run
+    if run_atualizado is not None and run_esta_ativo(run_atualizado):
+        run_atualizado = _run_expirar_por_timeout(
+            run_atualizado, lease_expirada=True, agora=agora_resolvido
+        )
+    pedido_novo = dataclasses.replace(
+        pedido,
+        status=RequestStatus.RESULTADO_DESCONHECIDO,
+        run=run_atualizado,
+        proximo_tentativa_em=None,
+    )
+    diagnostico = DiagnosticoPedido(
+        request_id=pedido.request_id,
+        motivo=(
+            f"lease vencida em '{pedido.status.value}' sem ninguém retomar o pedido "
+            f"(condição: '{pedido.condicao_espera}') -- resultado desconhecido, "
+            "requer reconciliação."
+        ),
+        status_anterior=pedido.status,
+        tentativas=pedido.tentativas,
+        registrado_em=agora_resolvido,
+    )
+    return ResultadoSweepLeaseVencida(pedido=pedido_novo, diagnostico=diagnostico)

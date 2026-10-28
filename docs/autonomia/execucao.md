@@ -640,29 +640,6 @@ pacote_concluido: P07
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 5/N -- dispatcher shadow/off (autonomy/dispatcher.py, passos 3 e 11): função pura decidir_despacho/decidir_lote. Modo OFF é o padrão e o destino de config inválida (fail-closed); SHADOW devolve nome/payload da tarefa que seria enfileirada sem enfileirar; ATIVO só enfileira com orçamento de despachos inteiro positivo (sem orçamento, nada). Payload só com request_id (conteúdo vem do banco após autenticar); nome de tarefa sha256 por pedido+tentativa. Elegibilidade espelha assumir_pedido (transição válida para RESERVADO, lease expirada, retentativa só após proximo_tentativa_em). Lote deduplica request_id e consome orçamento por ENFILEIRAR. Sem I/O, sem Cloud Tasks."
-estado: validado
-inicio: "2026-10-27T20:00:00Z"
-fim: "2026-10-27T20:40:00Z"
-decisoes:
-  - id: p08-sub5-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 17h BRT."
-  - id: p08-sub5-nome-reutilizado
-    motivo: "Achado do Codex (P2): RESERVADO->PENDENTE não incrementa tentativas, então o nome se repetiria e o Cloud Tasks recusa nomes de tarefas já executadas por horas (ALREADY_EXISTS), deixando o pedido sem tarefa. Corrigido: o nome inclui a geração da lease (monotônica, cresce a cada reserva). ALREADY_EXISTS passa a significar duplicata real."
-  - id: p08-sub5-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 3 arquivado em execucao-archive-p08sub3.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4847 OK (diário, P08 sub 4); DEPOIS 4862 OK (+15 em test_autonomy_dispatcher, incluindo o caso da geração no nome)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 3 achados reais (status str crua ignorava backoff por usar 'is'; tentativas não-inteira gerava nome inválido; pedido repetido no lote gastava orçamento duas vezes) -> corrigidos e cobertos por teste. Rodada 2 sobre a correção: não achou nada (só desvio cosmético: motivo duplicado_no_lote em modo OFF, ação igual). Codex na PR: 1 achado P2 (nome reutilizado após liberar reserva) -> corrigido com a geração da lease no nome e coberto por teste; mudança de uma linha, sem nova rodada."
-pendencias:
-  - "P08: wiring (worker HTTP autenticado, Cloud Tasks real tratando ALREADY_EXISTS como duplicata, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), leitura da flag do modo e do orçamento de despachos)."
-```
-
----
-
-```yaml
 pacote: "P08 sub-entrega 6/N -- autorização do worker (autonomy/worker_auth.py, passo 2): função pura autorizar_chamada_worker(claims, headers, config, agora). Claims OIDC já verificados pelo wiring; exige emissor Google, audience exata do worker, exp futuro e finito, e-mail verificado ASCII igual à conta de serviço configurada e cabeçalho X-CloudTasks-QueueName igual à fila configurada. Fail-closed (config inválida/tipos hostis nunca autorizam); motivo é código fixo que não ecoa o token. Sem I/O (shadow/off)."
 estado: validado
 inicio: "2026-10-28T10:49:00Z"
@@ -702,4 +679,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 4 achados (status como string crua contornava a máquina de estados; contadores podiam regredir; continuar_em não-datetime dava AttributeError; condicao_espera obsoleta após retomar) -> corrigidos e cobertos por teste; lease vencida em AGUARDANDO_EXTERNO sem saída no sweep é lacuna já documentada em autonomy.sweep, registrada em pendencias. Rodada 2: sem bug alcançável; 1 resíduo menor (proximo_tentativa_em após retomar) corrigido em uma linha."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, renovar lease ao acordar de AGUARDANDO_EXTERNO e tratar vencimento de lease em VERIFICANDO/AGUARDANDO_* no sweep, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 8/N -- sweep de espera/verificação vencida (autonomy/sweep.py, passo 5-6): nova varrer_espera_vencida: AGUARDANDO_EXTERNO (com lease vencida E horário de acordar alcançado/ausente) ou VERIFICANDO (lease vencida) -> RESULTADO_DESCONHECIDO (única saída do grafo sem lease; reconciliação via VERIFICANDO), sem reexecutar (retentar VERIFICANDO às cegas poderia duplicar efeitos), sem incrementar tentativas, condicao_espera preservada, run ativo fechado por timeout, diagnóstico devolvido. Lease vencida ANTES do horário de acordar é espera normal e levanta ValueError. Sem I/O (shadow/off)."
+estado: validado
+inicio: "2026-10-28T16:47:00Z"
+fim: "2026-10-28T17:35:00Z"
+decisoes:
+  - id: p08-sub8-triagem
+    motivo: "Única PR aberta (#547, melhorias, outra linha) estava trivial, sem conflito e com CI verde: mesclada. Nenhuma PR da autonomia pendente."
+  - id: p08-sub8-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 5 arquivado em execucao-archive-p08sub5.md."
+  - id: p08-sub8-espera
+    motivo: "Escolha segura sem decisão de produto: espera externa que ninguém acordou vira RESULTADO_DESCONHECIDO (reconciliar), nunca retentativa automática. AGUARDANDO_APROVACAO segue fora de escopo (prazo de espera humana é decisão do André)."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4890 OK (diário, P08 sub 7); DEPOIS 4902 OK (+8 em test_autonomy_sweep; o restante vem de merges de outras linhas)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): não achou nada. Codex na PR #550: 1 achado P1 real -- a 1a versão mandava VERIFICANDO vencido a RETENTATIVA_AGENDADA, o que reexecutaria o pedido e poderia duplicar efeito já feito; corrigido (VERIFICANDO vencido vai a RESULTADO_DESCONHECIDO, varrer_lease_vencida volta a recusá-lo) e coberto por teste. Rodada 2 (agente sem contexto, focada na correção): não achou nada (2 nits de documentação, 1 aplicado)."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao e o sweep, renovar lease ao acordar de AGUARDANDO_EXTERNO, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
