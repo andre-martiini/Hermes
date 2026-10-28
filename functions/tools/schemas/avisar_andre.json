@@ -1,0 +1,43 @@
+{
+  "name": "avisar_andre",
+  "description": "Pede ao Gaspar que avise o André no Telegram. Use ao terminar uma tarefa longa (o André saiu da sessão e não está esperando na tela), quando ela falhar, ou quando travar esperando uma decisão dele. Não use para progresso, para responder algo que ele acabou de perguntar ou em tarefa rápida. Um aviso por assunto. Se o trabalho está ligado a uma ação do Gaspar, passe acao_id: o aviso cita a ação.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "O que ele precisa saber, em uma frase que ele age em cima (ex.: 'Vídeos tutoriais do Sistema X prontos', 'Deploy falhou: 2 testes'). Máximo de 120 caracteres."
+      },
+      "resumo": {
+        "type": "string",
+        "description": "Detalhe curto: o que foi feito, o que falta ou o que ele precisa decidir. Máximo de 1000 caracteres."
+      },
+      "links": {
+        "type": "array",
+        "description": "Opcional: links para o resultado (Drive, PR, página). Até 10, URL http(s) completa.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {"type": "string", "description": "URL http(s) completa, sem espaços."},
+            "titulo": {"type": "string", "description": "Opcional: nome curto do link (ex.: 'Vídeo 1 - Login')."}
+          },
+          "required": ["url"]
+        }
+      },
+      "acao_id": {
+        "type": "string",
+        "description": "Opcional: id da ação do Gaspar a que este trabalho se refere (o campo id de obter_acao ou consultar_historico_acoes). O aviso mostra o título da ação. Se o id não existir, o aviso sai sem a ação e o retorno avisa."
+      },
+      "sessao": {
+        "type": "string",
+        "description": "Opcional: de onde vem o aviso, para ele saber qual sessão abrir (ex.: 'Claude Code · tutoriais do Sistema X'). Máximo de 60 caracteres."
+      },
+      "urgencia": {
+        "type": "string",
+        "enum": ["normal", "critica"],
+        "description": "normal (padrão): entra nas faixas de horário do Gaspar (das 19:00 às 05:00 espera). critica: só quando perder o prazo de hoje custa algo; avisa mesmo de madrugada."
+      }
+    },
+    "required": ["titulo", "resumo"]
+  }
+}
