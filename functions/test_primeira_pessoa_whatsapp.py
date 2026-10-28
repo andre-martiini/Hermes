@@ -1,5 +1,5 @@
-"""Secretário em primeira pessoa (14/10/2026), registro das mensagens do Gaspar e a
-conferência antes de cada envio."""
+"""Secretário identificado como assistente (28/10/2026; de 14 a 28/10 escrevia em primeira
+pessoa), registro das mensagens do Gaspar e a conferência antes de cada envio."""
 
 import datetime as dt
 import unittest
@@ -37,6 +37,12 @@ class TestConferencia(unittest.TestCase):
         for texto, motivo in casos.items():
             with self.subTest(texto=texto):
                 self.assertTrue(any(motivo in p for p in problemas(texto)), problemas(texto))
+
+    def test_secretario_pode_se_identificar_mas_as_outras_regras_valem(self):
+        self.assertEqual(problemas("Sou o Gaspar, assistente virtual do André.", permite_identidade=True), [])
+        self.assertTrue(problemas("Sou o assistente do André, pode me ligar?", permite_identidade=True))
+        # sem o parâmetro (Modo Objetivo) a identidade continua barrada
+        self.assertTrue(problemas("Sou o assistente do André"))
 
     def test_numero_liberado_passa_e_dado_vetado_nao(self):
         self.assertEqual(problemas("A carteirinha é 123456789012", pode_informar="carteirinha 123456789012"), [])
@@ -135,7 +141,7 @@ class TestHorarioDeEnvioComFolga(unittest.TestCase):
         self.assertEqual(docs["b"]["scheduled_for"], futuro)
 
 
-class TestSecretarioPrimeiraPessoa(unittest.TestCase):
+class TestSecretarioIdentificado(unittest.TestCase):
     def setUp(self):
         for alvo, valor in (("hermes_core_logic._get_telegram_token", "tok"),
                             ("main._resolve_default_telegram_chat_id", "123"),
@@ -148,7 +154,7 @@ class TestSecretarioPrimeiraPessoa(unittest.TestCase):
             "whatsapp_secretario": {"enabled": True, "chats_allowlist": [CHAT], "max_trocas": 2},
         })
 
-    def _llm(self, resposta="Estou em reunião agora, te retorno logo.", **extra):
+    def _llm(self, resposta="O André está em reunião agora e retorna logo.", **extra):
         def llm(**kwargs):
             return {"resposta_para_contato": resposta, "resumo_recado": "recado",
                     "forcou_decisao": False, "assunto_sensivel": False, **extra}
@@ -165,28 +171,41 @@ class TestSecretarioPrimeiraPessoa(unittest.TestCase):
     def _conversa(self):
         return self.db.collection(sec.COLLECTION_CONVERSAS).document(CHAT).get().to_dict()
 
-    def test_prompt_em_primeira_pessoa_com_as_regras_do_dono(self):
+    def test_prompt_identifica_o_gaspar_com_as_regras_do_dono(self):
         prompt = sec.montar_system_instruction_secretario(historico=[])
-        self.assertIn("PRIMEIRA PESSOA", prompt)
-        self.assertNotIn("Gaspar Bot", prompt)
-        for regra in ("perguntou_se_robo", "NUNCA sugira ligação", "Tininha", "não paga"):
+        self.assertIn("assistente virtual do André", prompt)
+        self.assertIn(sec.PREFIXO_IDENTIFICACAO, prompt)
+        self.assertNotIn("PRIMEIRA PESSOA", prompt)
+        for regra in ("Não use `perguntou_se_robo`", "NUNCA sugira ligação", "Tininha", "não paga", "não aceita convites"):
             with self.subTest(regra=regra):
                 self.assertIn(regra, prompt)
 
-    def test_resposta_sai_sem_assinatura_e_o_eco_nao_conta_como_o_andre(self):
+    def test_resposta_sai_com_prefixo_e_o_eco_nao_conta_como_o_andre(self):
         self._receber("Oi André")
-        self.assertEqual(self._enviadas(), ["Estou em reunião agora, te retorno logo."])
-        sec.processar_mensagem_secretario(self.db, {"chat_id": CHAT, "from_me": True,
-                                                    "content": "Estou em reunião agora, te retorno logo."})
+        esperado = f"{sec.PREFIXO_IDENTIFICACAO}\nO André está em reunião agora e retorna logo."
+        self.assertEqual(self._enviadas(), [esperado])
+        sec.processar_mensagem_secretario(self.db, {"chat_id": CHAT, "from_me": True, "content": esperado})
         self.assertEqual(self._conversa()["estado"], sec.ESTADO_EM_ATENDIMENTO)
 
-    def test_assinatura_que_o_modelo_escrever_e_removida(self):
-        self._receber("Oi André", llm=self._llm("**Gaspar Bot:** Já te respondo."))
-        self.assertEqual(self._enviadas(), ["Já te respondo."])
+    def test_prefixo_que_o_modelo_escrever_nao_duplica(self):
+        esperado = f"{sec.PREFIXO_IDENTIFICACAO}\nJá te respondo."
+        for escrito in ("**Gaspar Bot:** Já te respondo.", f"{sec.PREFIXO_IDENTIFICACAO} Já te respondo."):
+            with self.subTest(escrito=escrito):
+                self.db = _MockDb()
+                self.db.collection("system").document("settings").set({
+                    "whatsapp_secretario": {"enabled": True, "chats_allowlist": [CHAT], "max_trocas": 2},
+                })
+                self._receber("Oi André", llm=self._llm(escrito))
+                self.assertEqual(self._enviadas(), [esperado])
+
+    def test_secretario_pode_dizer_que_e_o_assistente(self):
+        texto = "Sou o Gaspar, assistente virtual do André. Ele vê o seu recado assim que puder."
+        self._receber("Isso é um robô?", llm=self._llm(texto))
+        self.assertEqual(self._enviadas(), [f"{sec.PREFIXO_IDENTIFICACAO}\n{texto}"])
 
     def test_resposta_barrada_vira_a_resposta_padrao(self):
         self._receber("Oi André", llm=self._llm("Sou o assistente do André, pode me ligar?"))
-        self.assertEqual(self._enviadas(), [sec._RESPOSTA_CONTINGENCIA_INICIO])
+        self.assertEqual(self._enviadas(), [sec.com_identificacao(sec._RESPOSTA_CONTINGENCIA_INICIO)])
 
     def test_pergunta_se_e_robo_nao_responde_e_chama_o_andre(self):
         res = self._receber("Isso é um robô?", llm=self._llm("Não", perguntou_se_robo=True))

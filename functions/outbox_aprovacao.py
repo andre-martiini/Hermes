@@ -274,7 +274,7 @@ def horario_envio_imediato() -> datetime.datetime:
 
 
 def _registrar_se_autonomo(db, dados: dict, outbox_id: str) -> None:
-    """Mensagem do Secretário ou do Objetivo sai em primeira pessoa: registra o texto
+    """Mensagem do Secretário ou do Objetivo sai pela conta do André: registra o texto
     final antes do envio para o eco `from_me` não ser lido como o André (mensagens_gaspar)."""
     from mensagens_gaspar import ORIGENS_AUTONOMAS, registrar
 
