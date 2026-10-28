@@ -16,7 +16,7 @@ from autonomy.runs import AgentRunStatus
 from autonomy.sweep import (
     DiagnosticoPedido,
     promover_retentativa_pronta,
-    varrer_espera_externa_vencida,
+    varrer_espera_vencida,
     varrer_lease_vencida,
 )
 
@@ -321,24 +321,22 @@ def _pedido_em_status(status, **kwargs):
 
 
 class TestVarrerVerificandoVencido(unittest.TestCase):
-    def test_retentativa_com_backoff_e_run_fechado(self):
-        pedido = _pedido_em_status(RequestStatus.VERIFICANDO)
-        depois = T0 + timedelta(hours=1)
-        r = varrer_lease_vencida(pedido, agora=depois, rng=_SemJitter())
-        self.assertEqual(r.pedido.status, RequestStatus.RETENTATIVA_AGENDADA)
-        self.assertEqual(r.pedido.tentativas, 1)
-        self.assertEqual(
-            r.pedido.proximo_tentativa_em, depois + timedelta(seconds=BACKOFF_BASE_SEGUNDOS[0])
-        )
-        self.assertIsNone(r.diagnostico)
-        self.assertNotEqual(r.pedido.run.status, AgentRunStatus.EM_ANDAMENTO)
-
-    def test_esgotado_vai_a_falha_final_com_diagnostico(self):
+    def test_nao_e_retentado_as_cegas_vai_a_resultado_desconhecido(self):
         pedido = _pedido_em_status(RequestStatus.VERIFICANDO, tentativas=3)
-        r = varrer_lease_vencida(pedido, agora=T0 + timedelta(hours=1))
-        self.assertEqual(r.pedido.status, RequestStatus.FALHA_FINAL)
+        depois = T0 + timedelta(hours=1)
+        with self.assertRaises(ValueError):
+            varrer_lease_vencida(pedido, agora=depois)
+        r = varrer_espera_vencida(pedido, agora=depois)
+        self.assertEqual(r.pedido.status, RequestStatus.RESULTADO_DESCONHECIDO)
+        self.assertEqual(r.pedido.tentativas, 3)
+        self.assertIsNone(r.pedido.proximo_tentativa_em)
+        self.assertNotEqual(r.pedido.run.status, AgentRunStatus.EM_ANDAMENTO)
         self.assertEqual(r.diagnostico.status_anterior, RequestStatus.VERIFICANDO)
-        self.assertEqual(r.diagnostico.tentativas, 4)
+
+    def test_lease_valida_nao_varre(self):
+        pedido = _pedido_em_status(RequestStatus.VERIFICANDO)
+        with self.assertRaises(ValueError):
+            varrer_espera_vencida(pedido, agora=T0 + timedelta(seconds=1))
 
 
 class TestVarrerEsperaExternaVencida(unittest.TestCase):
@@ -349,7 +347,7 @@ class TestVarrerEsperaExternaVencida(unittest.TestCase):
 
     def test_passou_do_horario_vai_a_resultado_desconhecido(self):
         pedido = self._espera(proximo_tentativa_em=T0 + timedelta(minutes=30), tentativas=2)
-        r = varrer_espera_externa_vencida(pedido, agora=T0 + timedelta(hours=1))
+        r = varrer_espera_vencida(pedido, agora=T0 + timedelta(hours=1))
         self.assertEqual(r.pedido.status, RequestStatus.RESULTADO_DESCONHECIDO)
         self.assertEqual(r.pedido.tentativas, 2)
         self.assertIsNone(r.pedido.proximo_tentativa_em)
@@ -359,28 +357,28 @@ class TestVarrerEsperaExternaVencida(unittest.TestCase):
         self.assertIn("resposta do fornecedor", r.diagnostico.motivo)
 
     def test_sem_horario_definido_tambem_varre(self):
-        r = varrer_espera_externa_vencida(self._espera(), agora=T0 + timedelta(hours=1))
+        r = varrer_espera_vencida(self._espera(), agora=T0 + timedelta(hours=1))
         self.assertEqual(r.pedido.status, RequestStatus.RESULTADO_DESCONHECIDO)
 
     def test_ainda_dentro_da_espera_nao_varre(self):
         pedido = self._espera(proximo_tentativa_em=T0 + timedelta(hours=2))
         with self.assertRaises(ValueError):
-            varrer_espera_externa_vencida(pedido, agora=T0 + timedelta(hours=1))
+            varrer_espera_vencida(pedido, agora=T0 + timedelta(hours=1))
 
     def test_lease_valida_nao_varre(self):
         with self.assertRaises(ValueError):
-            varrer_espera_externa_vencida(self._espera(), agora=T0 + timedelta(seconds=1))
+            varrer_espera_vencida(self._espera(), agora=T0 + timedelta(seconds=1))
 
     def test_status_errado_e_sem_lease_rejeitados(self):
         with self.assertRaises(ValueError):
-            varrer_espera_externa_vencida(_pedido_em_andamento(), agora=T0 + timedelta(hours=1))
+            varrer_espera_vencida(_pedido_em_andamento(), agora=T0 + timedelta(hours=1))
         sem_lease = PedidoDuravel(request_id="r", status=RequestStatus.AGUARDANDO_EXTERNO)
         with self.assertRaises(ValueError):
-            varrer_espera_externa_vencida(sem_lease, agora=T0 + timedelta(hours=1))
+            varrer_espera_vencida(sem_lease, agora=T0 + timedelta(hours=1))
 
     def test_agora_sem_fuso_rejeitado(self):
         with self.assertRaises(ValueError):
-            varrer_espera_externa_vencida(self._espera(), agora=datetime(2026, 9, 27))
+            varrer_espera_vencida(self._espera(), agora=datetime(2026, 9, 27))
 
 
 if __name__ == "__main__":

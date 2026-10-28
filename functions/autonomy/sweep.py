@@ -70,12 +70,10 @@ from autonomy.runs import run_esta_ativo
 #: Estados a partir dos quais `varrer_lease_vencida` sabe agir -- ver a
 #: docstring do módulo para por que `VERIFICANDO`/`AGUARDANDO_APROVACAO`/
 #: `AGUARDANDO_EXTERNO` ficam de fora desta fatia, mesmo sustentando lease.
+#: (`VERIFICANDO`/`AGUARDANDO_EXTERNO` vencidos: ver `varrer_espera_vencida`.)
 _STATUS_LEASE_VENCIDA_TRATADOS: frozenset[RequestStatus] = frozenset({
     RequestStatus.RESERVADO,
     RequestStatus.EM_ANDAMENTO,
-    # P08 sub 8: verificador morto -- mesmo desfecho de EM_ANDAMENTO (conta
-    # tentativa; retentativa com backoff ou falha final com diagnóstico).
-    RequestStatus.VERIFICANDO,
 })
 
 
@@ -119,7 +117,7 @@ def varrer_lease_vencida(
     ter renovado/concluído -- "worker morto" (seção 10.2 do plano).
 
     Só aceita `pedido.status` em `_STATUS_LEASE_VENCIDA_TRATADOS`
-    (`RESERVADO`/`EM_ANDAMENTO`/`VERIFICANDO` -- ver docstring do módulo) e exige
+    (`RESERVADO`/`EM_ANDAMENTO` -- ver docstring do módulo) e exige
     `pedido.lease` presente e de fato vencida (`autonomy.requests.lease_expirada`)
     -- levanta `ValueError` fora disso, mesmo estilo defensivo dos módulos
     irmãos (nunca assume, sempre confere antes de agir).
@@ -149,7 +147,7 @@ def varrer_lease_vencida(
     `autonomy.execution._REQUEST_STATUS_PARA_AGENT_RUN_STATUS`), com a
     mesma `DiagnosticoPedido` de qualquer desistência.
 
-    `EM_ANDAMENTO` e `VERIFICANDO` (verificador morto, P08 sub 8): efeito parcial pode já ter ocorrido -- conta como uma
+    `EM_ANDAMENTO`: efeito parcial pode já ter ocorrido -- conta como uma
     tentativa. Se `tentativas+1 <= max_tentativas`, agenda nova tentativa
     (`RETENTATIVA_AGENDADA`, `proximo_tentativa_em` calculado por
     `autonomy.requests.calcular_backoff_segundos`, mesmo backoff com jitter
@@ -261,7 +259,7 @@ def varrer_lease_vencida(
         )
         return ResultadoSweepLeaseVencida(pedido=pedido_novo, diagnostico=None)
 
-    # EM_ANDAMENTO/VERIFICANDO daqui em diante. Mesma correção de off-by-one do ramo
+    # EM_ANDAMENTO daqui em diante. Mesma correção de off-by-one do ramo
     # RESERVADO acima (achado de revisão do Codex, PR #344): `>`, não
     # `>=` -- desiste só depois que as `max_tentativas` retentativas
     # (todos os patamares de backoff, incluindo o de 20 minutos) já
@@ -341,26 +339,27 @@ def promover_retentativa_pronta(
     return dataclasses.replace(pedido, status=RequestStatus.PENDENTE, proximo_tentativa_em=None)
 
 
-def varrer_espera_externa_vencida(
+def varrer_espera_vencida(
     pedido: PedidoDuravel, agora: datetime | None = None
 ) -> ResultadoSweepLeaseVencida:
-    """`AGUARDANDO_EXTERNO` com lease vencida e horário de acordar já
-    alcançado (ou nunca definido) -> `RESULTADO_DESCONHECIDO` (P08 sub 8).
+    """`AGUARDANDO_EXTERNO`/`VERIFICANDO` com lease vencida (e, na espera,
+    horário de acordar já alcançado ou nunca definido) ->
+    `RESULTADO_DESCONHECIDO` (P08 sub 8).
 
-    Ninguém acordou o pedido: não se sabe se a condição externa ocorreu.
-    O grafo só permite sair de `AGUARDANDO_EXTERNO` sem lease por
-    `RESULTADO_DESCONHECIDO` (reconciliação via `VERIFICANDO`); nada é
-    reexecutado e `tentativas` não muda (nenhuma execução nova ocorreu). A
+    Ninguém acordou o pedido: não se sabe se a condição externa ocorreu
+    (espera) nem se o efeito já feito foi confirmado (verificação). Retentar
+    às cegas poderia duplicar efeitos (achado do Codex, PR #550): o desfecho é
+    reconciliação, via `RESULTADO_DESCONHECIDO`; nada é reexecutado e `tentativas` não muda (nenhuma execução nova ocorreu). A
     `condicao_espera` é preservada para a reconciliação. Lease vencida ANTES
     de `proximo_tentativa_em` é o caso normal de espera (ninguém renova
     durante ela) e NÃO é sweep: levanta `ValueError`, como os demais
     estados fora de escopo. Run ativo é fechado por timeout.
 
     Devolve `diagnostico` (pedido precisa de reconciliação)."""
-    if pedido.status != RequestStatus.AGUARDANDO_EXTERNO:
+    if pedido.status not in (RequestStatus.AGUARDANDO_EXTERNO, RequestStatus.VERIFICANDO):
         raise ValueError(
             f"pedido '{pedido.request_id}' está em '{pedido.status.value}', não "
-            "'aguardando_externo'."
+            "'aguardando_externo' nem 'verificando'."
         )
     if pedido.lease is None:
         raise ValueError(f"pedido '{pedido.request_id}' não tem lease -- nada para varrer.")
@@ -372,7 +371,11 @@ def varrer_espera_externa_vencida(
             f"pedido '{pedido.request_id}' tem lease ainda válida (expira em "
             f"{pedido.lease.expires_at.isoformat()}) -- não é um caso de sweep."
         )
-    if pedido.proximo_tentativa_em is not None and agora_resolvido < pedido.proximo_tentativa_em:
+    if (
+        pedido.status == RequestStatus.AGUARDANDO_EXTERNO
+        and pedido.proximo_tentativa_em is not None
+        and agora_resolvido < pedido.proximo_tentativa_em
+    ):
         raise ValueError(
             f"pedido '{pedido.request_id}' ainda está dentro da espera (acorda em "
             f"{pedido.proximo_tentativa_em.isoformat()}) -- lease vencida aqui é normal."
@@ -394,7 +397,7 @@ def varrer_espera_externa_vencida(
     diagnostico = DiagnosticoPedido(
         request_id=pedido.request_id,
         motivo=(
-            "espera externa passou do horário de acordar sem ninguém retomar o pedido "
+            f"lease vencida em '{pedido.status.value}' sem ninguém retomar o pedido "
             f"(condição: '{pedido.condicao_espera}') -- resultado desconhecido, "
             "requer reconciliação."
         ),

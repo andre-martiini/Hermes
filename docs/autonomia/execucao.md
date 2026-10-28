@@ -684,7 +684,7 @@ pendencias:
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 8/N -- sweep de espera/verificação vencida (autonomy/sweep.py, passo 5-6): (a) varrer_lease_vencida passa a tratar VERIFICANDO (verificador morto) com o desfecho de EM_ANDAMENTO: conta tentativa, RETENTATIVA_AGENDADA com backoff ou FALHA_FINAL com diagnóstico; (b) nova varrer_espera_externa_vencida: AGUARDANDO_EXTERNO com lease vencida E horário de acordar alcançado/ausente -> RESULTADO_DESCONHECIDO (única saída do grafo sem lease; reconciliação via VERIFICANDO), sem reexecutar, sem incrementar tentativas, condicao_espera preservada, run ativo fechado por timeout, diagnóstico devolvido. Lease vencida ANTES do horário de acordar é espera normal e levanta ValueError. Sem I/O (shadow/off)."
+pacote: "P08 sub-entrega 8/N -- sweep de espera/verificação vencida (autonomy/sweep.py, passo 5-6): nova varrer_espera_vencida: AGUARDANDO_EXTERNO (com lease vencida E horário de acordar alcançado/ausente) ou VERIFICANDO (lease vencida) -> RESULTADO_DESCONHECIDO (única saída do grafo sem lease; reconciliação via VERIFICANDO), sem reexecutar (retentar VERIFICANDO às cegas poderia duplicar efeitos), sem incrementar tentativas, condicao_espera preservada, run ativo fechado por timeout, diagnóstico devolvido. Lease vencida ANTES do horário de acordar é espera normal e levanta ValueError. Sem I/O (shadow/off)."
 estado: validado
 inicio: "2026-10-28T16:47:00Z"
 fim: "2026-10-28T17:35:00Z"
@@ -699,7 +699,7 @@ testes:
   resultados:
     - "functions/ completo ANTES 4890 OK (diário, P08 sub 7); DEPOIS 4902 OK (+8 em test_autonomy_sweep; o restante vem de merges de outras linhas)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada (grafo, datetimes, run/lease e chamadores conferidos; sem chamador de produção de varrer_lease_vencida). Sem rodada 2: lógica pura, sem achado."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achou nada. Codex na PR #550: 1 achado P1 real -- a 1a versão mandava VERIFICANDO vencido a RETENTATIVA_AGENDADA, o que reexecutaria o pedido e poderia duplicar efeito já feito; corrigido (VERIFICANDO vencido vai a RESULTADO_DESCONHECIDO, varrer_lease_vencida volta a recusá-lo) e coberto por teste. Rodada 2 (agente sem contexto, focada na correção): não achou nada (2 nits de documentação, 1 aplicado)."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao e o sweep, renovar lease ao acordar de AGUARDANDO_EXTERNO, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
