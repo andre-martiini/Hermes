@@ -1,6 +1,7 @@
 # Sobe a sessão residente do Gaspar (24 h por dia, todos os dias). O Agendador chama este script a cada 30 min
 # e a tarefa "Gaspar - encerrar" reinicia a sessão às 04:30 (contexto novo; agendamentos do /loop vencem em 7 dias);
-# se o agente já estiver rodando, sai sem fazer nada (é o que faz o papel de vigia).
+# se o agente já estiver rodando, sai sem fazer nada. Atenção: com a instância anterior ainda viva o Agendador
+# nem chega a disparar este script (IgnoreNew, 0x800710E0); quem vigia agente vivo com canal morto é o vigiar.ps1.
 $agente = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" |
   Where-Object { $_.CommandLine -match 'plugin:telegram@claude-plugins-official' }
 if ($agente) { exit 0 }
