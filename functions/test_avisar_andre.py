@@ -57,6 +57,15 @@ class TestAvisar(unittest.TestCase):
         self.assertNotIn("Ação do Gaspar", item["resumo"])
         self.assertIn("nao-existe", r["aviso"])
 
+    def test_acao_id_com_barra_ou_enorme_nao_vira_caminho_do_firestore(self):
+        # "acao-1/x" resolveria para um documento aninhado de outra ação: não pode nem consultar.
+        for acao_id in ("acao-1/x", "tarefas/acao-1/sub/y", "a" * (avisar_andre.LIMITE_ACAO_ID + 1)):
+            with self.subTest(acao_id=acao_id[:30]):
+                r = avisar_andre.avisar(self.db, "Prontos", "Ok.", acao_id=acao_id)
+                self.assertIsNone(r["acao"])
+                self.assertIn("invalido", r["aviso"])
+        self.assertTrue(all(i["acao_id"] is None for i in _itens(self.db)))
+
     def test_links_entram_no_texto_com_e_sem_titulo(self):
         avisar_andre.avisar(self.db, "Vídeos prontos", "Prontos.", links=[
             {"url": "https://drive.google.com/a", "titulo": "Vídeo 1 - Login"},

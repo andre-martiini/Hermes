@@ -26,6 +26,7 @@ TIPO_NOTIFICACAO_SESSAO = "notificacao_sessao"
 LIMITE_TITULO = 120
 LIMITE_RESUMO = 1000
 LIMITE_SESSAO = 60
+LIMITE_ACAO_ID = 128
 LIMITE_URL = 500
 MAX_LINKS = 10
 URGENCIAS = ("normal", "critica")
@@ -71,6 +72,9 @@ def _acao(db, acao_id) -> tuple[str | None, str | None, str | None]:
     acao_id = str(acao_id or "").strip()
     if not acao_id:
         return None, None, None
+    # "/" viraria caminho aninhado no Firestore (tarefas/x/sub/y): leria o título de outro documento.
+    if "/" in acao_id or len(acao_id) > LIMITE_ACAO_ID:
+        return None, None, "acao_id invalido; avisei sem a acao."
     snap = db.collection("tarefas").document(acao_id).get()
     if not snap.exists:
         return None, None, f"acao_id '{acao_id}' nao encontrado; avisei sem a acao."
