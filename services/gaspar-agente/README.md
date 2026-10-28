@@ -81,18 +81,22 @@ Diferenças em relação ao plano:
   Na primeira subida, o Claude Code pede login nesse perfil e a confiança na pasta.
 - **Confirmação do canal próprio:** o Claude Code pede a cada início, sem opção para lembrar. Um job no `iniciar.ps1` escreve Enter direto no buffer de entrada do console do agente (`WriteConsoleInput`), sem depender de foco nem de tela desbloqueada, até a sessão começar.
 - **Briefing da manhã:** todos os dias às 05:00, pelo Telegram (`.claude/briefing.md`; levantamento num subagente, para as leituras não ficarem no contexto do dia). A tarefa "Briefing da manhã do Gaspar" do app desktop foi desativada.
-- **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. Por isso a mesma tarefa serve para ligar e para vigiar.
+- **Uma instância só:** o `iniciar.ps1` sai sem fazer nada se o agente já está rodando. A tarefa "iniciar" liga o agente quando ele não existe (o `claude` morreu, ou o Windows reiniciou e o André fez login), mas **não vigia um agente vivo**: ela está com `IgnoreNew`, e enquanto a instância que lançou o agente roda, o Agendador recusa os disparos de 30 min (resultado `0x800710E0`). Quem vigia é o `vigiar.ps1`.
 - **`encerrar.ps1`:** derruba só a árvore de processos do agente (o claude dele, o Telegram e o canal), não as outras sessões.
+- **`vigiar.ps1` (desde 28/10/2026):** a cada 5 min confere se o poller do Telegram (`bot.pid`) e o canal `gaspar-eventos` estão vivos. Em 28/10 os dois processos bun sumiram com o `claude.exe` de pé e o agente ficou mudo por mais de uma hora. Com duas conferências seguidas ruins (≥ 3 min), roda o `encerrar.ps1` e religa pela tarefa "iniciar"; no máximo 3 religadas por hora. Registra em `~/.claude-gaspar/vigia.log` (`suspeita`, `reinicio`, `limite`) e grava `vigia-ultimo.txt` a cada passada. `-Simular` mostra a decisão sem agir; `-Teste` confere a regra. Não cobre o conector Sistema Hermes invalidado (pede login do dono; reiniciar não resolve).
 
 Agendador (como o usuário do André). O agente roda 24 h, todos os dias.
-- **"iniciar":** a cada 30 min, o dia inteiro. Funciona como vigia: sai sem fazer nada se o agente já está rodando.
-- **"encerrar":** às 04:30 reinicia a sessão (contexto novo); o vigia das 05:00 a religa a tempo do briefing.
+- **"iniciar":** a cada 30 min, o dia inteiro. Só liga o agente se ele não existe (ver acima).
+- **"encerrar":** às 04:30 reinicia a sessão (contexto novo); o "iniciar" das 05:00 a religa a tempo do briefing.
+- **"vigia":** a cada 5 min, o dia inteiro (`vigiar.ps1`).
 
 Recriar com `/F` encerra a instância que está rodando: rode `schtasks /Run /TN "Gaspar - iniciar"` em seguida.
 ```powershell
 schtasks /Create /TN "Gaspar - iniciar" /SC DAILY /ST 00:00 /RI 30 /DU 24:00 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\iniciar.ps1" /F
 schtasks /Create /TN "Gaspar - encerrar" /SC DAILY /ST 04:30 /IT /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\encerrar.ps1" /F
+schtasks /Create /TN "Gaspar - vigia" /SC MINUTE /MO 5 /IT /TR "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Bolsista\Repositorios\Hermes\services\gaspar-agente\vigiar.ps1" /F
 ```
+O `conhost.exe --headless` evita a janela piscando a cada 5 min (o "iniciar" precisa da janela visível; o vigia não).
 O pulso só roda das 05:00 às 22:59 (`*/15 5-22 * * *`); de madrugada, só os eventos acordam o agente.
 Depois de um reinício do Windows (ex.: Windows Update de madrugada), o agente só volta quando o André fizer login, porque a tarefa é "interativa apenas".
 
