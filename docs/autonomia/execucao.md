@@ -667,28 +667,7 @@ pendencias:
 
 # (Em 2026-10-27 o bloco "P08 sub-entrega 3/N" foi movido para docs/autonomia/execucao-archive-p08sub3.md.)
 
----
-
-```yaml
-pacote: "P08 sub-entrega 4/N -- adaptador de consumo Cowork (autonomy/executor_cowork.py, passo 10): CapacidadesExecutor (runner_servico ou cowork, ids 'cowork:<rotina>' reservados ao Cowork, regex de id, só capacidades DECLARADAS -- nunca herdadas entre tipos), capacidades_faltantes e reservar_pedido_para_executor (checagem prévia de capacidade sem tocar o pedido; depois a MESMA reserva de assumir_pedido: lease, geração, run). Perder a disputa vira DisputaPerdida; faltar capacidade vira CapacidadeInsuficiente. Sem I/O (shadow/off, passo 11)."
-estado: validado
-inicio: "2026-10-27T17:00:00Z"
-fim: "2026-10-27T17:40:00Z"
-decisoes:
-  - id: p08-sub4-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 14h BRT."
-  - id: p08-sub4-cas
-    motivo: "Função pura: dois executores partindo do MESMO snapshot pendente reservam ambos em memória; a exclusão real é compare-and-set por geração/status na gravação (wiring Firestore). Documentado na docstring e coberto por teste."
-  - id: p08-sub4-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 2 arquivado em execucao-archive-p08sub2.md."
-testes:
-  resultados:
-    - "functions/ completo DEPOIS 4847 OK (inclui +14 em test_autonomy_executor_cowork). ANTES: 4741 no diário (P08 sub 3); main atual rende 4833 (4847-14), pois PRs #541/#542 acrescentaram testes depois."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): achados reais (id vazio após prefixo, runner com 'COWORK:'/unicode/controles, duracao_segundos inf/nan, tipos errados sem TypeError, disputa sem exceção própria, faltantes mutável) -> corrigidos e cobertos por teste; snapshot concorrente documentado. Rodada 2 sobre a correção: 2 achados menores (int gigante vazava OverflowError na checagem de duração -> corrigido com checagem de faixa só; DisputaPerdida também cobre retentativa antes da hora -> documentado). Sem rodada 3: lógica pura, correções de uma linha cobertas por teste."
-pendencias:
-  - "P08: wiring (worker HTTP autenticado, Cloud Tasks, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), dispatcher shadow/off). Confirmar que os ids reais de runners cabem no regex [A-Za-z0-9_.:-]{1,100}."
-```
+# (Em 2026-10-28 o bloco "P08 sub-entrega 4/N" foi movido para docs/autonomia/execucao-archive-p08sub4.md.)
 
 ---
 
@@ -711,4 +690,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto): 3 achados reais (status str crua ignorava backoff por usar 'is'; tentativas não-inteira gerava nome inválido; pedido repetido no lote gastava orçamento duas vezes) -> corrigidos e cobertos por teste. Rodada 2 sobre a correção: não achou nada (só desvio cosmético: motivo duplicado_no_lote em modo OFF, ação igual). Codex na PR: 1 achado P2 (nome reutilizado após liberar reserva) -> corrigido com a geração da lease no nome e coberto por teste; mudança de uma linha, sem nova rodada."
 pendencias:
   - "P08: wiring (worker HTTP autenticado, Cloud Tasks real tratando ALREADY_EXISTS como duplicata, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, cache de prompt (passo 9), leitura da flag do modo e do orçamento de despachos)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 6/N -- autorização do worker (autonomy/worker_auth.py, passo 2): função pura autorizar_chamada_worker(claims, headers, config, agora). Claims OIDC já verificados pelo wiring; exige emissor Google, audience exata do worker, exp futuro e finito, e-mail verificado ASCII igual à conta de serviço configurada e cabeçalho X-CloudTasks-QueueName igual à fila configurada. Fail-closed (config inválida/tipos hostis nunca autorizam); motivo é código fixo que não ecoa o token. Sem I/O (shadow/off)."
+estado: validado
+inicio: "2026-10-28T10:49:00Z"
+fim: "2026-10-28T11:30:00Z"
+decisoes:
+  - id: p08-sub6-triagem
+    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT."
+  - id: p08-sub6-verificacao-token
+    motivo: "A verificação criptográfica do JWT (assinatura/exp) fica no wiring (google.oauth2.id_token); a função só decide sobre claims, com exp conferido de novo como defesa em profundidade."
+  - id: p08-sub6-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 4 arquivado em execucao-archive-p08sub4.md."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4862 OK (diário, P08 sub 5; main atual 4863); DEPOIS 4872 OK (+9 em test_autonomy_worker_auth)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto): 1 achado real (iss não hashable levantava TypeError) e 2 menores (e-mail com U+212A casava via lower(); exp=inf nunca expirava) -> corrigidos e cobertos por teste. Sem rodada 2: lógica pura, correções de uma linha cobertas por teste."
+pendencias:
+  - "P08: wiring (worker HTTP verificando o JWT e chamando autorizar_chamada_worker, Cloud Tasks real tratando ALREADY_EXISTS como duplicata, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, leitura da flag do modo e do orçamento de despachos, IAM mínimo da conta de serviço)."
 ```
