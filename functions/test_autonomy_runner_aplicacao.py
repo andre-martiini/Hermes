@@ -11,7 +11,7 @@ from autonomy.execution import (
     registrar_progresso,
 )
 from autonomy.requests import RequestStatus, lease_expirada
-from autonomy.runner_aplicacao import aplicar_decisao_continuacao
+from autonomy.runner_aplicacao import acordar_espera_externa, aplicar_decisao_continuacao
 from autonomy.runner_continuacao import DecisaoContinuacao
 from autonomy.runs import AgentRunStatus
 
@@ -155,3 +155,83 @@ class TestAplicarDecisao(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAcordarEsperaExterna(unittest.TestCase):
+    def _esperando(self, acordar_em=None):
+        p = _em_andamento()
+        return _aplicar(p, DecisaoContinuacao(
+            RequestStatus.AGUARDANDO_EXTERNO, continuar_em=acordar_em, condicao_espera="resposta"))
+
+    def test_acorda_com_lease_e_run_novos(self):
+        p = self._esperando(T0 + timedelta(hours=1))
+        agora = T0 + timedelta(hours=2)
+        n, antigo = acordar_espera_externa(p, "ex-b", "run-2", agora)
+        self.assertEqual(n.status, RequestStatus.EM_ANDAMENTO)
+        self.assertEqual(n.lease.generation, p.lease.generation + 1)
+        self.assertNotEqual(n.lease.lease_token, p.lease.lease_token)
+        self.assertEqual(n.run.run_id, "run-2")
+        self.assertEqual(n.run.status, AgentRunStatus.EM_ANDAMENTO)
+        self.assertEqual(antigo.status, AgentRunStatus.TIMEOUT)
+        self.assertEqual(n.condicao_espera, "")
+        self.assertIsNone(n.proximo_tentativa_em)
+        self.assertEqual(n.ledger_entry, p.ledger_entry)
+        self.assertEqual((n.tentativas, n.pausas), (p.tentativas, p.pausas))
+
+    def test_token_antigo_perde_o_fencing(self):
+        p = self._esperando()
+        n, _ = acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(hours=1))
+        with self.assertRaises(LeaseInvalida):
+            registrar_progresso(
+                n, p.lease.lease_token, p.lease.generation, "k2", {"a": 2}, {"passo": 2},
+                agora=T0 + timedelta(hours=1))
+
+    def test_antes_do_horario_recusa_exceto_por_evento(self):
+        p = self._esperando(T0 + timedelta(hours=3))
+        agora = T0 + timedelta(hours=1)
+        with self.assertRaises(LeaseInvalida):
+            acordar_espera_externa(p, "ex-b", "run-2", agora)
+        n, _ = acordar_espera_externa(p, "ex-b", "run-2", agora, por_evento=True)
+        self.assertEqual(n.status, RequestStatus.EM_ANDAMENTO)
+
+    def test_lease_ainda_valida_recusa_mesmo_por_evento(self):
+        p = self._esperando()
+        with self.assertRaises(LeaseInvalida):
+            acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(seconds=1), por_evento=True)
+
+    def test_status_errado_e_entradas_invalidas(self):
+        em = _em_andamento()
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(em, "ex-b", "run-2", T0 + timedelta(hours=1))
+        p = self._esperando()
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "ex-b", "run-2", datetime(2026, 10, 28, 15))
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(hours=1), por_evento="sim")
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "", "run-2", T0 + timedelta(hours=1))
+
+    def test_run_id_repetido_recusa(self):
+        p = self._esperando()
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "ex-b", p.run.run_id, T0 + timedelta(hours=1))
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "ex-b", f" {p.run.run_id} ", T0 + timedelta(hours=1))
+
+    def test_sem_lease_recusa(self):
+        p = dataclasses.replace(self._esperando(), lease=None)
+        with self.assertRaises(LeaseInvalida):
+            acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(hours=1))
+
+    def test_sem_run_antigo_devolve_none(self):
+        p = dataclasses.replace(self._esperando(), run=None)
+        n, antigo = acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(hours=1))
+        self.assertIsNone(antigo)
+        self.assertEqual(n.run.run_id, "run-2")
+
+    def test_pode_voltar_a_esperar_depois_de_acordar(self):
+        p = self._esperando()
+        n, _ = acordar_espera_externa(p, "ex-b", "run-2", T0 + timedelta(hours=1))
+        de_novo = _aplicar(n, DecisaoContinuacao(
+            RequestStatus.AGUARDANDO_EXTERNO, condicao_espera="outra"), agora=T0 + timedelta(hours=1))
+        self.assertEqual(de_novo.status, RequestStatus.AGUARDANDO_EXTERNO)

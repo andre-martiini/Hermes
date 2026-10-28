@@ -639,26 +639,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P08 sub-entrega 6/N -- autorização do worker (autonomy/worker_auth.py, passo 2): função pura autorizar_chamada_worker(claims, headers, config, agora). Claims OIDC já verificados pelo wiring; exige emissor Google, audience exata do worker, exp futuro e finito, e-mail verificado ASCII igual à conta de serviço configurada e cabeçalho X-CloudTasks-QueueName igual à fila configurada. Fail-closed (config inválida/tipos hostis nunca autorizam); motivo é código fixo que não ecoa o token. Sem I/O (shadow/off)."
-estado: validado
-inicio: "2026-10-28T10:49:00Z"
-fim: "2026-10-28T11:30:00Z"
-decisoes:
-  - id: p08-sub6-triagem
-    motivo: "Nenhuma PR aberta e nenhuma execução paralela da linha de autonomia no disparo das 8h BRT."
-  - id: p08-sub6-verificacao-token
-    motivo: "A verificação criptográfica do JWT (assinatura/exp) fica no wiring (google.oauth2.id_token); a função só decide sobre claims, com exp conferido de novo como defesa em profundidade."
-  - id: p08-sub6-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 4 arquivado em execucao-archive-p08sub4.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4862 OK (diário, P08 sub 5; main atual 4863); DEPOIS 4872 OK (+9 em test_autonomy_worker_auth)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 1 achado real (iss não hashable levantava TypeError) e 2 menores (e-mail com U+212A casava via lower(); exp=inf nunca expirava) -> corrigidos e cobertos por teste. Codex na PR: 1 achado P2 (exp inteiro gigante, 10**1000, estourava OverflowError em math.isfinite -- regressão da minha correção) -> corrigido com try/except e coberto por teste. Sem rodada 2: lógica pura, correções de poucas linhas cobertas por teste."
-pendencias:
-  - "P08: wiring (worker HTTP verificando o JWT e chamando autorizar_chamada_worker, Cloud Tasks real tratando ALREADY_EXISTS como duplicata, reserva/lease via autonomy.execution com CAS aplicando a DecisaoContinuacao, cliente Claude real consumindo ConfigModelos, leitura da flag do modo e do orçamento de despachos, IAM mínimo da conta de serviço)."
-```
+# (Em 2026-10-28 o bloco "P08 sub-entrega 6/N" foi movido para docs/autonomia/execucao-archive-p08sub6.md.)
 
 ---
 
@@ -702,4 +683,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): não achou nada. Codex na PR #550: 1 achado P1 real -- a 1a versão mandava VERIFICANDO vencido a RETENTATIVA_AGENDADA, o que reexecutaria o pedido e poderia duplicar efeito já feito; corrigido (VERIFICANDO vencido vai a RESULTADO_DESCONHECIDO, varrer_lease_vencida volta a recusá-lo) e coberto por teste. Rodada 2 (agente sem contexto, focada na correção): não achou nada (2 nits de documentação, 1 aplicado)."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao e o sweep, renovar lease ao acordar de AGUARDANDO_EXTERNO, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 9/N -- acordar espera externa (autonomy/runner_aplicacao.py, passo 5): função pura acordar_espera_externa(pedido, executor_id, run_id, agora, duracao_segundos, por_evento). Retoma AGUARDANDO_EXTERNO num worker novo: exige lease anterior vencida (nunca toma reserva válida), emite lease nova com geração+1 (fencing: token antigo perde o direito), fecha o run antigo por timeout (devolvido ao chamador para persistir), abre run novo EM_ANDAMENTO com run_id inédito, preserva ledger/tentativas/pausas e limpa condicao_espera/proximo_tentativa_em. Antes de proximo_tentativa_em só com por_evento=True. Sem I/O (shadow/off)."
+estado: validado
+inicio: "2026-10-28T19:48:00Z"
+fim: "2026-10-28T20:10:00Z"
+decisoes:
+  - id: p08-sub9-triagem
+    motivo: "Única PR aberta (#552, correção de OAuth do MCP, outra linha, sensível à segurança, revisão em andamento): não tocada. Nenhuma PR da autonomia pendente."
+  - id: p08-sub9-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 6 arquivado em execucao-archive-p08sub6.md."
+  - id: p08-sub9-cas
+    motivo: "Exclusão mútua entre dois despertares (ou despertar x sweep) sobre o mesmo snapshot é do wiring (compare-and-swap em generation/status); documentado na docstring."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4902 OK (diário, P08 sub 8); DEPOIS 4912 OK (+9 em test_autonomy_runner_aplicacao; o restante vem de merges de outras linhas)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): nenhum bug alcançável; 2 observações de baixo risco, ambas tratadas (run_id repetido agora recusado, com teste; CAS do wiring documentado). Codex na PR #553: 1 achado P2 real -- a checagem de run_id repetido não normalizava espaços como AgentRun faz (\" run-1 \" passava e colidia); corrigido (compara o id normalizado) e coberto por teste. Correção de uma linha, sem rodada adversarial adicional."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, o sweep e acordar_espera_externa persistindo também o run antigo fechado, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
