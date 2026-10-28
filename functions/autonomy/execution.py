@@ -153,6 +153,8 @@ class PedidoDuravel:
     run: AgentRun | None = None
     tentativas: int = 0
     proximo_tentativa_em: datetime | None = None
+    pausas: int = 0
+    condicao_espera: str = ""
 
     def __post_init__(self) -> None:
         request_id_limpo = str(self.request_id or "").strip()
@@ -161,6 +163,8 @@ class PedidoDuravel:
         object.__setattr__(self, "request_id", request_id_limpo)
         if self.tentativas < 0:
             raise ValueError("tentativas não pode ser negativa.")
+        if self.pausas < 0:
+            raise ValueError("pausas não pode ser negativa.")
         if self.proximo_tentativa_em is not None:
             _exigir_tz_aware(self.proximo_tentativa_em, "proximo_tentativa_em")
 
@@ -440,7 +444,8 @@ def registrar_progresso(
     entrada = criar_ou_reusar_entrada(idempotency_key, payload, pedido.ledger_entry, agora=agora)
     entrada = adicionar_checkpoint(entrada, checkpoint_dados, agora=agora)
     return dataclasses.replace(
-        pedido, status=RequestStatus.EM_ANDAMENTO, ledger_entry=entrada, run=run_atualizado
+        pedido, status=RequestStatus.EM_ANDAMENTO, ledger_entry=entrada, run=run_atualizado,
+        condicao_espera="", proximo_tentativa_em=None,
     )
 
 
