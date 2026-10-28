@@ -215,6 +215,8 @@ class TestAcordarEsperaExterna(unittest.TestCase):
         p = self._esperando()
         with self.assertRaises(ValueError):
             acordar_espera_externa(p, "ex-b", p.run.run_id, T0 + timedelta(hours=1))
+        with self.assertRaises(ValueError):
+            acordar_espera_externa(p, "ex-b", f" {p.run.run_id} ", T0 + timedelta(hours=1))
 
     def test_sem_lease_recusa(self):
         p = dataclasses.replace(self._esperando(), lease=None)

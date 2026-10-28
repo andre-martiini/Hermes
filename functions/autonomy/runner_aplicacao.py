@@ -205,7 +205,7 @@ def acordar_espera_externa(
         raise LeaseInvalida(
             f"pedido '{pedido.request_id}' só acorda em {pedido.proximo_tentativa_em.isoformat()}."
         )
-    if pedido.run is not None and run_id == pedido.run.run_id:
+    if pedido.run is not None and str(run_id or "").strip() == pedido.run.run_id:
         raise ValueError("run_id deve ser novo (igual ao do run corrente).")
     lease_nova = nova_lease(
         executor_id, pedido.lease.generation, agora=agora, duracao_segundos=duracao_segundos
