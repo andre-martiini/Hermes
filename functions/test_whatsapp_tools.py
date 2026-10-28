@@ -361,9 +361,15 @@ class TestConsolidar(unittest.TestCase):
 
         doc = ctx.db._cols[wa.COL_CONSOLIDACOES].dados[r["job_id"]]
         self.assertEqual(doc["status"], "queued")
-        self.assertEqual(doc["message_ids"], ["m1", "m2"])
+        self.assertEqual(doc["message_ids"], [f"{MONITORADO}_m1", f"{MONITORADO}_m2"])
         self.assertEqual(doc["chat_name"], "Equipe")
         self.assertEqual(doc["origem"], "mcp")
+
+    def test_id_completo_nao_recebe_prefixo_duas_vezes(self):
+        ctx = _Ctx(_db_padrao())
+        r = wa.consolidar(ctx, {"chat_id": MONITORADO, "message_ids": [f"{MONITORADO}_m1"]})
+        doc = ctx.db._cols[wa.COL_CONSOLIDACOES].dados[r["job_id"]]
+        self.assertEqual(doc["message_ids"], [f"{MONITORADO}_m1"])
 
     def test_sem_ids_o_periodo_define_o_recorte(self):
         ctx = _Ctx(_db_padrao())
