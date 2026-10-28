@@ -68,7 +68,13 @@ def autorizar_chamada_worker(
     if claims.get("aud") != config.audience:
         return _negar("audience_invalida")
     exp = claims.get("exp")
-    if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp):
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        return _negar("exp_invalido")
+    try:
+        finito = math.isfinite(exp)
+    except OverflowError:  # inteiro gigante não converte para float
+        finito = False
+    if not finito:
         return _negar("exp_invalido")
     if exp <= agora.astimezone(timezone.utc).timestamp():
         return _negar("token_expirado")

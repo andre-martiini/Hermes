@@ -47,7 +47,7 @@ class TestAuthWorker(unittest.TestCase):
             self.assertEqual(d.motivo, motivo)
 
     def test_exp_bool_nan(self):
-        for exp in (True, float("nan"), float("inf"), None):
+        for exp in (True, float("nan"), float("inf"), 10**1000, -10**1000, None):
             self.assertEqual(autorizar_chamada_worker(claims(exp=exp), HDR, CFG, AGORA).motivo, "exp_invalido")
 
     def test_sem_token_ou_cabecalho(self):
