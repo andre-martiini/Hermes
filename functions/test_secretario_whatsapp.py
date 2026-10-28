@@ -106,9 +106,20 @@ class _MockDb:
 
 
 class TestSecretarioRegrasPuras(unittest.TestCase):
-    # Desde 14/10/2026 o secretário escreve em primeira pessoa, sem assinatura.
+    # Desde 28/10/2026 o código acrescenta PREFIXO_IDENTIFICACAO; `sem_assinatura` só tira o que o modelo escrever.
     def test_sem_assinatura_mantem_texto_sem_prefixo(self):
-        self.assertEqual(sec.sem_assinatura("  Estou em reunião, te retorno.  "), "Estou em reunião, te retorno.")
+        self.assertEqual(sec.sem_assinatura("  O André está em reunião, vou repassar.  "), "O André está em reunião, vou repassar.")
+
+    def test_com_identificacao_poe_o_prefixo_uma_vez_so(self):
+        esperado = f"{sec.PREFIXO_IDENTIFICACAO}\nOlá, anotei."
+        for texto in ["Olá, anotei.", "  Olá, anotei. ", "**Gaspar Bot:** Olá, anotei.", sec.PREFIXO_IDENTIFICACAO + " Olá, anotei.",
+                      esperado]:
+            with self.subTest(texto=texto):
+                self.assertEqual(sec.com_identificacao(texto), esperado)
+
+    def test_prefixo_novo_e_reconhecido_como_do_bot_sem_registro(self):
+        self.assertTrue(sec.eh_mensagem_do_bot({"from_me": True, "content": sec.com_identificacao("Oi")}))
+        self.assertFalse(sec.eh_mensagem_do_bot({"from_me": True, "content": "Gaspar, tudo certo?"}))
 
     def test_sem_assinatura_tira_a_assinatura_antiga(self):
         for texto in ["**Gaspar Bot:** Olá, anotei.", "Gaspar Bot: Olá, anotei.", "*Gaspar Bot:* Olá, anotei.",
@@ -365,8 +376,8 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
         rascunho = outbox_docs[0].to_dict()
-        # Primeira pessoa, sem assinatura (14/10/2026).
-        self.assertFalse(rascunho["content"].startswith("**Gaspar Bot:**"))
+        # Sai identificado como assistente (28/10/2026).
+        self.assertTrue(rascunho["content"].startswith(sec.PREFIXO_IDENTIFICACAO + "\n"))
         self.assertEqual(rascunho["tipo"], sec.TIPO_OUTBOX_SECRETARIO)
         self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
         self.assertIsNone(rascunho.get("envio_liberado_em"))
@@ -419,7 +430,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         # Mensagem no outbox com encerramento polido
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
-        self.assertEqual(outbox_docs[0].to_dict()["content"], sec._RESPOSTA_FECHAMENTO)
+        self.assertEqual(outbox_docs[0].to_dict()["content"], sec.com_identificacao(sec._RESPOSTA_FECHAMENTO))
 
     def test_forcar_decisao_escala_alta_prioridade(self):
         chat_id = "5511999999999@c.us"
@@ -523,7 +534,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(res["status"], "ok")
         outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
         self.assertEqual(len(outbox_docs), 1)
-        self.assertFalse(outbox_docs[0].to_dict()["content"].startswith("**Gaspar Bot:**"))
+        self.assertTrue(outbox_docs[0].to_dict()["content"].startswith(sec.PREFIXO_IDENTIFICACAO + "\n"))
 
     def test_grupo_na_allowlist_com_mentioned_ids_cruzando_andre_ids_processa(self):
         chat_id = "120363000000000000@g.us"
@@ -1697,7 +1708,7 @@ class TestMontagemPromptSecretario(unittest.TestCase):
     def test_primeira_mensagem_instrui_apresentacao_breve(self):
         prompt = sec.montar_system_instruction_secretario(historico=[])
         self.assertIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
-        self.assertIn("em primeira pessoa, que agora não consegue falar com calma", prompt)
+        self.assertIn("que o André não pode responder agora e que você anota o recado para ele", prompt)
         self.assertNotIn("Esta conversa JÁ ESTÁ EM ANDAMENTO", prompt)
 
     def test_primeira_mensagem_com_historico_none(self):

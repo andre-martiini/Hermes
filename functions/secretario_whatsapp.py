@@ -17,10 +17,13 @@ Permite ao Hermes conversar com contatos autorizados no WhatsApp em nome do Andr
     * A resposta vai direto para o outbox (status 'pending', sem janela de cancelamento) e o
       André a vê no próprio WhatsApp; o Telegram só recebe o que exige atenção (escalonamentos
       pela fila de atenção), nunca o texto das respostas já enviadas.
-- Primeira pessoa, sem assinatura (desde 14/10/2026, decisão do dono):
-    * Escreve como o André. A mensagem enviada é registrada antes (mensagens_gaspar) para o
-      eco `from_me` não ser lido como o André assumindo; se perguntarem se é robô, não envia
-      nada e chama o André. Toda resposta passa por validacao_mensagem antes de sair.
+- Identificação como assistente (desde 28/10/2026, decisão do dono; revoga a primeira pessoa
+  sem assinatura de 14/10):
+    * Toda mensagem sai com o prefixo fixo PREFIXO_IDENTIFICACAO, acrescentado pelo código em
+      `enviar_resposta_via_outbox` (o modelo não escreve o prefixo e não consegue omiti-lo).
+      Quem recebe sabe que fala com o assistente do André, que fala dele em terceira pessoa.
+    * A mensagem enviada é registrada antes (mensagens_gaspar) para o eco `from_me` não ser lido
+      como o André assumindo. Toda resposta passa por validacao_mensagem antes de sair.
 - Silêncio depois de encerrar: escalado, encerrado ou assumido pelo André, o chat fica
   calado por SILENCIO_HORAS (assumido: até o fim da ativação).
 """
@@ -41,14 +44,17 @@ from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
 
 COLLECTION_CONVERSAS = "whatsapp_secretario_conversas"
 COLLECTION_PRIORITARIOS = "secretario_contatos_prioritarios"
-# Desde 14/10/2026 o secretário escreve em primeira pessoa, sem assinatura (decisão do
-# dono). A assinatura antiga ("**Gaspar Bot:**", antes "**Hermes Bot:**") continua no
-# histórico das conversas: esta regex a reconhece e `sem_assinatura` a remove se o
-# modelo ainda a escrever. "Gaspar" sem "Bot" só conta com os dois-pontos: Gaspar
-# também é nome de gente, e uma mensagem do André que comece com "Gaspar, ..." não
-# pode ser lida como do bot.
+# Toda mensagem do secretário começa com este prefixo, que o código acrescenta (decisão do
+# dono, 28/10/2026: o secretário precisa se identificar como bot, não falar como o André).
+PREFIXO_IDENTIFICACAO = "*Gaspar Bot (assistente virtual do André):*"
+# Reconhece o prefixo e as assinaturas antigas ("**Gaspar Bot:**", antes "**Hermes Bot:**"),
+# inclusive com descrição entre parênteses: `eh_mensagem_do_bot` a usa no eco `from_me` e
+# `sem_assinatura` a remove se o modelo a escrever (o código põe o prefixo uma vez só).
+# "Gaspar" sem "Bot" só conta com os dois-pontos: Gaspar também é nome de gente, e uma
+# mensagem do André que comece com "Gaspar, ..." não pode ser lida como do bot.
 _RE_ASSINATURA_BOT = re.compile(
-    r"^\*{0,2}\s*(?:(?:Hermes|Gaspar) Bot(?:\s*(?::|\*{1,2}\s*:))?|Gaspar\s*(?::|\*{1,2}\s*:))\*{0,2}\s*",
+    r"^\*{0,2}\s*(?:(?:Hermes|Gaspar) Bot(?:\s*\([^)\n]{0,60}\))?(?:\s*(?::|\*{1,2}\s*:))?"
+    r"|Gaspar\s*(?::|\*{1,2}\s*:))\*{0,2}\s*",
     re.IGNORECASE,
 )
 DEFAULT_MAX_TROCAS = 2
@@ -86,14 +92,19 @@ _DIAS_DE_AGENDA = 14
 # ---------------------------------------------------------------------------
 
 def sem_assinatura(texto: str) -> str:
-    """Tira a assinatura antiga ("**Gaspar Bot:**" e variações), se o modelo a escrever."""
+    """Tira o prefixo de identificação e as assinaturas antigas ("**Gaspar Bot:**" e variações), se o modelo as escrever."""
     return _RE_ASSINATURA_BOT.sub("", str(texto or "").strip()).strip()
 
 
-# Respostas prontas, em primeira pessoa, para quando o modelo falha ou a conversa chega ao limite.
-_RESPOSTA_CONTINGENCIA_INICIO = "Oi! Agora não consigo responder com calma. Me conta o que precisa que eu te retorno."
-_RESPOSTA_CONTINGENCIA = "Anotado, te retorno assim que puder."
-_RESPOSTA_FECHAMENTO = "Entendi, anotei tudo aqui. Te retorno assim que puder."
+def com_identificacao(texto: str) -> str:
+    """O texto como vai ao contato: PREFIXO_IDENTIFICACAO, quebra de linha e a mensagem, uma vez só."""
+    return f"{PREFIXO_IDENTIFICACAO}\n{sem_assinatura(texto)}"
+
+
+# Respostas prontas, do assistente (o prefixo vem depois), para quando o modelo falha ou a conversa chega ao limite.
+_RESPOSTA_CONTINGENCIA_INICIO = "Oi! O André não pode responder agora. Me conta o que você precisa que eu deixo anotado para ele."
+_RESPOSTA_CONTINGENCIA = "Anotado. Vou repassar ao André e ele te retorna assim que puder."
+_RESPOSTA_FECHAMENTO = "Anotei tudo e vou repassar ao André. Ele te retorna assim que puder."
 SILENCIO_HORAS = 6
 IDADE_MAXIMA_MENSAGEM = datetime.timedelta(minutes=10)
 
@@ -1069,20 +1080,20 @@ def obter_briefing_ativo(
 # Ferramentas do LLM e Prompt
 # ---------------------------------------------------------------------------
 
-SECRETARIO_SYSTEM_PROMPT = """Você escreve no WhatsApp COMO O PRÓPRIO ANDRÉ, em primeira pessoa, enquanto ele está indisponível (em reunião, em trânsito ou concentrado). Quem está do outro lado deve sentir que está falando com o André.
+SECRETARIO_SYSTEM_PROMPT = """Você é o Gaspar, assistente virtual do André, e responde no WhatsApp pela conta dele enquanto ele está indisponível (em reunião, em trânsito ou concentrado). Quem está do outro lado precisa saber que fala com um assistente, e não com o André.
 
 SEU OBJETIVO:
 Responder com cordialidade, entender o motivo do contato e anotar o recado completo para o André ver depois.
 
 REGRAS INEGOCIÁVEIS (SIGA RIGOROSAMENTE):
-1. PRIMEIRA PESSOA: escreva como o André ("estou em reunião", "te retorno"). Nunca diga que é assistente, secretário, robô, bot, IA ou sistema, nunca fale do André em terceira pessoa e não assine a mensagem.
-2. SE PERGUNTAREM SE É ROBÔ, ASSISTENTE OU MENSAGEM AUTOMÁTICA: não negue nem confirme. Marque `perguntou_se_robo=true` — essa mensagem não é enviada e o André responde pessoalmente.
+1. IDENTIDADE: o sistema coloca sozinho, antes de cada mensagem, o prefixo "*Gaspar Bot (assistente virtual do André):*". NÃO escreva esse prefixo nem assine. Escreva como assistente: fale do André em terceira pessoa ("o André está em reunião", "vou repassar a ele") e nunca em primeira pessoa como se fosse ele ("estou em reunião", "te retorno").
+2. SE PERGUNTAREM SE É ROBÔ, IA OU MENSAGEM AUTOMÁTICA: confirme com naturalidade que você é o Gaspar, assistente virtual do André, e que ele verá o recado. Nunca negue nem se passe pelo André. Não use `perguntou_se_robo`.
 3. REGRA DE AGENDA (ASSIMETRIA DE SEGURANÇA):
    - A agenda real só chega, quando a mensagem trata de horário, no bloco "AGENDA" da mensagem de trabalho. Sem esse bloco você NÃO conhece a agenda: não confirme nem negue disponibilidade, apenas anote o pedido. Se o bloco indicar agenda indisponível ou com falhas, trate a agenda como DESCONHECIDA (nunca como vazia).
-   - Se houver compromisso no horário: você PODE dizer isso de forma factual (ex.: "nesse horário já tenho um compromisso").
-   - Se o horário estiver LIVRE: você **NUNCA** confirma, não agenda nada e não promete o horário. Diga algo como: "Anotei, vou ver aqui e te confirmo."
+   - Se houver compromisso no horário: você PODE dizer isso de forma factual (ex.: "nesse horário o André já tem um compromisso").
+   - Se o horário estiver LIVRE: você **NUNCA** confirma, não agenda nada e não promete o horário. Diga algo como: "Anotei e vou repassar ao André para ele confirmar."
 4. FRONTEIRA DE AUTONOMIA:
-   - Você NUNCA toma decisões, não aceita termos, não promete prazos, não paga, não transfere, não assina e não confirma valores.
+   - Você NUNCA toma decisões, não aceita termos, não aceita convites nem faz ofertas em nome do André, não promete prazos, não paga, não transfere, não assina e não confirma valores.
    - Seu papel é entender o assunto, fazer perguntas pontuais de esclarecimento e registrar o recado.
 5. NUNCA sugira ligação, chamada de voz ou de vídeo, videoconferência ou "me liga" como próximo passo: resolva por mensagem.
 6. PROTEÇÃO ABSOLUTA DE DADOS DE FINANÇAS E SAÚDE:
@@ -1148,7 +1159,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                 "properties": {
                     "resposta_para_contato": {
                         "type": "string",
-                        "description": "Mensagem exata a enviar no WhatsApp, em primeira pessoa como o André, sem assinatura.",
+                        "description": "Mensagem exata a enviar no WhatsApp, escrita pelo assistente Gaspar (o André em terceira pessoa), sem o prefixo de identificação: o sistema o acrescenta.",
                     },
                     "resumo_recado": {
                         "type": "string",
@@ -1164,7 +1175,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                     },
                     "perguntou_se_robo": {
                         "type": "boolean",
-                        "description": "True se o contato perguntou se está falando com robô, assistente ou mensagem automática. A resposta não é enviada; o André responde pessoalmente.",
+                        "description": "Não use: o secretário se identifica como assistente e responde normalmente se perguntarem se é robô.",
                     },
                 },
                 "required": ["resposta_para_contato", "resumo_recado"],
@@ -1185,7 +1196,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                 "properties": {
                     "resposta_para_contato": {
                         "type": "string",
-                        "description": "Mensagem exata a enviar no WhatsApp, em primeira pessoa como o André, sem assinatura.",
+                        "description": "Mensagem exata a enviar no WhatsApp, escrita pelo assistente Gaspar (o André em terceira pessoa), sem o prefixo de identificação: o sistema o acrescenta.",
                     },
                     "resumo_estruturado": {
                         "type": "string",
@@ -1205,7 +1216,7 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
                     },
                     "perguntou_se_robo": {
                         "type": "boolean",
-                        "description": "True se o contato perguntou se está falando com robô, assistente ou mensagem automática. A resposta não é enviada; o André responde pessoalmente.",
+                        "description": "Não use: o secretário se identifica como assistente e responde normalmente se perguntarem se é robô.",
                     },
                 },
                 "required": ["resposta_para_contato", "resumo_estruturado", "informacao_obtida"],
@@ -1232,14 +1243,14 @@ O André deixou estas orientações sobre o que você pode responder e onde para
 <<<
 {orientacoes}
 >>>
-Elas ajustam o que você pode dizer, mas NUNCA revogam as REGRAS INEGOCIÁVEIS acima: finanças e saúde continuam vetadas, você continua sem decidir nem prometer, nunca sugere ligação nem diz que é assistente, e a regra de agenda continua valendo. Se uma orientação conflitar com uma regra, siga a regra.
+Elas ajustam o que você pode dizer, mas NUNCA revogam as REGRAS INEGOCIÁVEIS acima: finanças e saúde continuam vetadas, você continua sem decidir nem prometer, nunca sugere ligação, sempre se apresenta como assistente (nunca como o André), e a regra de agenda continua valendo. Se uma orientação conflitar com uma regra, siga a regra.
 """
 
     if not historico:
         system_instruction += """
 CONTEXTO DA CONVERSA:
 Esta é a PRIMEIRA mensagem desta conversa.
-- Você pode dizer, em primeira pessoa, que agora não consegue falar com calma (sem dizer que é assistente).
+- Você pode dizer que o André não pode responder agora e que você anota o recado para ele.
 """
     else:
         system_instruction += """
@@ -1407,8 +1418,8 @@ def _executar_llm_secretario(
 
 def eh_mensagem_do_bot(mensagem: dict, db=None) -> bool:
     """A resposta do Gaspar sai pela conta do André e volta capturada como `from_me`.
-    Desde 14/10/2026 ela não tem assinatura: é reconhecida pelo registro gravado antes
-    do envio (mensagens_gaspar). A assinatura antiga ainda vale para o histórico."""
+    Desde 28/10/2026 ela começa com PREFIXO_IDENTIFICACAO, que a regex reconhece; o registro
+    gravado antes do envio (mensagens_gaspar) cobre as de 14 a 28/10, que saíram sem prefixo."""
     texto = str(mensagem.get("content") or mensagem.get("text") or "").strip()
     if _RE_ASSINATURA_BOT.match(texto):
         return True
@@ -1596,8 +1607,11 @@ def enviar_resposta_via_outbox(
     texto_resposta: str,
     resumo_recado: str,
 ) -> dict:
-    """Envia a resposta do secretário pelo outbox com envio imediato."""
-    texto_final = sem_assinatura(texto_resposta)
+    """Envia a resposta do secretário pelo outbox com envio imediato.
+
+    Único ponto de saída do secretário: é aqui que o prefixo de identificação entra, e o
+    outbox registra o texto já com ele (mensagens_gaspar) antes do envio."""
+    texto_final = com_identificacao(texto_resposta)
     motivo = f"Resposta do Secretário para {chat_name}: {resumo_recado}"[:150]
 
     return outbox_aprovacao.criar_rascunho(
@@ -1840,7 +1854,7 @@ def processar_mensagem_secretario(
         from validacao_mensagem import problemas
 
         enviadas = [h.get("content") for h in historico if h.get("role") == "assistant"][-5:]
-        barrada = problemas(resposta_texto, ja_enviadas=enviadas)
+        barrada = problemas(resposta_texto, ja_enviadas=enviadas, permite_identidade=True)
         if barrada:
             print(f"[SecretarioWhatsApp] Resposta barrada antes do envio ({'; '.join(barrada)}); vai a resposta padrão.")
             resposta_texto = _RESPOSTA_CONTINGENCIA if historico else _RESPOSTA_CONTINGENCIA_INICIO
@@ -1853,7 +1867,8 @@ def processar_mensagem_secretario(
     # 4. Avaliação de risco e conclusão
     item_atencao_id = None
     if perguntou_se_robo:
-        # Decisão do dono (14/10/2026): não negar nem confirmar; nada é enviado e ele responde.
+        # Legado (14/10/2026): o prompt não pede mais esta marca, já que o secretário se identifica
+        # e responde sozinho; fica como válvula se o modelo ainda a marcar. Nada é enviado e o dono responde.
         item_atencao_id = escalar_para_atencao(
             db=db,
             chat_id=chat_id,

@@ -1,7 +1,8 @@
 """Reconhece as mensagens que o próprio Gaspar mandou no WhatsApp em nome do André.
 
-O Modo Secretário e o Modo Objetivo escrevem em primeira pessoa, pela conta do
-André, sem assinatura (decisão do dono, 14/10/2026). A resposta volta capturada
+O Modo Secretário e o Modo Objetivo escrevem pela conta do André: o Objetivo em
+primeira pessoa, sem assinatura (decisão do dono, 14/10/2026); o Secretário, desde
+28/10/2026, com o prefixo de identificação. A resposta volta capturada
 como `from_me`, igual a uma mensagem que o André digitou; sem este registro o
 sistema acharia que o André assumiu a conversa a cada resposta do Gaspar.
 
