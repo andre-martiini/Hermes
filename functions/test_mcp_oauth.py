@@ -542,5 +542,141 @@ class TestLogDeChamadaMcp(unittest.TestCase):
         self.assertEqual(info["supported_versions"], ["2025-06-18", "2026-07-28"])
 
 
+class _Doc:
+    """Documento e snapshot ao mesmo tempo: basta para `_consumir_refresh_token`."""
+
+    def __init__(self, store, chave):
+        self._store, self._chave = store, chave
+
+    @property
+    def exists(self):
+        return self._chave in self._store
+
+    def get(self):
+        return self
+
+    def to_dict(self):
+        return dict(self._store[self._chave]) if self.exists else None
+
+    def set(self, dados, merge=False):
+        base = self._store.get(self._chave, {}) if merge else {}
+        self._store[self._chave] = {**base, **dados}
+
+    def update(self, dados):
+        self._store[self._chave].update(dados)
+
+    def delete(self):
+        self._store.pop(self._chave, None)
+
+
+class _FakeDb:
+    def __init__(self):
+        self.colecoes = {}
+
+    def collection(self, nome):
+        store = self.colecoes.setdefault(nome, {})
+        return type("_Col", (), {"document": lambda _self, chave: _Doc(store, chave)})()
+
+
+class TestRefreshTokenRotacao(unittest.TestCase):
+    """Rotacao do refresh token com janela de tolerancia (28/10/2026).
+
+    A rotacao estrita derrubava a conexao do conector quando a resposta se perdia ou
+    duas sessoes renovavam juntas: o `invalid_grant` faz o claude.ai marcar a conexao
+    como invalida, e so o login do dono a refaz.
+    """
+
+    CLIENTE = "hermes-cliente-teste"
+
+    def setUp(self):
+        self.db = _FakeDb()
+        self.agora = 1_000_000
+        for alvo, valor in (("_db", lambda: self.db), ("_agora", lambda: self.agora),
+                            ("_signing_secret", lambda: _SEGREDO_DE_TESTE),
+                            ("_uid_autorizado", lambda uid: True)):
+            patch = mock.patch.object(mcp_oauth, alvo, valor)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _novo_token(self):
+        return mcp_oauth._emitir_refresh_token("uid-1", self.CLIENTE, mcp_oauth.SCOPE_PADRAO, mcp_oauth.MCP_RESOURCE)
+
+    def _refresh(self, token, client_id=None):
+        resp = mcp_oauth._token_por_refresh({"refresh_token": token}, client_id or self.CLIENTE)
+        return resp.status_code, json.loads(resp.get_data(as_text=True))
+
+    def _no_banco(self):
+        return self.db.colecoes.get(mcp_oauth._COL_REFRESH, {})
+
+    def test_rotaciona_e_devolve_outro_refresh_token(self):
+        t0 = self._novo_token()
+        status, corpo = self._refresh(t0)
+        self.assertEqual(status, 200)
+        self.assertNotEqual(corpo["refresh_token"], t0)
+        self.assertTrue(corpo["access_token"])
+
+    def test_reapresentar_dentro_da_janela_ainda_vale(self):
+        t0 = self._novo_token()
+        _, a = self._refresh(t0)
+        self.agora += mcp_oauth._REFRESH_GRACE_SEC - 1
+        status, b = self._refresh(t0)
+        self.assertEqual(status, 200)
+        self.assertNotEqual(a["refresh_token"], b["refresh_token"])
+        # os dois sucessores seguem validos
+        self.assertEqual(self._refresh(a["refresh_token"])[0], 200)
+        self.assertEqual(self._refresh(b["refresh_token"])[0], 200)
+
+    def test_reapresentar_depois_da_janela_e_invalid_grant_e_apaga_o_token(self):
+        t0 = self._novo_token()
+        self._refresh(t0)
+        self.agora += mcp_oauth._REFRESH_GRACE_SEC + 1
+        status, corpo = self._refresh(t0)
+        self.assertEqual((status, corpo["error"]), (400, "invalid_grant"))
+        self.assertNotIn(mcp_oauth._hash(t0), self._no_banco())
+
+    def test_cliente_errado_ou_vencido_queima_o_token_como_antes(self):
+        t0 = self._novo_token()
+        self.assertEqual(self._refresh(t0, client_id="outro")[1]["error"], "invalid_grant")
+        self.assertEqual(self._refresh(t0)[1]["error"], "invalid_grant")   # ja queimado
+        t1 = self._novo_token()
+        self.agora += mcp_oauth._REFRESH_TTL_SEC + 1
+        self.assertEqual(self._refresh(t1)[1]["error"], "invalid_grant")
+
+    def test_token_desconhecido_e_invalid_grant(self):
+        self.assertEqual(self._refresh("nunca-emitido")[1]["error"], "invalid_grant")
+
+    def test_uid_revogado_nao_ganha_token_nem_dentro_da_janela(self):
+        t0 = self._novo_token()
+        self._refresh(t0)
+        with mock.patch.object(mcp_oauth, "_uid_autorizado", lambda uid: False):
+            status, corpo = self._refresh(t0)
+        self.assertEqual((status, corpo["error"]), (400, "invalid_grant"))
+
+    def test_pai_some_quando_o_filho_e_usado_depois_da_janela(self):
+        t0 = self._novo_token()
+        _, a = self._refresh(t0)
+        self.agora += mcp_oauth._REFRESH_GRACE_SEC + 1
+        self._refresh(a["refresh_token"])
+        self.assertNotIn(mcp_oauth._hash(t0), self._no_banco())
+
+    def test_pai_fica_enquanto_a_janela_dele_nao_acabou(self):
+        t0 = self._novo_token()
+        _, a = self._refresh(t0)
+        self.agora += 10
+        self._refresh(a["refresh_token"])
+        self.assertIn(mcp_oauth._hash(t0), self._no_banco())
+        self.agora += 10
+        self.assertEqual(self._refresh(t0)[0], 200)
+
+    def test_log_do_reuso_nao_vaza_o_token(self):
+        t0 = self._novo_token()
+        self._refresh(t0)
+        with mock.patch("builtins.print") as mock_print:
+            self._refresh(t0)
+        linhas = " | ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("janela de tolerancia", linhas)
+        self.assertNotIn(t0, linhas)
+
+
 if __name__ == "__main__":
     unittest.main()

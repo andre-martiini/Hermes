@@ -100,6 +100,10 @@ SCOPE_PADRAO = "hermes:tools"
 
 _ACCESS_TTL_SEC = 3600          # 1h; o cliente renova pelo refresh
 _REFRESH_TTL_SEC = 60 * 60 * 24 * 30
+# Quanto tempo um refresh token ja rotacionado ainda e aceito (resposta perdida,
+# renovacao concorrente). Curto: e a janela em que um token roubado e reapresentado
+# tambem passa, o preco de nao derrubar a conexao do dono por um acaso de rede.
+_REFRESH_GRACE_SEC = 60
 _CODE_TTL_SEC = 120             # janela curta: o resgate e imediato
 
 # Curto de proposito: o discovery e servido pelo CDN do Hosting, e uma hora de
@@ -227,33 +231,78 @@ def validar_access_token(token: str) -> dict | None:
         return None
 
 
-def _emitir_refresh_token(uid: str, client_id: str, scope: str, resource: str) -> str:
+def _emitir_refresh_token(uid: str, client_id: str, scope: str, resource: str,
+                          pai: str | None = None) -> str:
+    """`pai` e o hash do refresh token que este substitui (some quando o pai sai da janela)."""
     bruto = secrets.token_urlsafe(40)
-    _db().collection(_COL_REFRESH).document(_hash(bruto)).set({
+    registro = {
         "uid": uid,
         "client_id": client_id,
         "scope": scope,
         "resource": resource,
         "criado_em": _agora(),
         "expira_em": _agora() + _REFRESH_TTL_SEC,
-    })
+    }
+    if pai:
+        registro["pai"] = pai
+    _db().collection(_COL_REFRESH).document(_hash(bruto)).set(registro)
     return bruto
 
 
+def _limpar_ancestral(col, pai: str | None, agora: int) -> None:
+    """Apaga o refresh token pai, ja consumido, quando a janela de tolerancia dele acabou.
+
+    Quem apresenta o filho provou ter recebido a resposta da rotacao anterior. Sem isto o pai
+    consumido ficaria no banco para sempre (as colecoes OAuth nao tem TTL). Falhar aqui nao
+    pode derrubar o refresh: o pior caso e um documento a mais.
+    """
+    if not pai:
+        return
+    try:
+        ref = col.document(pai)
+        snap = ref.get()
+        if snap.exists and agora - (snap.to_dict() or {}).get("consumido_em", agora) > _REFRESH_GRACE_SEC:
+            ref.delete()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mcp_oauth] nao consegui limpar refresh token antigo: {type(exc).__name__}")
+
+
 def _consumir_refresh_token(bruto: str, client_id: str) -> dict | None:
-    """Le e invalida um refresh token. Rotacao e obrigatoria para client publico.
+    """Valida e rotaciona um refresh token. Rotacao e obrigatoria para client publico.
 
     DCR registra o Claude como cliente publico, e a especificacao de autorizacao
     do MCP adota a exigencia do OAuth 2.1 de rotacionar refresh tokens nesse caso.
+
+    A rotacao nao e estrita ao segundo: o token consumido fica marcado (`consumido_em`)
+    e, por _REFRESH_GRACE_SEC, a mesma apresentacao ainda e aceita e gera outro par de
+    tokens. Em 28/10/2026 a conexao do conector foi invalidada (o `invalid_grant` faz o
+    claude.ai marcar a conexao como invalida, e so o login do dono a refaz), e a
+    rotacao estrita transforma em desastre dois casos comuns: a resposta se perde e o
+    cliente repete o token antigo, ou duas sessoes que dividem a conexao renovam ao
+    mesmo tempo. Passada a janela, um token ja consumido volta a ser `invalid_grant`.
+    O dict devolvido traz `hash_do_token`, para o sucessor apontar para ele (`pai`).
     """
-    ref = _db().collection(_COL_REFRESH).document(_hash(bruto))
+    col = _db().collection(_COL_REFRESH)
+    hash_do_token = _hash(bruto)
+    ref = col.document(hash_do_token)
     snap = ref.get()
     if not snap.exists:
         return None
     dados = snap.to_dict() or {}
-    ref.delete()
-    if dados.get("client_id") != client_id or dados.get("expira_em", 0) < _agora():
+    agora = _agora()
+    consumido_em = dados.get("consumido_em")
+    if consumido_em is not None and agora - consumido_em > _REFRESH_GRACE_SEC:
+        ref.delete()
         return None
+    if dados.get("client_id") != client_id or dados.get("expira_em", 0) < agora:
+        ref.delete()   # cliente errado ou vencido: queima o token, como antes
+        return None
+    if consumido_em is None:
+        ref.update({"consumido_em": agora})
+    else:
+        print("[mcp_oauth] refresh token reapresentado dentro da janela de tolerancia")
+    _limpar_ancestral(col, dados.get("pai"), agora)
+    dados["hash_do_token"] = hash_do_token
     return dados
 
 
@@ -582,7 +631,8 @@ def _handle_token(req: https_fn.Request) -> https_fn.Response:
     return resp
 
 
-def _resposta_token(uid: str, client_id: str, scope: str, resource: str) -> https_fn.Response:
+def _resposta_token(uid: str, client_id: str, scope: str, resource: str,
+                    pai: str | None = None) -> https_fn.Response:
     # `scope` e `resource` nao sao segredo (sao o que o cliente pediu no
     # `/oauth/authorize`, visivel na propria URL de autorizacao); logar os
     # dois aqui, no unico caminho de sucesso, deixa verificavel se um cliente
@@ -594,7 +644,7 @@ def _resposta_token(uid: str, client_id: str, scope: str, resource: str) -> http
         "access_token": emitir_access_token(uid, client_id, scope, resource),
         "token_type": "Bearer",
         "expires_in": _ACCESS_TTL_SEC,
-        "refresh_token": _emitir_refresh_token(uid, client_id, scope, resource),
+        "refresh_token": _emitir_refresh_token(uid, client_id, scope, resource, pai),
         "scope": scope,
     })
 
@@ -635,6 +685,7 @@ def _token_por_refresh(dados: dict, client_id: str) -> https_fn.Response:
         registro["uid"], client_id,
         registro.get("scope") or SCOPE_PADRAO,
         registro.get("resource") or MCP_RESOURCE,
+        pai=registro.get("hash_do_token"),
     )
 
 
