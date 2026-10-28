@@ -1632,6 +1632,9 @@ def processar_mensagem_secretario(
         return None
     if _mensagem_antiga(mensagem):
         return None
+    # Status (stories) e canais não são conversa: ninguém espera resposta e o envio falha.
+    if chat_id.endswith(("@broadcast", "@newsletter")):
+        return None
 
     # Fast path 2: Configuração em system/settings
     cfg = obter_config_secretario(db)

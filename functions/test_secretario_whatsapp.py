@@ -615,6 +615,12 @@ class TestEscopoUniversalDeContatos(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertEqual(res["status"], "ok")
 
+    def test_escopo_individuais_ignora_status_broadcast_e_newsletter(self):
+        self._configurar(escopo_universal="todos")
+        for chat in ("status@broadcast", "123@newsletter"):
+            msg = {"chat_id": chat, "from_me": False, "content": "Compre agora: site.com", "wa_message_id": "m0"}
+            self.assertIsNone(sec.processar_mensagem_secretario(self.db, msg, llm_runner=self._llm_padrao))
+
     def test_escopo_individuais_nao_atende_grupo(self):
         self._configurar(escopo_universal="individuais")
         msg = {
