@@ -433,6 +433,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="reversível pela tela Brainstorming (arquivar/apagar). Não idempotente: cada chamada cria "
         "documento com ID automático em brainstorm_ideas, sem checar texto repetido.",
     ),
+    "avisar_andre": ToolInventoryEntry(
+        "atencao", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "relê o item gravado em atencao e devolve o estado; obter_fila_atencao (origem sessao) também o mostra",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="o aviso vai ao próprio André (não a terceiros). Reversível: o item sai da fila com "
+        "resolver_item_atencao, mas a mensagem no Telegram, uma vez enviada, não volta. Não idempotente: "
+        "cada chamada grava um item novo (chave única), de propósito, para o segundo aviso não ser "
+        "engolido pela deduplicação.",
+    ),
     "anotar_no_diario": ToolInventoryEntry(
         "diario_pessoal", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático; a nota aparece na tela Diário Pessoal da data",

@@ -178,6 +178,18 @@ def _guardar_ideia(ctx: ToolContext, args: dict):
         return f"ERRO|{erro.message}"
 
 
+def _avisar_andre(ctx: ToolContext, args: dict):
+    from tools import avisar_andre
+
+    try:
+        return avisar_andre.avisar(
+            ctx.db, args.get("titulo"), args.get("resumo"), links=args.get("links"),
+            acao_id=args.get("acao_id"), sessao=args.get("sessao"), urgencia=args.get("urgencia"),
+        )
+    except avisar_andre.AvisoError as erro:
+        return f"ERRO|{erro.message}"
+
+
 def _anotar_no_diario(ctx: ToolContext, args: dict):
     from tools import anotar_no_diario
 
@@ -3212,6 +3224,7 @@ _HANDLERS: dict = {
     "consultar_lista_compras": _consultar_lista_compras,
     "guardar_ideia": _guardar_ideia,
     "listar_ideias": _listar_ideias,
+    "avisar_andre": _avisar_andre,
     "anotar_no_diario": _anotar_no_diario,
     "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
     "decidir_elevacao": _decidir_elevacao,

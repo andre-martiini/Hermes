@@ -39,7 +39,7 @@ A hora vem da tool `agora` do canal, porque a análise de comandos de PowerShell
 
 ## Marco 2: canal gaspar-eventos
 `gaspar-eventos/server.ts` consulta o Firestore a cada 20 s e empurra para a sessão:
-- itens abertos da fila de atenção;
+- itens abertos da fila de atenção, inclusive os avisos de sessões do Claude (`avisar_andre`, origem `sessao`, tipo `notificacao_sessao`): chat, Claude Code ou Cowork chamam a tool do Hermes ao terminar uma tarefa longa, falhar ou travar esperando decisão, e o agente manda no Telegram com a ação do Gaspar e os links (regra no `CLAUDE.md`). Sem o agente ligado, o backend avisa pelo bot antigo (prioridade alta). A tool só aparece para uma sessão depois que ela recarrega a lista de ferramentas do conector;
 - WhatsApp recebido em conversa individual (grupos, Status e Canais ficam de fora);
 - promessas vencidas;
 - reações de contatos a mensagens do André em conversa individual, gravadas pelo worker em `whatsapp_reactions` (`services/whatsapp-capture/reacoes.js`). Uma reação removida não vira evento.
