@@ -382,6 +382,19 @@ não reconstrói um token utilizável). O segredo de assinatura fica em
 `system/mcp_oauth.signing_secret`, gerado na primeira execução; `system/**` é
 negado a todo mundo nas firestore.rules, só o Admin SDK alcança.
 
+**Refresh token: rotação com janela de tolerância de 60 s (desde 28/10/2026).** Cada
+refresh gera um token novo e marca o antigo (`consumido_em`); o antigo ainda é aceito
+por `_REFRESH_GRACE_SEC` (60 s) e, nesse caso, gera outro par de tokens (os dois
+sucessores valem). Passada a janela, volta a ser `invalid_grant` e o documento é
+apagado; cliente errado ou token vencido continuam queimando o token na hora. Motivo:
+`invalid_grant` faz o claude.ai marcar a conexão do conector como invalidada, e só o
+login do dono a refaz. A rotação estrita derrubava a conexão quando a resposta se
+perdia (o cliente repete o token antigo) ou quando duas sessões que dividem a conexão
+renovavam juntas. O custo é a janela em que um token roubado e reapresentado também
+passa; não há detecção de reuso por família. O sucessor guarda `pai` (hash do token
+anterior), e o pai consumido é apagado quando o filho é usado depois da janela dele,
+já que essas coleções não têm TTL.
+
 ### Decisões que valem registrar
 
 **O access token é próprio, não um Firebase ID token repassado.** É um JWT HS256
