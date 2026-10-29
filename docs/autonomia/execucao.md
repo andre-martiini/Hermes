@@ -643,25 +643,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P08 sub-entrega 7/N -- aplicação da decisão de continuação (autonomy/runner_aplicacao.py, passos 4-7): função pura aplicar_decisao_continuacao(pedido, lease_token, generation, decisao, agora). Fencing + transição validada a partir de EM_ANDAMENTO. VERIFICANDO/AGUARDANDO_EXTERNO mantêm lease e run (espera guarda condição e horário); RETENTATIVA_AGENDADA fecha o run como falha, libera a lease (expira em agora) e grava contadores/proximo_tentativa_em; FALHA_FINAL sela o ledger via registrar_resultado_observado (sem ledger, só fecha o run). Contadores nunca regridem. PedidoDuravel ganha pausas e condicao_espera (default, compatível); registrar_progresso limpa condicao_espera/proximo_tentativa_em ao retomar. Sem I/O (shadow/off)."
-estado: validado
-inicio: "2026-10-28T13:54:00Z"
-fim: "2026-10-28T14:25:00Z"
-decisoes:
-  - id: p08-sub7-triagem
-    motivo: "Única PR aberta (#547, melhorias) é de outra linha e estava ativa há 2 min: não tocada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub7-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 1 arquivado em execucao-archive-p08sub1.md."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4872 OK (diário, P08 sub 6); DEPOIS 4890 OK (+18 em test_autonomy_runner_aplicacao)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 4 achados (status como string crua contornava a máquina de estados; contadores podiam regredir; continuar_em não-datetime dava AttributeError; condicao_espera obsoleta após retomar) -> corrigidos e cobertos por teste; lease vencida em AGUARDANDO_EXTERNO sem saída no sweep é lacuna já documentada em autonomy.sweep, registrada em pendencias. Rodada 2: sem bug alcançável; 1 resíduo menor (proximo_tentativa_em após retomar) corrigido em uma linha."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, renovar lease ao acordar de AGUARDANDO_EXTERNO e tratar vencimento de lease em VERIFICANDO/AGUARDANDO_* no sweep, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
-```
-
+# (Em 2026-10-29 o bloco "P08 sub-entrega 7/N" foi movido para docs/autonomia/execucao-archive-p08sub7.md.)
 ---
 
 ```yaml
@@ -706,4 +688,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): nenhum bug alcançável; 2 observações de baixo risco, ambas tratadas (run_id repetido agora recusado, com teste; CAS do wiring documentado). Codex na PR #553: 1 achado P2 real -- a checagem de run_id repetido não normalizava espaços como AgentRun faz (\" run-1 \" passava e colidia); corrigido (compara o id normalizado) e coberto por teste. Correção de uma linha, sem rodada adversarial adicional."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, o sweep e acordar_espera_externa persistindo também o run antigo fechado, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 10/N -- reconciliação de RESULTADO_DESCONHECIDO (autonomy/runner_aplicacao.py): função pura reconciliar_resultado_desconhecido(pedido, efeito_ocorreu, agora, ...). Exige lease anterior vencida. efeito_ocorreu=True -> VERIFICANDO com lease geração+1 e run novo (nunca retenta: duplicaria efeito); False -> RETENTATIVA_AGENDADA com tentativas+1, continuar_em futuro obrigatório e recusa acima de DEFAULT_MAX_TENTATIVAS. Devolve (pedido, run_antigo) para o wiring persistir. Sem I/O (shadow/off)."
+estado: validado
+inicio: "2026-10-29T10:48:00Z"
+fim: "2026-10-29T11:10:00Z"
+decisoes:
+  - id: p08-sub10-triagem
+    motivo: "Única PR aberta (#556, excluir_entrada_diario, outra linha) apaga dados e a própria descrição pede aval do André: não tocada. Nenhuma PR da autonomia pendente."
+  - id: p08-sub10-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 7 arquivado em execucao-archive-p08sub7.md."
+  - id: p08-sub10-escopo
+    motivo: "FALHA_FINAL por reconciliação fica fora (selar o ledger exige fencing com lease válida); a evidência efeito_ocorreu é responsabilidade do chamador/wiring."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4912 OK (diário, P08 sub 9); DEPOIS 4950 OK (+8 em test_autonomy_runner_aplicacao; o restante vem de merges de outras linhas)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): 1 achado real -- retentativa por reconciliação contornava o teto de tentativas; corrigido (ValueError acima de DEFAULT_MAX_TENTATIVAS, também recusa tentativas bool) e coberto por teste. Rodada 2 (focada na correção): não achei nada."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, sweep, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```

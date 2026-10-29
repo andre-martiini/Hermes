@@ -16,6 +16,11 @@ continuação em `proximo_tentativa_em`.
 - `FALHA_FINAL` sela o ledger (quando aberto) via
   `registrar_resultado_observado`; sem ledger, só transiciona e fecha o run.
 
+- `reconciliar_resultado_desconhecido` (sub 10) tira o pedido de
+  `RESULTADO_DESCONHECIDO` por evidência de reconciliação: efeito a
+  conferir -> `VERIFICANDO` (lease/run novos) ou efeito comprovadamente
+  inexistente -> `RETENTATIVA_AGENDADA`.
+
 Contadores da decisão nunca regridem em relação ao pedido. Limite conhecido:
 a espera que ninguém acorda é varrida por `autonomy.sweep.varrer_espera_vencida`;
 `acordar_espera_externa` retoma a espera com lease/run novos.
@@ -35,6 +40,7 @@ from autonomy.execution import (
 )
 from autonomy.requests import (
     DEFAULT_LEASE_SEGUNDOS,
+    DEFAULT_MAX_TENTATIVAS,
     RequestStatus,
     lease_expirada,
     nova_lease,
@@ -225,3 +231,106 @@ def acordar_espera_externa(
         condicao_espera="", proximo_tentativa_em=None,
     )
     return novo, run_antigo
+
+
+def reconciliar_resultado_desconhecido(
+    pedido: PedidoDuravel,
+    efeito_ocorreu: bool,
+    agora: datetime,
+    executor_id: str = "",
+    run_id: str = "",
+    continuar_em: datetime | None = None,
+    duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
+) -> tuple[PedidoDuravel, AgentRun | None]:
+    """Reconcilia um pedido `RESULTADO_DESCONHECIDO` (P08, sub 10).
+
+    `efeito_ocorreu` é a evidência da reconciliação (quem chama a obteve de
+    uma fonte confiável; esta função não adivinha):
+
+    - `True`: o efeito pode ter acontecido -> `VERIFICANDO`, para o verificador
+      concluir ou refutar. NUNCA retenta (retentar duplicaria o efeito). Exige
+      `executor_id`/`run_id` (novos): emite lease nova com geração + 1 e abre
+      run novo `EM_ANDAMENTO`, preservando ledger, tentativas e pausas.
+    - `False`: comprovadamente não ocorreu -> `RETENTATIVA_AGENDADA`, com
+      `tentativas` + 1 e `proximo_tentativa_em = continuar_em` (obrigatório,
+      futuro em relação a `agora`); recusa se `tentativas + 1` passar de `DEFAULT_MAX_TENTATIVAS`. A lease permanece vencida, como na
+      retentativa de `aplicar_decisao_continuacao`.
+
+    Exige a lease anterior vencida (nunca reconcilia sob reserva válida).
+    Devolve `(pedido, run_antigo)`; `run_antigo` só é não-`None` se ainda
+    estava ativo e precisou ser fechado por timeout (o wiring persiste os
+    dois). Exclusão mútua entre reconciliações concorrentes é do wiring
+    (compare-and-swap em `generation`/`status`). `FALHA_FINAL` por
+    reconciliação fica fora desta fatia (selar o ledger exige fencing)."""
+    if not isinstance(pedido, PedidoDuravel):
+        raise ValueError("pedido deve ser PedidoDuravel.")
+    if not isinstance(efeito_ocorreu, bool):
+        raise ValueError("efeito_ocorreu deve ser bool.")
+    if not isinstance(agora, datetime) or agora.tzinfo is None or agora.utcoffset() is None:
+        raise ValueError("agora deve ser datetime com fuso.")
+    agora = agora.astimezone(timezone.utc)
+    if pedido.status != RequestStatus.RESULTADO_DESCONHECIDO:
+        raise ValueError(
+            f"pedido '{pedido.request_id}' está em '{pedido.status.value}', "
+            "não 'resultado_desconhecido'."
+        )
+    destino = RequestStatus.VERIFICANDO if efeito_ocorreu else RequestStatus.RETENTATIVA_AGENDADA
+    ok, motivo = validar_transicao(pedido.status, destino)
+    if not ok:
+        raise ValueError(motivo)
+    if pedido.lease is None:
+        raise LeaseInvalida(f"pedido '{pedido.request_id}' não tem lease anterior para suceder.")
+    if not lease_expirada(pedido.lease, agora=agora):
+        raise LeaseInvalida(
+            f"lease anterior ainda válida (expira em {pedido.lease.expires_at.isoformat()}) "
+            "-- não é possível reconciliar antes de expirar."
+        )
+    run_antigo = pedido.run
+    if run_antigo is not None and run_esta_ativo(run_antigo):
+        run_antigo = _run_expirar_por_timeout(run_antigo, lease_expirada=True, agora=agora)
+    else:
+        run_antigo = None
+
+    if not efeito_ocorreu:
+        if (
+            not isinstance(continuar_em, datetime)
+            or continuar_em.tzinfo is None
+            or continuar_em.utcoffset() is None
+        ):
+            raise ValueError("retentativa_agendada exige continuar_em com fuso.")
+        if continuar_em <= agora:
+            raise ValueError("continuar_em deve ser posterior a agora.")
+        if (
+            isinstance(pedido.tentativas, bool)
+            or not isinstance(pedido.tentativas, int)
+            or pedido.tentativas + 1 > DEFAULT_MAX_TENTATIVAS
+        ):
+            raise ValueError(
+                f"pedido '{pedido.request_id}' esgotou o teto de {DEFAULT_MAX_TENTATIVAS} "
+                "tentativas -- retentar por reconciliação o contornaria (use falha_final)."
+            )
+        run_corrente = run_antigo if run_antigo is not None else pedido.run
+        return dataclasses.replace(
+            pedido, status=destino, run=run_corrente,
+            tentativas=pedido.tentativas + 1, proximo_tentativa_em=continuar_em,
+            condicao_espera="",
+        ), run_antigo
+
+    if not str(executor_id or "").strip() or not str(run_id or "").strip():
+        raise ValueError("verificar exige executor_id e run_id.")
+    if pedido.run is not None and str(run_id).strip() == pedido.run.run_id:
+        raise ValueError("run_id deve ser novo (igual ao do run corrente).")
+    lease_nova = nova_lease(
+        executor_id, pedido.lease.generation, agora=agora, duracao_segundos=duracao_segundos
+    )
+    run_novo = _run_marcar_em_andamento(
+        _run_criar(
+            run_id=run_id, request_id=pedido.request_id, executor_id=executor_id,
+            lease_token=lease_nova.lease_token, generation=lease_nova.generation, agora=agora,
+        ),
+        lease_nova.lease_token, lease_nova.generation,
+    )
+    return dataclasses.replace(
+        pedido, status=destino, lease=lease_nova, run=run_novo,
+        proximo_tentativa_em=None, condicao_espera="",
+    ), run_antigo
