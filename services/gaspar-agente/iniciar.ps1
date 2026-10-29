@@ -24,6 +24,15 @@ if (Test-Path $cache) {
 }
 Set-Location $PSScriptRoot
 
+# Aquece o servidor MCP do Hermes antes de subir o agente. A função dorme de madrugada e a partida a frio
+# passa dos 30 s que o proxy do claude.ai espera para conectar: nas subidas das 05:00 de 23, 26, 28 e 29/10
+# o conector Sistema Hermes deu CONNECT_TIMEOUT e, em 29/10, nunca conectou (o agente passou a manhã sem o
+# Gaspar). O initialize sem token responde 401, mas só depois de carregar a função inteira: é isso que aquece.
+try {
+  Invoke-WebRequest -Uri 'https://gestao-hermes.firebaseapp.com/mcp' -Method Post -ContentType 'application/json' `
+    -Body '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' -UseBasicParsing -TimeoutSec 120 | Out-Null
+} catch { }   # o 401 esperado vira exceção no PowerShell 5.1; o que importa é a função ter respondido
+
 # Canal gaspar-eventos (marco 2): usa a chave da conta de serviço do worker do WhatsApp; sem ela, o /loop varre tudo a cada 5 min.
 $canais = @('plugin:telegram@claude-plugins-official')
 $cron = '*/5 5-22 * * *'
