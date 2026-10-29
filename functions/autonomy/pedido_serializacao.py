@@ -14,7 +14,9 @@ O wiring de persistência (CAS por geração/status) grava e lê este documento.
   forma imutável do domínio não existe no documento) e voltam congelados
   pelos próprios construtores.
 - Round-trip: `pedido_de_dict(pedido_para_dict(p)) == p` para todo pedido
-  válido (instantes comparam iguais mesmo normalizados para UTC).
+  válido em UTC; a escrita relê o documento e recusa o que não leria. (Fuso com
+  horário de verão em hora ambígua preserva o instante, mas `==` pode diferir
+  pela regra do PEP 495.)
 """
 
 from __future__ import annotations
@@ -95,6 +97,10 @@ def _instante_de_str(valor: Any, nome: str) -> datetime:
         raise ValueError(f"{nome}: instante inválido.") from exc
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError(f"{nome}: instante sem fuso.")
+    try:
+        dt.astimezone(timezone.utc)  # a escrita normaliza para UTC: recusa o que não regrava
+    except OverflowError as exc:
+        raise ValueError(f"{nome}: instante fora do intervalo.") from exc
     return dt
 
 
@@ -133,7 +139,7 @@ def pedido_para_dict(pedido: PedidoDuravel) -> dict[str, Any]:
     lease = pedido.lease
     entrada = pedido.ledger_entry
     run = pedido.run
-    return {
+    doc = {
         "versao": VERSAO_SCHEMA,
         "request_id": pedido.request_id,
         "status": RequestStatus(pedido.status).value,
@@ -174,10 +180,16 @@ def pedido_para_dict(pedido: PedidoDuravel) -> dict[str, Any]:
         "pausas": pedido.pausas,
         "condicao_espera": pedido.condicao_espera,
     }
+    # Garante que o que se grava é legível: tipos fracos que o domínio aceita
+    # (ex.: checkpoint com `dados` não-dict) falham aqui, não só na leitura.
+    pedido_de_dict(doc)
+    return doc
 
 
 def _lease_de_dict(d: Any) -> Lease:
     m = _exigir_mapa(d, "lease", _CHAVES_LEASE)
+    if _exigir_int(m["generation"], "lease.generation") < 1:
+        raise ValueError("lease.generation: deve ser >= 1.")
     return Lease(
         lease_token=_exigir_str(m["lease_token"], "lease.lease_token"),
         generation=_exigir_int(m["generation"], "lease.generation"),
@@ -201,6 +213,11 @@ def _ledger_de_dict(d: Any) -> LedgerEntry:
             dados=_json_puro(mc["dados"], f"checkpoints[{i}].dados"),
             criado_em=_instante_de_str(mc["criado_em"], f"checkpoints[{i}].criado_em"),
         ))
+    seqs = [c.sequencia for c in checkpoints]
+    if any(b <= a for a, b in zip(seqs, seqs[1:])):
+        raise ValueError("ledger_entry.checkpoints: sequencia deve ser estritamente crescente.")
+    if m["resultado"] is not None and m["resultado_registrado_em"] is None:
+        raise ValueError("ledger_entry: resultado sem resultado_registrado_em.")
     return LedgerEntry(
         idempotency_key=_exigir_str(m["idempotency_key"], "ledger_entry.idempotency_key"),
         payload_hash=_exigir_str(m["payload_hash"], "ledger_entry.payload_hash"),

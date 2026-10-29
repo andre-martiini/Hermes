@@ -155,6 +155,32 @@ class TestSerializacaoPedido(unittest.TestCase):
         with self.assertRaises(ValueError):
             pedido_de_dict(d)
 
+    def test_escrita_recusa_pedido_que_a_leitura_recusaria(self):
+        p = assumir_pedido(PedidoDuravel("r", RequestStatus.PENDENTE), "ex", "run", agora=T0)
+        q = registrar_progresso(p, p.lease.lease_token, p.lease.generation, "k", {"a": 1}, [1, 2], agora=T0)
+        with self.assertRaises(ValueError):
+            pedido_para_dict(q)
+
+    def test_leitura_recusa_incoerencias_do_ledger_e_da_lease(self):
+        d = pedido_para_dict(_completo())
+        d["ledger_entry"]["resultado_registrado_em"] = None
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+        d = pedido_para_dict(_completo())
+        d["ledger_entry"]["checkpoints"] = d["ledger_entry"]["checkpoints"] * 2
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+        d = pedido_para_dict(_completo())
+        d["lease"]["generation"] = 0
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+
+    def test_leitura_recusa_instante_que_nao_regrava(self):
+        d = pedido_para_dict(_completo())
+        d["lease"]["expires_at"] = "9999-12-31T23:59:59-23:59"
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+
     def test_leitura_recusa_run_de_outro_pedido(self):
         d = pedido_para_dict(_completo())
         d["run"]["request_id"] = "outro"
