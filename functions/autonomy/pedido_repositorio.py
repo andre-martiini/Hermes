@@ -64,7 +64,9 @@ def _utf8_valido(texto: str) -> bool:
     return True
 
 
-def _validar_para_firestore(valor: Any, nivel: str = "pedido", profundidade: int = 1) -> None:
+def _validar_para_firestore(
+    valor: Any, nivel: str = "pedido", profundidade: int = 1, em_lista: bool = False
+) -> None:
     """Regras do Firestore que o JSON puro do domínio não cobre: int64,
     chaves de mapa vazias/`__x__`/longas, UTF-8 válido e no máximo 20 níveis
     de mapa. Falha aqui (ValueError claro), não como erro opaco do cliente
@@ -80,10 +82,12 @@ def _validar_para_firestore(valor: Any, nivel: str = "pedido", profundidade: int
                 or len(chave.encode("utf-8")) > 1500
             ):
                 raise ValueError(f"{nivel}: chave {chave!r} recusada pelo Firestore.")
-            _validar_para_firestore(sub, f"{nivel}.{chave}", profundidade + 1)
+            _validar_para_firestore(sub, f"{nivel}.{chave}", profundidade + 1, False)
     elif isinstance(valor, list):
+        if em_lista:
+            raise ValueError(f"{nivel}: array dentro de array não é aceito pelo Firestore.")
         for i, sub in enumerate(valor):
-            _validar_para_firestore(sub, f"{nivel}[{i}]", profundidade)
+            _validar_para_firestore(sub, f"{nivel}[{i}]", profundidade, True)
     elif isinstance(valor, str):
         if not _utf8_valido(valor):
             raise ValueError(f"{nivel}: texto com surrogate solitário.")

@@ -180,7 +180,7 @@ class TestRepositorioPedido(unittest.TestCase):
             repo.criar_pedido(self.db, p)
         self.assertEqual(self.db.docs, {})
         # montagem direta do documento: o validador é função pura
-        for valor in ({"x": 2**70}, {"": 1}, {"a": {"__b__": 1}}, {"l": [{"": 1}]}, {"n": -(2**63) - 1}):
+        for valor in ({"x": 2**70}, {"": 1}, {"a": {"__b__": 1}}, {"l": [{"": 1}]}, {"n": -(2**63) - 1}, {"l": [[1]]}, {"l": [{"m": [[]]}]}):
             with self.assertRaises(ValueError):
                 repo._validar_para_firestore(valor)
         fundo = {}
@@ -193,7 +193,7 @@ class TestRepositorioPedido(unittest.TestCase):
         for _ in range(18):
             raso = {"a": raso}
         repo._validar_para_firestore(raso)
-        repo._validar_para_firestore({"a": [1, {"b": 2**63 - 1, "c": True}], "d": -(2**63)})
+        repo._validar_para_firestore({"a": [1, {"b": 2**63 - 1, "c": True, "l": [1, 2]}], "d": -(2**63)})
         repo.criar_pedido(self.db, _completo())  # o pedido normal passa
 
     def test_criar_tipo_errado_e_transformar_nao_callable(self):
