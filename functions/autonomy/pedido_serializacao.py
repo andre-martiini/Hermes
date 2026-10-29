@@ -279,8 +279,6 @@ def _pedido_de_dict(documento: Any) -> PedidoDuravel:
     if run is not None and run.request_id != _exigir_str(m["request_id"], "request_id").strip():
         raise ValueError("run.request_id não confere com o pedido.")
     if run is not None:
-        if run.finalizado_em is not None and run.finalizado_em < run.iniciado_em:
-            raise ValueError("run.finalizado_em anterior a iniciado_em.")
         terminal = run.status in (AgentRunStatus.CONCLUIDO, AgentRunStatus.FALHA, AgentRunStatus.TIMEOUT)
         if terminal != (run.finalizado_em is not None):
             raise ValueError("run.finalizado_em incoerente com o status.")

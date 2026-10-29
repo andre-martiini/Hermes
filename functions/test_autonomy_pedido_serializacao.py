@@ -6,7 +6,7 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from autonomy.execution import PedidoDuravel, assumir_pedido, registrar_progresso
+from autonomy.execution import PedidoDuravel, assumir_pedido, registrar_progresso, registrar_resultado_observado
 from autonomy.ledger import registrar_resultado
 from autonomy.pedido_serializacao import pedido_de_dict, pedido_para_dict
 from autonomy.requests import RequestStatus
@@ -196,6 +196,15 @@ class TestSerializacaoPedido(unittest.TestCase):
             d[a][b] = v
             with self.assertRaises(ValueError, msg=(a, b)):
                 pedido_de_dict(d)
+
+    def test_relogio_atrasado_run_fechado_antes_de_iniciar_faz_round_trip(self):
+        # o domínio aceita `agora` anterior ao da reserva; a escrita não pode recusar
+        p = assumir_pedido(PedidoDuravel("r", RequestStatus.PENDENTE), "ex", "run", agora=T0)
+        pr = registrar_progresso(p, p.lease.lease_token, p.lease.generation, "k", {"a": 1}, {"c": 1},
+                                 agora=T0 + timedelta(seconds=1))
+        c = registrar_resultado_observado(pr, p.lease.lease_token, p.lease.generation, {"ok": 1},
+                                          RequestStatus.CONCLUIDO, agora=T0 - timedelta(seconds=1))
+        self.assertEqual(pedido_de_dict(pedido_para_dict(c)), c)
 
     def test_leitura_recusa_run_de_outro_pedido(self):
         d = pedido_para_dict(_completo())

@@ -646,28 +646,6 @@ pacote_concluido: P07
 # (Em 2026-10-29 o bloco "P08 sub-entrega 7/N" foi movido para docs/autonomia/execucao-archive-p08sub7.md.)
 ---
 
-```yaml
-pacote: "P08 sub-entrega 8/N -- sweep de espera/verificação vencida (autonomy/sweep.py, passo 5-6): nova varrer_espera_vencida: AGUARDANDO_EXTERNO (com lease vencida E horário de acordar alcançado/ausente) ou VERIFICANDO (lease vencida) -> RESULTADO_DESCONHECIDO (única saída do grafo sem lease; reconciliação via VERIFICANDO), sem reexecutar (retentar VERIFICANDO às cegas poderia duplicar efeitos), sem incrementar tentativas, condicao_espera preservada, run ativo fechado por timeout, diagnóstico devolvido. Lease vencida ANTES do horário de acordar é espera normal e levanta ValueError. Sem I/O (shadow/off)."
-estado: validado
-inicio: "2026-10-28T16:47:00Z"
-fim: "2026-10-28T17:35:00Z"
-decisoes:
-  - id: p08-sub8-triagem
-    motivo: "Única PR aberta (#547, melhorias, outra linha) estava trivial, sem conflito e com CI verde: mesclada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub8-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 5 arquivado em execucao-archive-p08sub5.md."
-  - id: p08-sub8-espera
-    motivo: "Escolha segura sem decisão de produto: espera externa que ninguém acordou vira RESULTADO_DESCONHECIDO (reconciliar), nunca retentativa automática. AGUARDANDO_APROVACAO segue fora de escopo (prazo de espera humana é decisão do André)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4890 OK (diário, P08 sub 7); DEPOIS 4902 OK (+8 em test_autonomy_sweep; o restante vem de merges de outras linhas)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achou nada. Codex na PR #550: 1 achado P1 real -- a 1a versão mandava VERIFICANDO vencido a RETENTATIVA_AGENDADA, o que reexecutaria o pedido e poderia duplicar efeito já feito; corrigido (VERIFICANDO vencido vai a RESULTADO_DESCONHECIDO, varrer_lease_vencida volta a recusá-lo) e coberto por teste. Rodada 2 (agente sem contexto, focada na correção): não achou nada (2 nits de documentação, 1 aplicado)."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao e o sweep, renovar lease ao acordar de AGUARDANDO_EXTERNO, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
-```
-
----
 
 ```yaml
 pacote: "P08 sub-entrega 9/N -- acordar espera externa (autonomy/runner_aplicacao.py, passo 5): função pura acordar_espera_externa(pedido, executor_id, run_id, agora, duracao_segundos, por_evento). Retoma AGUARDANDO_EXTERNO num worker novo: exige lease anterior vencida (nunca toma reserva válida), emite lease nova com geração+1 (fencing: token antigo perde o direito), fecha o run antigo por timeout (devolvido ao chamador para persistir), abre run novo EM_ANDAMENTO com run_id inédito, preserva ledger/tentativas/pausas e limpa condicao_espera/proximo_tentativa_em. Antes de proximo_tentativa_em só com por_evento=True. Sem I/O (shadow/off)."
@@ -711,4 +689,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 1 achado real -- retentativa por reconciliação contornava o teto de tentativas; corrigido (ValueError acima de DEFAULT_MAX_TENTATIVAS, também recusa tentativas bool) e coberto por teste. Rodada 2 (focada na correção): não achei nada."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, sweep, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 11/N -- serialização do pedido durável (autonomy/pedido_serializacao.py, passo 4, base do wiring de persistência): funções puras pedido_para_dict / pedido_de_dict. Documento só com tipos JSON/Firestore (instantes ISO UTC), leitura estrita (ValueError para chave ausente/extra, bool como int, instante sem fuso, status desconhecido, chave não-str aninhada, tupla, vazios em lease/ledger, sequencia de checkpoint não crescente, resultado sem resultado_registrado_em, lease.generation<1, run de outro pedido ou ativo divergente da lease, limites do domínio como checkpoint grande). pedido_para_dict relê o que produz e recusa o que a leitura recusaria. NaN no resultado faz round-trip. Sem I/O (shadow/off)."
+estado: validado
+inicio: "2026-10-29T13:52:00Z"
+fim: "2026-10-29T15:10:00Z"
+decisoes:
+  - id: p08-sub11-triagem
+    motivo: "PRs abertas: #561 (melhorias, atualizada há <60 min = execução paralela) e #556 (excluir_entrada_diario, outra linha, apaga dados e pede aval do André): nenhuma tocada. Nenhuma PR da autonomia pendente."
+  - id: p08-sub11-arquivo
+    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 8 arquivado em execucao-archive-p08sub8.md."
+  - id: p08-sub11-escopo
+    motivo: "Fora de escopo, deliberado: limites do Firestore (int64, array em array, surrogates, 1MiB), ZoneInfo em hora ambígua (PEP 495), espaços nas pontas (normalizados pelos construtores), limites de quantidade/bytes de checkpoints na leitura, e checkpoint_dados não-dict aceito pelo domínio (a escrita agora recusa). Checagem finalizado_em >= iniciado_em removida: o domínio aceita agora anterior ao da reserva e a escrita não pode recusar o que ele aceitou."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4950 OK (diário, P08 sub 10); DEPOIS 4976 OK (suíte completa, antes da remoção da checagem finalizado_em; depois dela, rodados de novo os 144 testes de serializacao/execution/runner_aplicacao/sweep: OK). O restante vem de merges de outras linhas."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): achados reais corrigidos -- leitura levantava CheckpointMuitoGrande/RecursionError em vez de ValueError, NaN gravava e não lia, chave não-str aninhada perdia dado, instante extremo estourava OverflowError. Rodada 2: fuzz de 1386 casos sem exceção fora de ValueError; escrita passou a reler o documento (checkpoint não-dict), coerência ledger/lease. Rodada 3: vazios em lease_token (permitia passar no fencing) e coerência do run corrigidos. Rodada 4 (focada nas checagens novas): 1 falso positivo real -- finalizado_em < iniciado_em vindo de relógio atrasado era recusado na escrita; checagem removida e coberta por teste. Sem rodada adicional após a remoção (só tira uma checagem)."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, repositório Firestore com CAS usando pedido_para_dict/pedido_de_dict e chamando decidir_continuacao + aplicar_decisao_continuacao, sweep, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
