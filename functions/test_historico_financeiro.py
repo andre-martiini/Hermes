@@ -73,6 +73,22 @@ class TestToolsFinanceirasComCompetencia(unittest.TestCase):
         self.assertEqual((r["periodo"]["competencia"], r["periodo"]["mes_nome"]), ("2026-09", "setembro"))
         self.assertAlmostEqual(r["resumo"]["total_contas"], 6524.55, places=2)
 
+    def test_avulsas_entram_no_saldo_do_mes(self):
+        from tools import telegram_extended
+
+        db = _db_setembro()
+        db.banco["finance_transactions"] = {
+            "a": {"amount": 100, "date": "2026-09-05T10:00:00", "status": "active"},
+            "b": {"amount": 50.5, "date": "2026-09-30", "status": "active"},
+            "c": {"amount": 900, "date": "2026-09-06", "status": "deleted"},
+            "d": {"amount": 700, "date": "2026-10-01", "status": "active"},
+        }
+        r = json.loads(telegram_extended.execute("consultar_financas_v2", {"competencia": "2026-09"}, db=db))
+        self.assertAlmostEqual(r["resumo"]["total_avulsas"], 150.5, places=2)
+        self.assertAlmostEqual(r["resumo"]["saldo_atual"], 9096.95 + 4500 - 5721.28 - 500 - 150.5, places=2)
+        self.assertEqual(len(r["detalhes"]["avulsas"]), 2)
+        self.assertEqual(hf.montar_mes(db, "2026-09")["avulsas"], {"total": 150.5, "quantidade": 2})
+
     def test_consulta_com_competencia_invalida(self):
         from tools import telegram_extended
 

@@ -1155,6 +1155,13 @@ def execute(tool_name: str, slots: dict, db) -> str:
         goals_docs = db.collection("finance_goals").stream()
         settings_doc = db.collection("finance_settings").document("config").get()
 
+        # Transacao avulsa e gasto ja feito: entra no saldo (antes era ignorada
+        # e o saldo_atual nao mexia com 13 avulsas lancadas).
+        import historico_financeiro
+
+        avulsas = historico_financeiro.avulsas_do_mes(db, _competencia.periodo(mes, ano)["competencia"])
+        total_avulsas = round(sum(historico_financeiro._num(a.get("amount")) for a in avulsas), 2)
+
         # A regra de leitura de valor vive em `bolso_aquisicoes`, espelhada em
         # `src/utils/bolsoAquisicoes.ts`. As duas tem de dar o mesmo numero.
         import bolso_aquisicoes
@@ -1243,8 +1250,9 @@ def execute(tool_name: str, slots: dict, db) -> str:
                 "renda_recebida": total_received_income,
                 "total_contas": total_bills,
                 "contas_pagas": total_paid_bills,
-                "saldo_previsto": total_income - total_bills,
-                "saldo_atual": total_received_income - total_paid_bills
+                "total_avulsas": total_avulsas,
+                "saldo_previsto": total_income - total_bills - total_avulsas,
+                "saldo_atual": total_received_income - total_paid_bills - total_avulsas
             },
             "metas": goals,
             "reserva_emergencia": {
@@ -1267,7 +1275,8 @@ def execute(tool_name: str, slots: dict, db) -> str:
             },
             "detalhes": {
                 "contas": bills,
-                "rendas": income
+                "rendas": income,
+                "avulsas": avulsas
             }
         }
         return json.dumps(summary, ensure_ascii=False)
