@@ -206,6 +206,12 @@ class TestSerializacaoPedido(unittest.TestCase):
                                           RequestStatus.CONCLUIDO, agora=T0 - timedelta(seconds=1))
         self.assertEqual(pedido_de_dict(pedido_para_dict(c)), c)
 
+    def test_leitura_recusa_run_ativo_sem_lease(self):
+        d = pedido_para_dict(_completo())
+        d["lease"] = None
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+
     def test_leitura_recusa_run_de_outro_pedido(self):
         d = pedido_para_dict(_completo())
         d["run"]["request_id"] = "outro"
