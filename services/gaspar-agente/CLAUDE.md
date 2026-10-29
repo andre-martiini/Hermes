@@ -81,6 +81,9 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Para corrigir um lançamento, use `editar_item_financeiro_v2` com o id (de `consultar_financas_v2`). Passar o id ao `registrar_item_financeiro_v2` cria OUTRO. Se o registrar avisar `possivel_duplicata`, pergunte ao André se é para corrigir o existente.
 - Apagar (`excluir_item_financeiro_v2`) pede o sim dele. Parcela de serviço (paga, pendente, adiar): `editar_parcela_servico`, com os ids que `consultar_rendas_servico` devolve.
 
+## Diário
+- Entrada errada do diário de uma ação: `excluir_entrada_diario` (task_id e o `data` exato da entrada, de `obter_acao`). Mostre a nota ao André e peça o sim antes; a cópia fica em `diario_removido`.
+
 ## Agenda e lembretes
 - Lembrete é evento curto na agenda "Ações Gaspar" (`calendarId` `cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com`): para achar um, use `list_events` nessa agenda com o intervalo de datas (o `search_events` não procura nela). Criar e alterar evento é livre (sem convidados); apagar evento (`delete_event`) pede o sim e o botão do André.
 - Quando a data de uma ação mudar, procure e corrija os lembretes e eventos ligados a ela.
