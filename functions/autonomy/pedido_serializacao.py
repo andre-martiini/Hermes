@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from autonomy.execution import PedidoDuravel
-from autonomy.ledger import Checkpoint, LedgerEntry, _serializar_canonico
+from autonomy.ledger import Checkpoint, CheckpointMuitoGrande, LedgerEntry, _serializar_canonico
 from autonomy.requests import Lease, RequestStatus
 from autonomy.runs import AgentRun, AgentRunStatus
 
@@ -54,7 +54,10 @@ def _json_mutavel(valor: Any) -> Any:
 def _instante_para_str(valor: datetime | None) -> str | None:
     if valor is None:
         return None
-    return valor.astimezone(timezone.utc).isoformat()
+    try:
+        return valor.astimezone(timezone.utc).isoformat()
+    except OverflowError as exc:
+        raise ValueError("instante fora do intervalo representável em UTC.") from exc
 
 
 def _exigir_mapa(valor: Any, nome: str, chaves: frozenset[str]) -> Mapping[str, Any]:
@@ -99,11 +102,28 @@ def _instante_opcional(valor: Any, nome: str) -> datetime | None:
     return None if valor is None else _instante_de_str(valor, nome)
 
 
+def _chaves_str(valor: Any, nome: str) -> None:
+    """Chave não-str em qualquer nível seria normalizada (e deduplicada) pelo
+    `json.dumps`, perdendo dado em silêncio."""
+    if isinstance(valor, Mapping):
+        for k, v in valor.items():
+            if not isinstance(k, str):
+                raise ValueError(f"{nome}: chave não-str.")
+            _chaves_str(v, nome)
+    elif isinstance(valor, list):
+        for v in valor:
+            _chaves_str(v, nome)
+    elif isinstance(valor, tuple):
+        raise ValueError(f"{nome}: tupla não é JSON.")
+
+
 def _json_puro(valor: Any, nome: str) -> Any:
-    """Valida que o valor lido é JSON puro (sem NaN/Infinity) e o devolve."""
+    """Valida que o valor lido é JSON puro e o devolve. NaN/Infinity passam:
+    o domínio os aceita (ledger) e o Firestore os guarda como double."""
     try:
-        return json.loads(json.dumps(valor, allow_nan=False))
-    except (TypeError, ValueError) as exc:
+        _chaves_str(valor, nome)
+        return json.loads(json.dumps(valor))
+    except (TypeError, ValueError, RecursionError, OverflowError) as exc:
         raise ValueError(f"{nome}: valor não é JSON puro.") from exc
 
 
@@ -213,6 +233,17 @@ def _run_de_dict(d: Any) -> AgentRun:
 
 
 def pedido_de_dict(documento: Any) -> PedidoDuravel:
+    """Qualquer documento inválido levanta `ValueError` (inclusive limites do
+    domínio, como checkpoint grande demais)."""
+    try:
+        return _pedido_de_dict(documento)
+    except ValueError:
+        raise
+    except (CheckpointMuitoGrande, TypeError, RecursionError, OverflowError) as exc:
+        raise ValueError(f"documento inválido: {type(exc).__name__}.") from exc
+
+
+def _pedido_de_dict(documento: Any) -> PedidoDuravel:
     m = _exigir_mapa(documento, "pedido", _CHAVES_PEDIDO)
     if _exigir_int(m["versao"], "versao") != VERSAO_SCHEMA:
         raise ValueError("versao: schema não suportado.")
@@ -220,12 +251,15 @@ def pedido_de_dict(documento: Any) -> PedidoDuravel:
         status = RequestStatus(_exigir_str(m["status"], "status"))
     except ValueError as exc:
         raise ValueError("status: desconhecido.") from exc
+    run = None if m["run"] is None else _run_de_dict(m["run"])
+    if run is not None and run.request_id != _exigir_str(m["request_id"], "request_id").strip():
+        raise ValueError("run.request_id não confere com o pedido.")
     return PedidoDuravel(
         request_id=_exigir_str(m["request_id"], "request_id"),
         status=status,
         lease=None if m["lease"] is None else _lease_de_dict(m["lease"]),
         ledger_entry=None if m["ledger_entry"] is None else _ledger_de_dict(m["ledger_entry"]),
-        run=None if m["run"] is None else _run_de_dict(m["run"]),
+        run=run,
         tentativas=_exigir_int(m["tentativas"], "tentativas"),
         proximo_tentativa_em=_instante_opcional(m["proximo_tentativa_em"], "proximo_tentativa_em"),
         pausas=_exigir_int(m["pausas"], "pausas"),

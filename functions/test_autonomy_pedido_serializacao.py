@@ -127,11 +127,49 @@ class TestSerializacaoPedido(unittest.TestCase):
             with self.assertRaises(ValueError, msg=ruim):
                 pedido_de_dict(d)
 
-    def test_leitura_recusa_json_nao_puro_em_resultado(self):
+    def test_nan_no_resultado_faz_round_trip(self):
+        p = _completo()
+        p = dataclasses.replace(p, ledger_entry=registrar_resultado(
+            dataclasses.replace(p.ledger_entry, resultado=None, resultado_registrado_em=None),
+            {"x": float("nan")}, agora=T0))
+        lido = pedido_de_dict(pedido_para_dict(p))
+        self.assertNotEqual(lido.ledger_entry.resultado["x"], lido.ledger_entry.resultado["x"])
+
+    def test_leitura_recusa_chave_nao_str_aninhada_e_tupla(self):
+        for ruim in ({1: "a", "1": "b"}, {"t": (1, 2)}):
+            d = pedido_para_dict(_completo())
+            d["ledger_entry"]["resultado"] = ruim
+            with self.assertRaises(ValueError, msg=ruim):
+                pedido_de_dict(d)
+
+    def test_leitura_so_levanta_valueerror_em_limites_do_dominio(self):
         d = pedido_para_dict(_completo())
-        d["run"]["resultado"] = {"x": float("nan")}
+        d["ledger_entry"]["checkpoints"][0]["dados"] = {"x": "a" * 70000}
         with self.assertRaises(ValueError):
             pedido_de_dict(d)
+        v = []
+        for _ in range(100000):
+            v = [v]
+        d = pedido_para_dict(_completo())
+        d["ledger_entry"]["resultado"] = v
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+
+    def test_leitura_recusa_run_de_outro_pedido(self):
+        d = pedido_para_dict(_completo())
+        d["run"]["request_id"] = "outro"
+        with self.assertRaises(ValueError):
+            pedido_de_dict(d)
+
+    def test_escrita_instante_extremo_levanta_valueerror(self):
+        p = dataclasses.replace(
+            PedidoDuravel("r", RequestStatus.RETENTATIVA_AGENDADA),
+            proximo_tentativa_em=datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=3))),
+        )
+        with self.assertRaises(ValueError):
+            pedido_para_dict(p)
+
+    def test_leitura_recusa_json_nao_puro_em_resultado(self):
         d = pedido_para_dict(_completo())
         d["ledger_entry"]["resultado"] = {"x": object()}
         with self.assertRaises(ValueError):
