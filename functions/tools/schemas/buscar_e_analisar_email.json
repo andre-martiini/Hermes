@@ -11,6 +11,10 @@
       "max_results": {
         "type": "integer",
         "description": "Número máximo de e-mails (padrão: 5, máximo: 5)"
+      },
+      "max_chars_anexo": {
+        "type": "integer",
+        "description": "Caracteres devolvidos por PDF anexo (padrão 3000, máximo 40000). Suba quando o texto do PDF vier cortado."
       }
     },
     "required": ["query"]
