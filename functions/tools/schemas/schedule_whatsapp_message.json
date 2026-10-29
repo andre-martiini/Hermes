@@ -18,7 +18,7 @@
       },
       "como_assistente": {
         "type": "boolean",
-        "description": "true: a mensagem sai com a identificação do Gaspar na primeira linha (\"*Gaspar Bot (assistente virtual do André):*\"). O agente residente do Telegram passa sempre true; escreva a mensagem como assistente (o André em terceira pessoa) e sem o prefixo, que o sistema acrescenta. Omitido ou false: a mensagem sai exatamente como veio (uso das sessões do próprio André, que escrevem com as palavras e o sim dele)."
+        "description": "NÃO USE. Reservado: true faz a mensagem sair com a identificação do Gaspar na primeira linha. Por decisão do André (29/10/2026), a mensagem enviada com o sim dele sai em primeira pessoa, como ele, sem identificação; só as mensagens totalmente autônomas (Modo Secretário e Modo Objetivo) se identificam, e o servidor faz isso sozinho nesses modos. Omitido ou false: a mensagem sai exatamente como veio."
       }
     },
     "required": ["contact_number", "message", "scheduled_time"]
