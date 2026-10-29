@@ -11,9 +11,14 @@ from autonomy.execution import (
     registrar_progresso,
 )
 from autonomy.requests import RequestStatus, lease_expirada
-from autonomy.runner_aplicacao import acordar_espera_externa, aplicar_decisao_continuacao
+from autonomy.runner_aplicacao import (
+    acordar_espera_externa,
+    aplicar_decisao_continuacao,
+    reconciliar_resultado_desconhecido,
+)
 from autonomy.runner_continuacao import DecisaoContinuacao
 from autonomy.runs import AgentRunStatus
+from autonomy.sweep import varrer_espera_vencida
 
 T0 = datetime(2026, 10, 28, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -235,3 +240,88 @@ class TestAcordarEsperaExterna(unittest.TestCase):
         de_novo = _aplicar(n, DecisaoContinuacao(
             RequestStatus.AGUARDANDO_EXTERNO, condicao_espera="outra"), agora=T0 + timedelta(hours=1))
         self.assertEqual(de_novo.status, RequestStatus.AGUARDANDO_EXTERNO)
+
+
+def _desconhecido():
+    p = _em_andamento()
+    p = aplicar_decisao_continuacao(
+        p, p.lease.lease_token, p.lease.generation,
+        DecisaoContinuacao(RequestStatus.VERIFICANDO, motivo="v"), T0)
+    depois = p.lease.expires_at + timedelta(minutes=1)
+    return varrer_espera_vencida(p, agora=depois).pedido, depois
+
+
+class TestReconciliarDesconhecido(unittest.TestCase):
+    def test_efeito_ocorreu_vai_a_verificando_com_lease_e_run_novos(self):
+        p, agora = _desconhecido()
+        n, antigo = reconciliar_resultado_desconhecido(
+            p, True, agora, executor_id="ex-b", run_id="run-2")
+        self.assertEqual(n.status, RequestStatus.VERIFICANDO)
+        self.assertEqual(n.lease.generation, p.lease.generation + 1)
+        self.assertEqual(n.run.run_id, "run-2")
+        self.assertEqual(n.ledger_entry, p.ledger_entry)
+        self.assertEqual(n.tentativas, p.tentativas)
+        self.assertIsNone(antigo)  # sweep já fechou o run antigo
+
+    def test_efeito_nao_ocorreu_agenda_retentativa(self):
+        p, agora = _desconhecido()
+        quando = agora + timedelta(minutes=10)
+        n, _ = reconciliar_resultado_desconhecido(p, False, agora, continuar_em=quando)
+        self.assertEqual(n.status, RequestStatus.RETENTATIVA_AGENDADA)
+        self.assertEqual(n.tentativas, p.tentativas + 1)
+        self.assertEqual(n.proximo_tentativa_em, quando)
+        self.assertTrue(lease_expirada(n.lease, agora=agora))
+
+    def test_retentativa_exige_continuar_em_futuro(self):
+        p, agora = _desconhecido()
+        for q in (None, agora, agora - timedelta(seconds=1), datetime(2026, 11, 1)):
+            with self.assertRaises(ValueError):
+                reconciliar_resultado_desconhecido(p, False, agora, continuar_em=q)
+
+    def test_verificar_exige_ids_e_run_novo(self):
+        p, agora = _desconhecido()
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(p, True, agora)
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(
+                p, True, agora, executor_id="ex-b", run_id=p.run.run_id)
+
+    def test_recusa_lease_valida_e_status_errado(self):
+        p, agora = _desconhecido()
+        with self.assertRaises(LeaseInvalida):
+            reconciliar_resultado_desconhecido(
+                p, True, p.lease.expires_at - timedelta(seconds=1),
+                executor_id="ex-b", run_id="run-2")
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(
+                _em_andamento(), True, agora, executor_id="ex-b", run_id="run-2")
+
+    def test_validacoes_de_tipo(self):
+        p, agora = _desconhecido()
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(p, 1, agora, executor_id="e", run_id="r")
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(p, True, datetime(2026, 11, 1), executor_id="e", run_id="r")
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido("x", True, agora)
+
+    def test_run_ativo_e_fechado_por_timeout_e_devolvido(self):
+        p, agora = _desconhecido()
+        ativo = dataclasses.replace(
+            p, run=_em_andamento().run)  # run ainda ativo (inconsistência tolerada)
+        n, antigo = reconciliar_resultado_desconhecido(
+            ativo, True, agora, executor_id="ex-b", run_id="run-9")
+        self.assertIsNotNone(antigo)
+        self.assertFalse(antigo.status == AgentRunStatus.EM_ANDAMENTO)
+
+    def test_retentativa_respeita_teto_de_tentativas(self):
+        from autonomy.requests import DEFAULT_MAX_TENTATIVAS
+        p, agora = _desconhecido()
+        p = dataclasses.replace(p, tentativas=DEFAULT_MAX_TENTATIVAS)
+        with self.assertRaises(ValueError):
+            reconciliar_resultado_desconhecido(
+                p, False, agora, continuar_em=agora + timedelta(days=1))
+        ok, _ = reconciliar_resultado_desconhecido(
+            dataclasses.replace(p, tentativas=DEFAULT_MAX_TENTATIVAS - 1), False, agora,
+            continuar_em=agora + timedelta(days=1))
+        self.assertEqual(ok.tentativas, DEFAULT_MAX_TENTATIVAS)
