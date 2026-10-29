@@ -1,12 +1,13 @@
 """Reconhece as mensagens que o próprio Gaspar mandou no WhatsApp em nome do André.
 
-O Modo Secretário e o Modo Objetivo escrevem pela conta do André e, desde 28/10/2026
-(decisão do dono, que revoga a primeira pessoa sem assinatura de 14/10), com o prefixo
-de identificação PREFIXO_IDENTIFICACAO, que o código acrescenta no ponto de saída de cada
-modo. O agente residente o pede (`como_assistente`) nas mensagens que manda com o sim do
-André. A resposta volta capturada como `from_me`, igual a uma mensagem que o André
-digitou; sem este registro o sistema acharia que o André assumiu a conversa a cada
-resposta do Gaspar.
+O Modo Secretário e o Modo Objetivo (as mensagens totalmente autônomas) escrevem pela conta
+do André e, desde 28/10/2026 (decisão do dono, que revoga a primeira pessoa sem assinatura
+de 14/10), com o prefixo de identificação PREFIXO_IDENTIFICACAO, que o código acrescenta no
+ponto de saída de cada modo. A mensagem que o agente manda com o sim do André (envio normal,
+encaminhamento) NÃO se identifica: sai em primeira pessoa, como ele (decisão de 29/10);
+`schedule_whatsapp_message(como_assistente=True)` existe, mas ninguém o usa. A resposta volta
+capturada como `from_me`, igual a uma mensagem que o André digitou; sem este registro o
+sistema acharia que o André assumiu a conversa a cada resposta do Gaspar.
 
 O registro é gravado ANTES do envio (na criação do rascunho de envio imediato ou
 na aprovação), então o eco sempre o encontra. A chave é só o texto: o eco pode
