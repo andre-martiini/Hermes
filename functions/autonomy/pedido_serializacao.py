@@ -82,6 +82,12 @@ def _exigir_str(valor: Any, nome: str) -> str:
     return valor
 
 
+def _exigir_str_nao_vazia(valor: Any, nome: str) -> str:
+    if not isinstance(valor, str) or not valor.strip():
+        raise ValueError(f"{nome}: esperado str não vazia.")
+    return valor
+
+
 def _exigir_int(valor: Any, nome: str) -> int:
     if type(valor) is not int:
         raise ValueError(f"{nome}: esperado int.")
@@ -191,9 +197,9 @@ def _lease_de_dict(d: Any) -> Lease:
     if _exigir_int(m["generation"], "lease.generation") < 1:
         raise ValueError("lease.generation: deve ser >= 1.")
     return Lease(
-        lease_token=_exigir_str(m["lease_token"], "lease.lease_token"),
+        lease_token=_exigir_str_nao_vazia(m["lease_token"], "lease.lease_token"),
         generation=_exigir_int(m["generation"], "lease.generation"),
-        executor_id=_exigir_str(m["executor_id"], "lease.executor_id"),
+        executor_id=_exigir_str_nao_vazia(m["executor_id"], "lease.executor_id"),
         expires_at=_instante_de_str(m["expires_at"], "lease.expires_at"),
     )
 
@@ -219,8 +225,8 @@ def _ledger_de_dict(d: Any) -> LedgerEntry:
     if m["resultado"] is not None and m["resultado_registrado_em"] is None:
         raise ValueError("ledger_entry: resultado sem resultado_registrado_em.")
     return LedgerEntry(
-        idempotency_key=_exigir_str(m["idempotency_key"], "ledger_entry.idempotency_key"),
-        payload_hash=_exigir_str(m["payload_hash"], "ledger_entry.payload_hash"),
+        idempotency_key=_exigir_str_nao_vazia(m["idempotency_key"], "ledger_entry.idempotency_key"),
+        payload_hash=_exigir_str_nao_vazia(m["payload_hash"], "ledger_entry.payload_hash"),
         criado_em=_instante_de_str(m["criado_em"], "ledger_entry.criado_em"),
         checkpoints=tuple(checkpoints),
         resultado=_json_puro(m["resultado"], "ledger_entry.resultado"),
@@ -268,13 +274,24 @@ def _pedido_de_dict(documento: Any) -> PedidoDuravel:
         status = RequestStatus(_exigir_str(m["status"], "status"))
     except ValueError as exc:
         raise ValueError("status: desconhecido.") from exc
+    lease = None if m["lease"] is None else _lease_de_dict(m["lease"])
     run = None if m["run"] is None else _run_de_dict(m["run"])
     if run is not None and run.request_id != _exigir_str(m["request_id"], "request_id").strip():
         raise ValueError("run.request_id não confere com o pedido.")
+    if run is not None:
+        if run.finalizado_em is not None and run.finalizado_em < run.iniciado_em:
+            raise ValueError("run.finalizado_em anterior a iniciado_em.")
+        terminal = run.status in (AgentRunStatus.CONCLUIDO, AgentRunStatus.FALHA, AgentRunStatus.TIMEOUT)
+        if terminal != (run.finalizado_em is not None):
+            raise ValueError("run.finalizado_em incoerente com o status.")
+        if lease is not None and not terminal and (
+            run.generation != lease.generation or run.lease_token != lease.lease_token
+        ):
+            raise ValueError("run ativo não confere com a lease.")
     return PedidoDuravel(
         request_id=_exigir_str(m["request_id"], "request_id"),
         status=status,
-        lease=None if m["lease"] is None else _lease_de_dict(m["lease"]),
+        lease=lease,
         ledger_entry=None if m["ledger_entry"] is None else _ledger_de_dict(m["ledger_entry"]),
         run=run,
         tentativas=_exigir_int(m["tentativas"], "tentativas"),

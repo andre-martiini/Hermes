@@ -181,6 +181,22 @@ class TestSerializacaoPedido(unittest.TestCase):
         with self.assertRaises(ValueError):
             pedido_de_dict(d)
 
+    def test_leitura_recusa_vazios_e_run_incoerente(self):
+        casos = [
+            (("lease", "lease_token"), ""),
+            (("lease", "executor_id"), " "),
+            (("ledger_entry", "idempotency_key"), ""),
+            (("ledger_entry", "payload_hash"), ""),
+            (("run", "generation"), 7),
+            (("run", "finalizado_em"), "2026-10-29T12:00:00+00:00"),
+            (("run", "status"), "concluido"),
+        ]
+        for (a, b), v in casos:
+            d = pedido_para_dict(_completo())
+            d[a][b] = v
+            with self.assertRaises(ValueError, msg=(a, b)):
+                pedido_de_dict(d)
+
     def test_leitura_recusa_run_de_outro_pedido(self):
         d = pedido_para_dict(_completo())
         d["run"]["request_id"] = "outro"
