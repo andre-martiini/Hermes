@@ -49,7 +49,7 @@ Não inclua: o resto das ações do dia, rotinas pessoais (check-ins, pesagem, r
 
 3. FECHE COM uma linha: "Responda com os números (ex.: '1 cobra, 3 reagenda sexta')."
 
-Devolva também, DEPOIS do briefing e separado pela linha "=== TEXTOS ===", o texto exato proposto para cada item do DECIDIR que envolve mensagem a terceiro (número do item e texto; primeira pessoa, como se fosse o André; nunca sugerir ligação ou videochamada; a esposa dele é Alnínive, Amor, Gatinha ou Fofinha, nunca "Tininha"). Essa parte não vai para o André.
+Devolva também, DEPOIS do briefing e separado pela linha "=== TEXTOS ===", o texto exato proposto para cada item do DECIDIR que envolve mensagem a terceiro (número do item e texto; escrito como assistente do André, que fala dele em terceira pessoa e sem o prefixo de identificação, que o sistema acrescenta; nunca sugerir ligação ou videochamada; a esposa dele é Alnínive, Amor, Gatinha ou Fofinha, nunca "Tininha"). Essa parte não vai para o André.
 
 Devolva por último, separado pela linha "=== DADOS ===", UM bloco JSON (só o JSON, sem cercas de código) com os MESMOS itens do briefing, para o agente principal gravar no Painel do dia. Você só lê: quem grava é ele. Formato (omita a chave que não tiver item; nenhum campo extra):
 {

@@ -1,12 +1,14 @@
 """Modo Objetivo no WhatsApp: o Gaspar conduz uma conversa até cumprir um objetivo.
 
 O André dá um objetivo e um interlocutor ("marque uma consulta com a clínica X") e
-o Gaspar conversa em primeira pessoa, como ele, até concluir. Só aciona o André
-(Telegram) quando precisa de um dado ou decisão que não tem, quando perguntam se
-é robô, quando trava, quando o prazo vence e quando conclui. Decisões do dono em
-14/10/2026: abertura sempre aprovada por ele; envio imediato (com aprovação de
-cada mensagem enquanto `aprovar_cada_mensagem` estiver ligado, o modo sombra
-do começo); qualquer objetivo e horário; o limite é o prazo (30 min por padrão).
+o Gaspar conversa, identificado como assistente dele, até concluir. Só aciona o André
+(Telegram) quando precisa de um dado ou decisão que não tem, quando trava, quando o
+prazo vence e quando conclui. Decisões do dono em 14/10/2026: abertura sempre aprovada
+por ele; envio imediato (com aprovação de cada mensagem enquanto `aprovar_cada_mensagem`
+estiver ligado, o modo sombra do começo); qualquer objetivo e horário; o limite é o prazo
+(30 min por padrão). Desde 28/10/2026 (decisão do dono, que revoga a primeira pessoa sem
+assinatura de 14/10) toda mensagem sai com o prefixo de `mensagens_gaspar`, acrescentado
+em `_enfileirar`, e o Gaspar fala do André em terceira pessoa.
 
 Fluxo:
 1. `criar_e_iniciar` (tool MCP com confirmação obrigatória) grava o objetivo e
@@ -37,6 +39,8 @@ from datetime import timezone
 
 from firebase_admin import firestore
 from firebase_functions import firestore_fn, options, scheduler_fn
+
+from mensagens_gaspar import com_identificacao
 
 COLECAO = "objetivos_whatsapp"
 COLECAO_ATIVOS = "objetivos_whatsapp_ativos"
@@ -216,13 +220,13 @@ def previa(db, args: dict, ctx=None) -> dict:
         "chat_id": dados["chat_id"],
         "objetivo": dados["objetivo"],
         "concluido_quando": dados["criterio_conclusao"],
-        "mensagem_de_abertura": dados["mensagem_abertura"],
+        "mensagem_de_abertura": com_identificacao(dados["mensagem_abertura"]),
         "pode_informar": dados["pode_informar"] or "(nada além do necessário; o resto vai para o André)",
         "nunca_informar": dados["nunca_informar"] or "(nada listado)",
         "pode_decidir": dados["limites_decisao"] or "(nada: toda decisão vai para o André)",
         "prazo_min": dados["prazo_min"],
         "aprovar_cada_mensagem": dados["aprovar_cada_mensagem"],
-        "aviso": "A abertura sai assim que você confirmar, em primeira pessoa, sem assinatura.",
+        "aviso": "A abertura sai assim que você confirmar, exatamente como mostrada acima, com a identificação do Gaspar na primeira linha.",
     }
 
 
@@ -495,7 +499,7 @@ def _enfileirar(db, objetivo: dict, texto: str, *, imediato: bool) -> dict:
     return outbox_aprovacao.criar_rascunho(
         db=db,
         contact_number=objetivo["chat_id"],
-        message=texto,
+        message=com_identificacao(texto),   # único ponto de saída do Objetivo: abertura, respostas e mensagem final
         motivo=f"Objetivo com {objetivo['contato_nome']}: {objetivo['objetivo']}"[:150],
         acao_id=None,
         origem=ORIGEM,
@@ -778,7 +782,7 @@ def _agenda(db) -> str | None:
 # Decisão pelo Gemini
 # ---------------------------------------------------------------------------
 
-PROMPT_OBJETIVO = """Você conversa no WhatsApp COMO O PRÓPRIO ANDRÉ, em primeira pessoa, para cumprir um objetivo que ele te deu. Quem está do outro lado deve sentir que fala com o André.
+PROMPT_OBJETIVO = """Você é o Gaspar, assistente virtual do André, e conversa no WhatsApp pela conta dele para cumprir um objetivo que ele te deu. Quem está do outro lado precisa saber que fala com um assistente, e não com o André.
 
 OBJETIVO: {objetivo}
 CONCLUÍDO QUANDO: {criterio}
@@ -787,13 +791,13 @@ NUNCA INFORME: {nunca_informar}
 VOCÊ PODE DECIDIR SOZINHO: {limites}
 {respostas}
 REGRAS INEGOCIÁVEIS:
-1. Escreva em primeira pessoa como o André. Nunca diga que é assistente, robô, bot, IA ou sistema. Não assine.
-2. Se perguntarem se é robô, assistente ou mensagem automática: NÃO responda ao contato; chame pedir_ao_dono com motivo "perguntou_se_robo".
+1. IDENTIDADE: o sistema coloca sozinho, antes de cada mensagem, o prefixo "*Gaspar Bot (assistente virtual do André):*". NÃO escreva esse prefixo nem assine. Escreva como assistente: fale do André em terceira pessoa ("o André prefere terça de manhã", "vou confirmar com ele") e nunca em primeira pessoa como se fosse ele.
+2. Se perguntarem se é robô, IA ou mensagem automática: confirme com naturalidade que você é o Gaspar, assistente virtual do André, e siga com o objetivo. Nunca negue nem se passe pelo André.
 3. Nunca sugira ligação, chamada de voz ou de vídeo nem videoconferência: resolva por mensagem.
 4. Nunca pague, transfira, assine, aceite termos, contrato, orçamento ou valor. Apareceu valor, cobrança ou condição nova: pedir_ao_dono.
 5. Data e horário: só aceite o que estiver dentro do que o André permitiu e livre na AGENDA. Agenda desconhecida ou horário fora do permitido: pedir_ao_dono.
 6. Dado pessoal fora de "PODE INFORMAR": pedir_ao_dono. Nunca invente dado.
-7. Leia a conversa inteira antes de decidir. Não repita o que você (Eu) já disse; responda só ao que falta.
+7. Leia a conversa inteira antes de decidir. "Eu" é a conta do André, que você usa: não repita o que ela já enviou; responda só ao que falta.
 8. Se o contato disse que vai verificar ou retornar e não há nada a acrescentar: aguardar.
 9. Critério cumprido: concluir, com o resultado concreto (ex.: data, hora, local). Se couber, uma última mensagem curta de agradecimento em mensagem_final.
 10. Sem como avançar: travar, explicando por quê.
@@ -802,9 +806,9 @@ REGRAS INEGOCIÁVEIS:
 Chame exatamente UMA ferramenta."""
 
 _FERRAMENTAS = [
-    {"name": "responder", "description": "Manda a próxima mensagem ao contato, em primeira pessoa.",
+    {"name": "responder", "description": "Manda a próxima mensagem ao contato, como assistente do André.",
      "input_schema": {"type": "object", "properties": {
-         "texto": {"type": "string", "description": "Mensagem exata, curta e natural, sem assinatura."},
+         "texto": {"type": "string", "description": "Mensagem exata, curta e natural, sem o prefixo de identificação (o sistema o acrescenta)."},
          "informacao_nova": {"type": "boolean",
                              "description": "False se a conversa não avançou desde a sua última mensagem."}},
          "required": ["texto", "informacao_nova"]}},

@@ -9,6 +9,7 @@ from google.cloud.firestore_v1.transforms import ArrayUnion
 
 import objetivos_whatsapp as ow
 import telegram_callbacks_objetivo as tco
+from mensagens_gaspar import PREFIXO_IDENTIFICACAO as PREFIXO
 
 UTC = dt.timezone.utc
 
@@ -196,9 +197,17 @@ class TestCadastro(_Base):
     def test_previa_mostra_o_que_o_andre_confirma(self):
         p = ow.previa(self.db, ARGS)
         self.assertEqual(p["destinatario"], "Clínica Vida")
-        self.assertEqual(p["mensagem_de_abertura"], ARGS["mensagem_abertura"])
+        # O André confirma o texto exato que sai: com a identificação do Gaspar na primeira linha.
+        self.assertEqual(p["mensagem_de_abertura"], f"{PREFIXO}\n{ARGS['mensagem_abertura']}")
         self.assertEqual(p["prazo_min"], 30)
         self.assertFalse(p["aprovar_cada_mensagem"])
+
+    def test_abertura_que_se_identifica_como_assistente_nao_e_barrada(self):
+        for abertura in ("Oi, aqui é o Gaspar, assistente virtual do André. Ele quer marcar uma consulta.",
+                         "Olá! Sou um assistente virtual e estou falando em nome do André."):
+            with self.subTest(abertura=abertura):
+                p = ow.previa(self.db, {**ARGS, "mensagem_abertura": abertura})
+                self.assertTrue(p["mensagem_de_abertura"].startswith(PREFIXO + "\n"))
 
     def test_prazo_padrao_e_modo_sombra_vem_da_configuracao(self):
         args = {k: v for k, v in ARGS.items() if k not in ("prazo_min", "aprovar_cada_mensagem")}
@@ -212,7 +221,7 @@ class TestCadastro(_Base):
         with mock.patch.object(ow, "_resolver_contato", side_effect=ValueError("grupos não são aceitos")):
             with self.assertRaisesRegex(ValueError, "grupos"):
                 ow.previa(self.db, ARGS)
-        for abertura in ("Oi, sou o assistente do André.", "Oi! Pode me ligar amanhã?", "Meu CPF é 123.456.789-00"):
+        for abertura in ("Oi! Pode me ligar amanhã?", "Meu CPF é 123.456.789-00"):
             with self.subTest(abertura=abertura), self.assertRaisesRegex(ValueError, "barrada"):
                 ow.previa(self.db, {**ARGS, "mensagem_abertura": abertura})
 
@@ -307,8 +316,8 @@ class TestDecisoes(_Base):
 
     def test_resposta_barrada_duas_vezes_vai_para_o_andre(self):
         oid = self._criar()
-        res, _ = self._ciclo(oid, {"acao": "responder", "texto": "Sou o assistente do André", "informacao_nova": True},
-                             {"acao": "responder", "texto": "Sou um robô, desculpe", "informacao_nova": True})
+        res, _ = self._ciclo(oid, {"acao": "responder", "texto": "Me liga que a gente acerta", "informacao_nova": True},
+                             {"acao": "responder", "texto": "Podemos fazer uma videochamada?", "informacao_nova": True})
         self.assertEqual(res["status"], ow.AGUARDANDO_DONO)
         self.assertIn("barrada", self._objetivo(oid)["pergunta_ao_dono"])
         self.assertEqual(len(self.enfileiradas), 1)  # só a abertura
@@ -481,9 +490,33 @@ class TestConversaEPrompt(_Base):
     def test_prompt_traz_o_objetivo_e_as_regras_do_dono(self):
         prompt = ow.montar_prompt({**ARGS, "respostas_do_dono": [{"pergunta": "Valor?", "resposta": "Até 300"}]})
         for trecho in (ARGS["objetivo"], ARGS["criterio_conclusao"], ARGS["nunca_informar"], "Até 300",
-                       "Nunca sugira ligação", "perguntou_se_robo", "Tininha", "PRIMEIRA PESSOA".lower()):
+                       "Nunca sugira ligação", "Tininha", "assistente virtual do André", PREFIXO,
+                       "terceira pessoa", "confirme com naturalidade"):
             with self.subTest(trecho=trecho):
                 self.assertIn(trecho.lower(), prompt.lower())
+        self.assertNotIn("primeira pessoa como o André", prompt.lower())
+        self.assertNotIn("perguntou_se_robo", prompt)
+
+
+class TestSaidaIdentificada(unittest.TestCase):
+    """O prefixo entra em `_enfileirar`, único ponto de saída do Objetivo (abertura, resposta e mensagem final).
+    `_Base` substitui `_enfileirar`; aqui roda o de verdade."""
+
+    def _enviada(self, texto):
+        objetivo = {"id": "o1", "chat_id": "5527999990000@c.us", "contato_nome": "Clínica Vida",
+                    "objetivo": "Marcar consulta"}
+        with mock.patch("outbox_aprovacao.criar_rascunho", return_value={"status": "pending", "outbox_id": "ob-1"}) as criar:
+            ow._enfileirar(None, objetivo, texto, imediato=True)
+        return criar.call_args.kwargs["message"]
+
+    def test_mensagem_sai_com_o_prefixo(self):
+        self.assertEqual(self._enviada("Pode ser quinta às 9h?"), f"{PREFIXO}\nPode ser quinta às 9h?")
+
+    def test_prefixo_que_o_modelo_escrever_nao_duplica(self):
+        esperado = f"{PREFIXO}\nPode ser quinta às 9h?"
+        for escrito in (f"{PREFIXO} Pode ser quinta às 9h?", "**Gaspar Bot:** Pode ser quinta às 9h?", esperado):
+            with self.subTest(escrito=escrito):
+                self.assertEqual(self._enviada(escrito), esperado)
 
 
 class TestTrava(unittest.TestCase):

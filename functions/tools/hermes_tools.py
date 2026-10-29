@@ -728,6 +728,11 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
         return f"ERRO|Erro: {e}"
 
 
+def _como_assistente(args: dict) -> bool:
+    """`como_assistente` (tolerante a "true" em texto): o agente residente pede o prefixo de identificação."""
+    return str(args.get("como_assistente")).strip().lower() in ("true", "1", "sim")
+
+
 def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
     from tools.schedule_whatsapp_message import schedule_whatsapp_message as _fn
 
@@ -737,6 +742,7 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
         message=args.get("message"),
         scheduled_time=args.get("scheduled_time"),
         idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
+        como_assistente=_como_assistente(args),
     )
 
 
@@ -998,11 +1004,16 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
             return {"status": "destinatario_ambiguo" if resolved.get("ambiguo") else "destinatario_desconhecido",
                     "informado": resolved["informado"],
                     "sugestoes": resolved["sugestoes"]}
+        mensagem = str(args.get("message") or "")
+        if _como_assistente(args) and mensagem.strip():
+            from mensagens_gaspar import com_identificacao
+
+            mensagem = com_identificacao(mensagem)   # o André aprova o texto exato, com a identificação
         return {"status": "confirmation_required",
                 "destinatario": ("GRUPO: " if resolved["tipo"] == "grupo" else "") + resolved["nome"],
                 "destinatario_id": resolved["chat_id"],
                 "tipo_destinatario": resolved["tipo"],
-                "mensagem": str(args.get("message") or ""),
+                "mensagem": mensagem,
                 "agendado_para": str(args.get("scheduled_time") or "")}
     return None
 

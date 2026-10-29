@@ -200,7 +200,7 @@ _CATALOG: dict[str, str] = {
     "video_refazer_cena": "Refaz o clipe de uma cena de um vídeo pronto (opcionalmente as seguintes) e remonta; pago, exige confirmação",
     "video_cancelar": "Cancela um projeto de vídeo; se estiver renderizando, o worker para antes do próximo clipe",
     # Modo Objetivo no WhatsApp (14/10/2026): o Gaspar conduz a conversa até cumprir um objetivo.
-    "criar_objetivo_whatsapp": "Modo Objetivo: o Gaspar conversa no WhatsApp em primeira pessoa com uma pessoa até cumprir um objetivo (ex.: marcar consulta); exige confirmação da abertura",
+    "criar_objetivo_whatsapp": "Modo Objetivo: o Gaspar conversa no WhatsApp, identificado como assistente do André, com uma pessoa até cumprir um objetivo (ex.: marcar consulta); exige confirmação da abertura",
     "consultar_objetivos_whatsapp": "Andamento dos objetivos de WhatsApp: estado, prazo, pergunta pendente ao André e resultado",
     "responder_objetivo_whatsapp": "Responde a pergunta do Modo Objetivo ou retoma/estende um objetivo; o Gaspar segue a conversa",
     "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",

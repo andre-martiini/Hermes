@@ -22,7 +22,10 @@ from firebase_admin import firestore
 
 
 def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_time: str,
-                              *, idempotency_key: str | None = None) -> str:
+                              *, idempotency_key: str | None = None, como_assistente: bool = False) -> str:
+    """`como_assistente`: a mensagem sai com o prefixo de identificação do Gaspar (desde 28/10/2026 o
+    agente residente o pede em tudo que manda com o sim do André). Sem ele, a mensagem sai como veio:
+    é o que as outras sessões do André fazem, com as palavras e o sim dele."""
     try:
         contact_number = str(contact_number or "").strip()
         message = str(message or "").strip()
@@ -33,6 +36,10 @@ def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_t
             raise ValueError("message vazio")
         if not scheduled_time:
             raise ValueError("scheduled_time vazio")
+        if como_assistente:
+            from mensagens_gaspar import com_identificacao
+
+            message = com_identificacao(message)
 
         # O numero e normalizado no envio (`resolverDestino` no worker, que usa
         # `client.getNumberId`); aqui so se recusa o que nao tem digito nenhum,
