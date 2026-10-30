@@ -720,7 +720,7 @@ testes:
   resultados:
     - "functions/ completo ANTES 5107 OK (diário, P08 sub 15); DEPOIS 5122 OK (205s; 10 testes novos em test_autonomy_reconciliar_persistido; o restante vem de merges de outras linhas)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada (run_id, retentativa que mantém o run fechado em pedido.run, reexecução da transformação, efeito_ocorreu não-bool e arquivamento duplicado conferidos). Não verificado contra Firestore real."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Codex na PR #574: 1 achado P2 real que a rodada 1 não pegou -- o run já terminal deixado pelo sweep em pedido.run sumia ao ser substituído pelo run do verificador (efeito_ocorreu=True), pois a função pura devolve antigo=None; agora atual.run é arquivado quando o run novo o substitui; coberto por teste. Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
