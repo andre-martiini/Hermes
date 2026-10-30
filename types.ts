@@ -378,6 +378,8 @@ export interface FinanceTransaction {
     google_message_id?: string;
     status?: 'active' | 'deleted';
     origin?: 'internal' | 'external';
+    /** De qual conta saiu. Só 'picpay' conta no teto do mês (src/utils/gastoAvulso.ts). */
+    conta?: 'picpay' | 'xp' | 'caixa' | 'mista';
 }
 
 export interface FinanceGoal {

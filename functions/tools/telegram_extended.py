@@ -1338,10 +1338,15 @@ def execute(tool_name: str, slots: dict, db) -> str:
             return json.dumps({"success": True, "tipo": "obrigacao_fixa", "id": ref.id})
 
         elif tipo == "transacao_avulsa":
+            import gasto_avulso as _gasto_avulso
+
+            conta = str(slots.get("conta") or "").strip().lower()
+            if conta and conta not in _gasto_avulso.CONTAS:
+                return "ERRO|" + json.dumps({"success": False, "reason": f"conta deve ser uma de {list(_gasto_avulso.CONTAS)}"}, ensure_ascii=False)
             day = now.day
             sprint = 1 if day < 8 else 2 if day < 15 else 3 if day < 22 else 4
             ref = db.collection("finance_transactions").document()
-            ref.set({
+            registro = {
                 "description": descricao,
                 "amount": valor,
                 "category": categoria,
@@ -1350,7 +1355,10 @@ def execute(tool_name: str, slots: dict, db) -> str:
                 "status": "active",
                 "origin": "internal",
                 "source": "hermes_v2"
-            })
+            }
+            if conta:
+                registro["conta"] = conta  # só "picpay" entra no teto do mês (gasto_avulso)
+            ref.set(registro)
             return json.dumps({"success": True, "tipo": "transacao_avulsa", "id": ref.id})
 
         # P03 passo 2: string JSON com "success": false, sem prefixo `ERRO|`.

@@ -1832,7 +1832,7 @@ const FinanceView = ({
                                     </button>
                                     <button
                                         onClick={() => {
-                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
+                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação', conta: 'picpay' });
                                             setIsAddingTransaction(true);
                                         }}
                                         className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
@@ -1878,6 +1878,25 @@ const FinanceView = ({
                                                 }}
                                             />
                                         </div>
+                                        <label className="flex flex-col gap-1 text-[10px] font-sans font-semibold uppercase tracking-wider text-slate-500">
+                                            Conta (só PicPay entra no teto do mês)
+                                            <select
+                                                className="bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold normal-case tracking-normal text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                                value={(editingTransaction || newTransaction).conta || ''}
+                                                onChange={e => {
+                                                    // Sem a chave quando "Não informada": o Firestore recusa campo undefined.
+                                                    const { conta: _anterior, ...resto } = editingTransaction || newTransaction;
+                                                    const proximo = e.target.value ? { ...resto, conta: e.target.value as FinanceTransaction['conta'] } : resto;
+                                                    editingTransaction ? setEditingTransaction(proximo as FinanceTransaction) : setNewTransaction(proximo);
+                                                }}
+                                            >
+                                                <option value="">Não informada</option>
+                                                <option value="picpay">PicPay</option>
+                                                <option value="xp">XP</option>
+                                                <option value="caixa">Caixa</option>
+                                                <option value="mista">Mais de uma conta</option>
+                                            </select>
+                                        </label>
                                         <div className="flex gap-2 pt-2">
                                             <button
                                                 onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}

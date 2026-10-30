@@ -1,12 +1,20 @@
-"""Gasto avulso do mes e saldo do orcamento, a mesma conta no Telegram e no app.
+"""Gasto do teto do PicPay no mes e quanto resta, a mesma conta no Telegram e no app.
 
 Modulo puro, espelhado em `src/utils/gastoAvulso.ts` (mesmo padrao de
 `bolso_aquisicoes`): a notificacao "Gasto Realizado via Pix" e o "Alerta de
 Orcamento" do app mostravam numeros de contas diferentes. Os testes dos dois
 lados usam a MESMA fixture; mudou a regra aqui, muda la.
 
+O modelo (André, 30/10/2026): o salario cai na Caixa, vai para a XP, la saem as
+contas do inicio do mes, e o resto vai para o PicPay. O orcamento do mes
+(`monthlyBudgets`/`monthlyBudget`) e o TETO de gasto variavel do PicPay; o que
+sobra vai para os cofrinhos. Entao o saldo e o teto menos o gasto feito PELA
+CONTA PICPAY.
+
 A regra, e o que ela NAO resolve:
-- conta so o que esta em `finance_transactions` e nao esta `deleted`;
+- conta so o que esta em `finance_transactions`, nao esta `deleted` e tem
+  `conta == "picpay"`. Lancamento sem `conta` (manual antigo, resumo misto
+  XP/PicPay) NAO entra: sem sinal de conta, nao se adivinha;
 - o mes e o de Brasilia. Data so com dia ("2026-10-28") vale o dia escrito, e
   meia-noite UTC exata tambem: e o que o campo de data do app grava
   (`new Date("2026-11-01").toISOString()`). Data com hora e sem fuso e UTC, como
@@ -15,11 +23,9 @@ A regra, e o que ela NAO resolve:
 - categoria de movimentacao que nao e consumo (transferencia, investimento,
   aporte, poupanca, reserva, conta fixa, no singular ou plural) fica fora;
 - orcamento do mes gravado (mesmo 0) vence o geral; 0 = sem orcamento, sem saldo.
-NAO separa sozinha um resumo mensal lancado a mao ("Mercado (outubro)") dos Pix
-individuais que ele ja inclui: nao ha campo que ligue um ao outro. Isso so a
-limpeza dos lancamentos resolve.
 """
 
+import calendar
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -28,6 +34,9 @@ from bolso_aquisicoes import centavos, numero
 
 # ponytail: offset fixo; o Brasil nao tem horario de verao desde 2019. Se voltar, trocar por zoneinfo nos dois lados.
 BRT = timezone(timedelta(hours=-3))
+
+CONTA_DO_TETO = "picpay"
+CONTAS = ("picpay", "xp", "caixa", "mista")
 
 # Prefixos, para pegar singular e plural ("Investimentos", "Contas fixas").
 FORA_DO_CONSUMO = ("transferenc", "investiment", "aporte", "poupanc", "reserva", "conta fixa", "contas fixa")
@@ -71,7 +80,7 @@ def mes_brt(data):
 def gasto_avulso_centavos(transacoes, ano: int, mes: int) -> int:
     total, vistos = 0, set()
     for t in transacoes:
-        if t.get("status") == "deleted":
+        if t.get("status") == "deleted" or _normal(t.get("conta")) != CONTA_DO_TETO:
             continue
         if _normal(t.get("category")).startswith(FORA_DO_CONSUMO):
             continue
@@ -101,18 +110,27 @@ def resumo_do_mes(transacoes, settings: dict, ano: int, mes: int) -> dict:
             "saldo": None if orcamento is None else orcamento - gasto}
 
 
-def mes_atual_brt(agora: datetime | None = None):
+def hoje_brt(agora: datetime | None = None):
+    """(ano, mes 1-12, dia) de agora em Brasilia."""
     local = (agora or datetime.now(timezone.utc)).astimezone(BRT)
-    return local.year, local.month
+    return local.year, local.month, local.day
 
 
 def _reais(centavos_: int) -> str:
     return f"{centavos_ / 100:.2f}"
 
 
-def texto_notificacao_pix(valor: float, resumo: dict) -> str:
-    """Corpo da notificacao "Gasto Realizado via Pix"; saldo so quando ha orcamento."""
-    linhas = [f"Valor: R$ {valor:.2f}", f"Gasto avulso no mês: R$ {_reais(resumo['gasto'])}"]
-    if resumo["saldo"] is not None:
-        linhas.append(f"Saldo disponível: R$ {_reais(resumo['saldo'])}")
+def texto_notificacao_pix(valor: float, resumo: dict, hoje: tuple) -> str:
+    """Corpo da notificacao "Gasto Realizado via Pix". `hoje` = (ano, mes, dia) em BRT.
+
+    O que resta no teto e dividido pelos dias que faltam, contando hoje.
+    """
+    linhas = [f"Valor: R$ {valor:.2f}", f"Gasto no PicPay no mês: R$ {_reais(resumo['gasto'])}"]
+    saldo = resumo["saldo"]
+    if saldo is not None and saldo > 0:
+        ano, mes, dia = hoje
+        dias = calendar.monthrange(ano, mes)[1] - dia + 1
+        linhas.append(f"Restam R$ {_reais(saldo)} no teto (R$ {_reais(saldo // dias)} por dia até o fim do mês)")
+    elif saldo is not None:
+        linhas.append(f"Teto do mês estourado em R$ {_reais(-saldo)}")
     return "\n".join(linhas)

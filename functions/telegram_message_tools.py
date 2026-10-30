@@ -873,15 +873,16 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         from tools.telegram_extended import execute
         return execute("consultar_financas_v2", {"mes": mes, "ano": ano}, db)
 
-    def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
+    def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None, conta: str = None):
         """
         Registra nova renda, obrigacao_fixa ou transacao_avulsa no sistema financeiro.
         tipo: 'renda' | 'obrigacao_fixa' | 'transacao_avulsa'.
+        conta (só transacao_avulsa): 'picpay' | 'xp' | 'caixa' | 'mista'; só 'picpay' entra no teto do mês.
         Obrigatório apresentar rascunho completo ao usuário para confirmação antes de persistir.
         Categoria não deve ser inferida nem solicitada por enquanto; o sistema grava "Geral" internamente.
         """
         from tools.telegram_extended import execute
-        slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data}
+        slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data, "conta": conta}
         return execute("registrar_item_financeiro_v2", slots, db)
 
     def buscar_e_analisar_email(query: str, max_results: int = 5):
