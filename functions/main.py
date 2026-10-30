@@ -46,6 +46,7 @@ from gmail_bill_pdf import (
 )
 import fatura_cartao
 import conciliacao_pix
+import gasto_avulso
 from bill_pdf_passwords import (
     find_password_config,
     list_password_configs,
@@ -1958,7 +1959,9 @@ def sync_pix_emails(service, sync_ref, logs):
                 'date': parse_iso_date(data.get('date')),
                 'pix_id': data.get('pix_id'),
                 'google_message_id': data.get('google_message_id'),
-                'status': data.get('status')
+                'status': data.get('status'),
+                'category': data.get('category'),
+                'data_original': data.get('date')  # gasto_avulso lê o texto: "2026-11-01" é o dia 1º, não 31/10 21h
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
@@ -1993,19 +1996,10 @@ def sync_pix_emails(service, sync_ref, logs):
                                        'default': d.get('defaultAmount'),
                                        'pix_recebedor': d.get('pix_recebedor')})
 
-        # Orçamento do mês corrente e gasto acumulado, para exibir "Saldo disponível" nas notificações de Pix
-        now_utc = datetime.now(timezone.utc)
-        current_month_key = f"{now_utc.year}-{now_utc.month:02d}"
+        # Gasto avulso e saldo das notificações de Pix: mesma regra do "Alerta de Orçamento" do app (gasto_avulso).
+        ano_brt, mes_brt = gasto_avulso.mes_atual_brt()
         finance_settings_doc = db.collection('finance_settings').document('config').get()
         finance_settings_data = finance_settings_doc.to_dict() if finance_settings_doc.exists else {}
-        monthly_budget = (finance_settings_data.get('monthlyBudgets') or {}).get(
-            current_month_key, finance_settings_data.get('monthlyBudget', 0) or 0
-        )
-        current_month_spend = sum(
-            t['amount'] for t in existing_transactions
-            if t.get('status') != 'deleted' and t.get('date')
-            and t['date'].year == now_utc.year and t['date'].month == now_utc.month
-        )
 
         for msg in messages:
             msg_id = msg['id']
@@ -2216,14 +2210,13 @@ def sync_pix_emails(service, sync_ref, logs):
                     }
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
                     inseridos_ou_alterados += 1
-                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id, 'status': None})
+                    existing_transactions.append({**new_record, 'doc_id': doc_ref.id, 'date': dt, 'status': None, 'data_original': iso_date})
 
-                    if dt.year == now_utc.year and dt.month == now_utc.month:
-                        current_month_spend += amount
-                    saldo_disponivel = monthly_budget - current_month_spend
                     emit_notification_backend(
                         "Gasto Realizado via Pix",
-                        f"Valor: R$ {amount:.2f}\nSaldo disponível: R$ {saldo_disponivel:.2f}",
+                        gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
+                            [dict(t, date=t['data_original']) for t in existing_transactions],
+                            finance_settings_data, ano_brt, mes_brt)),
                         'expense', 'financeiro'
                     )
 
