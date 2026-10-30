@@ -6,7 +6,7 @@ Plano técnico: https://claude.ai/artifact/DguHwj33UzU7mh8mRx8xtw
 | Arquivo | Papel |
 |---|---|
 | `CLAUDE.md` | persona e regras |
-| `.claude/loop.md` | pulso (fila de atenção, WhatsApp, pedidos do agente) |
+| `.claude/loop.md` | pulso (fila de atenção, WhatsApp, pedidos do agente; revisão de uma ação às 10h e 15h) |
 | `.claude/settings.json` | permissões, plugins desta pasta (telegram, fakechat; os do perfil desligados), exclui o CLAUDE.md global |
 
 Diferenças em relação ao plano: tudo fica nesta pasta (escopo de projeto), não em `~/.claude`, para não mudar as outras sessões do André.
