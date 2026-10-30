@@ -17,9 +17,11 @@ from typing import Any, Callable
 from firebase_admin import firestore
 
 from autonomy.execution import PedidoDuravel
-from autonomy.pedido_serializacao import pedido_de_dict, pedido_para_dict
+from autonomy.pedido_serializacao import pedido_de_dict, pedido_para_dict, run_para_dict
+from autonomy.runs import AgentRun
 
 COLECAO_PEDIDOS = "autonomy_pedidos"
+SUBCOLECAO_RUNS_ENCERRADOS = "runs_encerrados"
 
 
 class PedidoJaExiste(Exception):
@@ -35,10 +37,14 @@ class PedidoCorrompido(ValueError):
 
 
 def _validar_request_id(request_id: Any) -> str:
+    return _validar_id_documento(request_id, "request_id")
+
+
+def _validar_id_documento(request_id: Any, nome: str) -> str:
     if not isinstance(request_id, str) or not request_id.strip() or "/" in request_id:
-        raise ValueError("request_id deve ser str não vazia sem '/'.")
+        raise ValueError(f"{nome} deve ser str não vazia sem '/'.")
     if request_id != request_id.strip():
-        raise ValueError("request_id não pode ter espaços nas pontas.")
+        raise ValueError(f"{nome} não pode ter espaços nas pontas.")
     # Ids que o Firestore real recusa com InvalidArgument (o duplo de teste não).
     if (
         request_id in (".", "..")
@@ -47,7 +53,7 @@ def _validar_request_id(request_id: Any) -> str:
         or len(request_id.encode("utf-8")) > 1500
         or any(ord(c) < 32 or ord(c) == 127 for c in request_id)
     ):
-        raise ValueError("request_id recusado pelo Firestore (reservado, longo ou com controle).")
+        raise ValueError(f"{nome} recusado pelo Firestore (reservado, longo ou com controle).")
     return request_id
 
 
@@ -159,10 +165,18 @@ def atualizar_pedido(
     db: Any,
     request_id: str,
     transformar: Callable[[PedidoDuravel], PedidoDuravel],
+    run_encerrado: Callable[[], AgentRun | None] | None = None,
 ) -> PedidoDuravel:
     """Read-modify-write transacional. `transformar` deve ser PURA: o
     Firestore a reexecuta sobre o estado novo quando há contenção. Se ela
-    levanta, nada é gravado e a exceção sobe. Devolve o pedido gravado."""
+    levanta, nada é gravado e a exceção sobe. Devolve o pedido gravado.
+
+    `run_encerrado` (opcional) é chamado logo após `transformar`, na mesma
+    transação, e devolve o run antigo fechado que a transição deixou de
+    guardar no pedido (ex.: `acordar_espera_externa`); ele é gravado em
+    `autonomy_pedidos/{id}/runs_encerrados/{run_id}` junto com o pedido
+    (atômico), sem o que ficaria ativo para sempre. Só é gravado se o pedido
+    também mudou."""
     request_id = _validar_request_id(request_id)
     if not callable(transformar):
         raise TypeError("transformar deve ser callable.")
@@ -183,7 +197,30 @@ def atualizar_pedido(
         doc = pedido_para_dict(novo)
         _validar_para_firestore(doc)
         if doc != pedido_para_dict(atual):
+            antigo = run_encerrado() if run_encerrado is not None else None
+            ref_run = doc_run = None
+            if antigo is not None:
+                if not isinstance(antigo, AgentRun) or antigo.request_id != request_id:
+                    raise ValueError("run_encerrado deve ser AgentRun do mesmo request_id.")
+                doc_run = run_para_dict(antigo)
+                _validar_para_firestore(doc_run, "run_encerrado")
+                ref_run = ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(
+                    _validar_id_documento(antigo.run_id, "run_id"))
+                # Leituras antes de qualquer escrita (regra das transações do Firestore).
+                existente = ref_run.get(transaction=transaction)
+                if existente.exists and existente.to_dict() != doc_run:
+                    raise ValueError(f"run_id '{antigo.run_id}' já arquivado com outro conteúdo.")
+            if run_encerrado is not None and novo.run is not None and (
+                atual.run is None or novo.run.run_id != atual.run.run_id
+            ):
+                # Run novo com id já arquivado travaria o próximo despertar.
+                if ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(
+                    _validar_id_documento(novo.run.run_id, "run_id")
+                ).get(transaction=transaction).exists:
+                    raise ValueError(f"run_id '{novo.run.run_id}' já consta no arquivo de runs encerrados.")
             transaction.set(ref, {"pedido": doc, "revisao": revisao + 1})
+            if ref_run is not None:
+                transaction.set(ref_run, doc_run)
         return novo
 
     return _exec(tx)

@@ -33,6 +33,17 @@ class _Ref:
     def set(self, data):
         self.db.docs[self.id] = copy.deepcopy(data)
 
+    def collection(self, nome):
+        return _SubCol(self.db, f"{self.id}/{nome}")
+
+
+class _SubCol:
+    def __init__(self, db, prefixo):
+        self.db, self.prefixo = db, prefixo
+
+    def document(self, doc_id):
+        return _Ref(self.db, f"{self.prefixo}/{doc_id}")
+
 
 class _Col:
     def __init__(self, db):
@@ -207,6 +218,43 @@ class TestRepositorioPedido(unittest.TestCase):
             repo.criar_pedido(_DbSemTx(), _completo())
         with self.assertRaises(RuntimeError):
             repo.atualizar_pedido(_DbSemTx(), "req-1", lambda p: p)
+
+
+
+class TestRunEncerrado(unittest.TestCase):
+    def setUp(self):
+        self.db = _Db()
+        self.p = _completo()
+        repo.criar_pedido(self.db, self.p)
+        self.antigo = self.p.run
+
+    def _caminho(self):
+        return f"req-1/{repo.SUBCOLECAO_RUNS_ENCERRADOS}/{self.antigo.run_id}"
+
+    def test_grava_run_encerrado_junto_com_o_pedido(self):
+        repo.atualizar_pedido(
+            self.db, "req-1", lambda p: dataclasses.replace(p, tentativas=7),
+            run_encerrado=lambda: self.antigo)
+        self.assertEqual(self.db.docs["req-1"]["revisao"], 2)
+        self.assertEqual(self.db.docs[self._caminho()]["run_id"], self.antigo.run_id)
+
+    def test_sem_mudanca_nao_grava_run(self):
+        repo.atualizar_pedido(self.db, "req-1", lambda p: p, run_encerrado=lambda: self.antigo)
+        self.assertNotIn(self._caminho(), self.db.docs)
+
+    def test_run_none_nao_grava_subdocumento(self):
+        repo.atualizar_pedido(
+            self.db, "req-1", lambda p: dataclasses.replace(p, tentativas=7), run_encerrado=lambda: None)
+        self.assertEqual(set(self.db.docs), {"req-1"})
+
+    def test_run_de_outro_pedido_ou_tipo_errado_nao_grava_nada(self):
+        for ruim in (dataclasses.replace(self.antigo, request_id="outro"), {"run_id": "x"}):
+            with self.assertRaises(ValueError):
+                repo.atualizar_pedido(
+                    self.db, "req-1", lambda p: dataclasses.replace(p, tentativas=7),
+                    run_encerrado=lambda r=ruim: r)
+        self.assertEqual(set(self.db.docs), {"req-1"})
+        self.assertEqual(self.db.docs["req-1"]["revisao"], 1)
 
 
 if __name__ == "__main__":
