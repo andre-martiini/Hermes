@@ -4,7 +4,7 @@ title: Schema do Firestore
 description: Coleções do Firestore usadas pelo Gaspar, agrupadas por domínio, com campos principais, quem escreve em cada uma e suas relações.
 resource: types.ts
 tags: [hermes, okf, firestore, schema, arquitetura]
-timestamp: 2026-08-22T00:00:00-03:00
+timestamp: 2026-10-30T00:00:00-03:00
 ---
 
 # Schema do Firestore
@@ -28,6 +28,8 @@ Núcleo de toda a aplicação — ações/tarefas do usuário.
 
 ### `estrategia_pessoal`
 Objetivos/metas estratégicas pessoais do usuário (equivalente a metas de PGD/plano de gestão, mas de escopo pessoal). Campos: `userId`, `pilar` (`carreira`\|`financas`\|`saude`\|`intelectual`\|`estilo_vida`), `objetivoMacro`, `tipoMeta` (`absoluta`\|`relativa_qualitativa`), `metricaAlvo` (`valorInicial`, `valorAtual`, `valorObjetivo`, `unidade`), `historicoMetrica[]`, `indicadoresSucesso[]`, `marcos[]`, `diretrizesDerivadas[]`, `status` (`ativo`\|`concluido`\|`revisar`). Escrito pelo frontend (`StrategyDashboardView.tsx`), pelo refinamento por IA (`estrategia_pessoal_refinar`) e pelas tools de chat do Copiloto e do Godmode (CRUD compartilhado em `strategy_tools.py`, usado por `main.py:10296-10520` e `godmode.py`). Lido também pelo planejador de notificações de IA (ver `scheduled_notifications` abaixo). Relação: `tarefas.estrategia_objetivo_id`/`estrategia_indicador_id` apontam de volta para cá.
+
+Perfil de 3 meses (30/10/2026), todos opcionais, meta legada segue igual: `ciclo` (`inicio`, `fim`, YYYY-MM-DD), `linhaBase` (`data`, `valores` chave→número), `indicadores[]` (`chave`, `rotulo`, `unidade`, `sentido` `menor_melhor`\|`maior_melhor`, `fonte` `peso`\|`cintura`\|`guardado_acumulado`\|`manual`, `inicial`, `alvoFinal`) e, em cada marco, `dataAlvo` e `esperado` (chave do indicador→número; dinheiro em reais). O esperado de hoje e o estado (`no_perfil`, `atrasado`, `adiantado`, `sem_dado`) saem de `functions/perfil_estrategia.py`, espelhado em `src/utils/perfilEstrategia.ts` com a mesma fixture. Toda escrita de marco preserva campos desconhecidos (`strategy_tools.normalizar_item` e `src/utils/itensEstrategia.ts`); marco legado em texto puro tem id estável (`id_legado`), o mesmo na leitura e na gravação.
 
 ## Conhecimento e RAG
 

@@ -971,6 +971,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "chamada -- efeito adicional real, não só inerte. Um hint único não descreveria os quatro ramos "
         "honestamente -- um hint errado é pior que a omissão.",
     ),
+    "obter_objetivo_estrategico": ToolInventoryEntry(
+        "estrategico", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — chamador pode reler",
+        nota="strategy_tools.obter_objetivo_estrategico: só lê; marco legado em texto sai com o id estável "
+        "de perfil_estrategia.id_legado, o mesmo que gerenciar_item_estrategico aceita e grava.",
+    ),
+    "listar_objetivos_estrategicos": ToolInventoryEntry(
+        "estrategico", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — chamador pode reler",
+        nota="strategy_tools.listar_objetivos_estrategicos: só lê os objetivos com userId do chamador.",
+    ),
     "excluir_objetivo_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.IRREVERSIVEL, False, False,
         _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,

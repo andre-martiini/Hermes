@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 
 from firebase_admin import firestore
 
+from bolso_aquisicoes import numero
+from perfil_estrategia import dia, id_legado
+
 PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
 STATUS_VALUES = {'ativo', 'concluido', 'revisar'}
 TIPOS = {'absoluta', 'relativa_qualitativa'}
@@ -209,6 +212,108 @@ def editar_objetivo_estrategico(
     }
 
 
+def normalizar_item(item, tipo: str, indice: int) -> dict:
+    """Marco ou indicador como dict, PRESERVANDO todo campo que não conhecemos.
+
+    Antes cada escrita recompunha o item só com id, descricao, concluido,
+    registros, dataConclusao e evidencia: qualquer adicionar/editar/concluir
+    apagava em silêncio `dataAlvo` e `esperado` (perfil de 3 meses, 30/10/2026)
+    e o que mais viesse depois. Item legado em texto puro ganha o id estável de
+    `perfil_estrategia.id_legado` — o mesmo em toda leitura, e o que fica gravado.
+    """
+    if isinstance(item, str):
+        return {"id": id_legado(tipo, indice, item), "descricao": item, "concluido": False, "registros": []}
+    item = dict(item or {})
+    # Só texto entra no hash: str(1.0) e String(1) divergem, e o id tem de ser o mesmo na tela.
+    texto = item.get("descricao") if isinstance(item.get("descricao"), str) else ""
+    return {**item,
+            "id": item.get("id") or id_legado(tipo, indice, texto),
+            "descricao": item.get("descricao", ""),
+            "concluido": bool(item.get("concluido")),
+            "registros": item.get("registros", [])}
+
+
+def _data_alvo(valor):
+    """(valor, erro): YYYY-MM-DD normalizado; vazio remove a data."""
+    if valor == "":
+        return "", None
+    d = dia(valor)
+    return (d.isoformat(), None) if d and len(str(valor).strip()) == 10 else (None, "dataAlvo_invalida")
+
+
+def _esperado(valor):
+    """(mapa, erro): chave do indicador -> número; {} limpa."""
+    if not isinstance(valor, dict):
+        return None, "esperado_invalido"
+    limpo = {}
+    for chave, numero_bruto in valor.items():
+        n = numero(numero_bruto, None)
+        if not str(chave).strip() or n is None or isinstance(numero_bruto, bool):
+            return None, "esperado_invalido"
+        limpo[str(chave).strip()] = n
+    return limpo, None
+
+
+def aplicar_item(data: dict, tipo: str, acao: str, descricao: str | None = None, item_id: str | None = None,
+                 dataAlvo: str | None = None, esperado: dict | None = None):
+    """Parte pura de `gerenciar_item_estrategico`: (nova lista, resultado) ou (None, erro)."""
+    campo = "indicadoresSucesso" if tipo == "indicador" else "marcos"
+    if tipo != "marco":
+        # Vazio é "não enviado": quem chama costuma preencher os opcionais assim.
+        if dataAlvo not in (None, "") or esperado not in (None, {}):
+            return None, {"status": "error", "reason": "dataAlvo_e_esperado_so_em_marco"}
+        dataAlvo = esperado = None
+    perfil = {}
+    if dataAlvo is not None:
+        perfil["dataAlvo"], erro = _data_alvo(dataAlvo)
+        if erro:
+            return None, {"status": "error", "reason": erro}
+    if esperado is not None:
+        perfil["esperado"], erro = _esperado(esperado)
+        if erro:
+            return None, {"status": "error", "reason": erro}
+
+    def _com_perfil(alvo: dict) -> dict:
+        for chave, valor in perfil.items():
+            if valor in ("", {}):
+                alvo.pop(chave, None)
+            elif chave == "esperado":
+                # Mescla por indicador: mandar só o peso não apaga a cintura do marco.
+                atual = alvo.get("esperado") if isinstance(alvo.get("esperado"), dict) else {}
+                alvo["esperado"] = {**atual, **valor}
+            else:
+                alvo[chave] = valor
+        return alvo
+
+    lista = [normalizar_item(item, tipo, i) for i, item in enumerate(data.get(campo) or [])]
+
+    if acao == "adicionar":
+        if not (descricao or "").strip():
+            return None, {"status": "error", "reason": "descricao_obrigatoria"}
+        novo = _com_perfil({"id": novo_id_estrategia(tipo), "descricao": descricao.strip(),
+                            "concluido": False, "registros": []})
+        lista.append(novo)
+        return lista, {"item_id": novo["id"]}
+
+    if not item_id:
+        return None, {"status": "error", "reason": "item_id_obrigatorio"}
+    alvo = next((it for it in lista if it["id"] == item_id), None)
+    if not alvo:
+        return None, {"status": "error", "reason": "item_nao_encontrado"}
+    if acao == "editar":
+        if not (descricao or "").strip() and not perfil:
+            return None, {"status": "error", "reason": "nada_para_editar"}
+        if (descricao or "").strip():
+            alvo["descricao"] = descricao.strip()
+        _com_perfil(alvo)
+    elif acao == "remover":
+        lista = [it for it in lista if it["id"] != item_id]
+    elif acao == "concluir":
+        alvo["concluido"] = True
+        alvo["dataConclusao"] = datetime.now(timezone.utc).isoformat()
+    return lista, {"item_id": item_id}
+
+
 def gerenciar_item_estrategico(
     db,
     user_uid: str | None,
@@ -217,6 +322,8 @@ def gerenciar_item_estrategico(
     acao: str,
     descricao: str | None = None,
     item_id: str | None = None,
+    dataAlvo: str | None = None,
+    esperado: dict | None = None,
 ) -> dict:
     if not user_uid or not objetivo_id:
         return {"status": "error", "reason": "objetivo_nao_encontrado"}
@@ -243,53 +350,71 @@ def gerenciar_item_estrategico(
         if data.get('userId') != user_uid:
             return {"status": "error", "reason": "objetivo_nao_encontrado"}
 
-        lista = []
-        for item in (data.get(campo) or []):
-            if isinstance(item, str):
-                lista.append({"id": novo_id_estrategia(tipo_norm), "descricao": item, "concluido": False, "registros": []})
-            else:
-                lista.append({
-                    "id": item.get("id") or novo_id_estrategia(tipo_norm),
-                    "descricao": item.get("descricao", ""),
-                    "concluido": bool(item.get("concluido")),
-                    "registros": item.get("registros", []),
-                    **({"dataConclusao": item["dataConclusao"]} if item.get("dataConclusao") else {}),
-                    **({"evidencia": item["evidencia"]} if item.get("evidencia") else {}),
-                })
-
-        if acao_norm == "adicionar":
-            if not (descricao or "").strip():
-                return {"status": "error", "reason": "descricao_obrigatoria"}
-            novo = {"id": novo_id_estrategia(tipo_norm), "descricao": descricao.strip(), "concluido": False, "registros": []}
-            lista.append(novo)
-            resultado_id = novo["id"]
-        else:  # editar | remover | concluir
-            if not item_id:
-                return {"status": "error", "reason": "item_id_obrigatorio"}
-            alvo = next((it for it in lista if it["id"] == item_id), None)
-            if not alvo:
-                return {"status": "error", "reason": "item_nao_encontrado"}
-            if acao_norm == "editar":
-                if not (descricao or "").strip():
-                    return {"status": "error", "reason": "descricao_obrigatoria"}
-                alvo["descricao"] = descricao.strip()
-            elif acao_norm == "remover":
-                lista = [it for it in lista if it["id"] != item_id]
-            elif acao_norm == "concluir":
-                alvo["concluido"] = True
-                alvo["dataConclusao"] = datetime.now(timezone.utc).isoformat()
-            resultado_id = item_id
-
+        lista, resultado = aplicar_item(data, tipo_norm, acao_norm, descricao, item_id, dataAlvo, esperado)
+        if lista is None:
+            return resultado
         transaction.update(ref, {campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
         return {
             "status": "ok",
             "objetivo_id": ref.id,
             "tipo": tipo_norm,
             "acao": acao_norm,
-            "item_id": resultado_id,
+            "item_id": resultado["item_id"],
         }
 
     return _aplicar(db.transaction())
+
+
+def _serializavel(valor):
+    """O que vai para o JSON do MCP: datas do Firestore viram texto ISO."""
+    if isinstance(valor, dict):
+        return {k: _serializavel(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_serializavel(v) for v in valor]
+    return valor.isoformat() if hasattr(valor, "isoformat") else valor
+
+
+def _objetivo_completo(objetivo_id: str, data: dict) -> dict:
+    """O objetivo inteiro, com marcos e indicadores de sucesso sempre como dict e com o
+    id que `gerenciar_item_estrategico` aceita (o legado em texto ganha `id_legado`)."""
+    saida = {k: v for k, v in data.items() if k != "userId"}
+    saida["id"] = objetivo_id
+    saida["marcos"] = [normalizar_item(m, "marco", i) for i, m in enumerate(data.get("marcos") or [])]
+    saida["indicadoresSucesso"] = [normalizar_item(m, "indicador", i)
+                                   for i, m in enumerate(data.get("indicadoresSucesso") or [])]
+    return _serializavel(saida)
+
+
+def obter_objetivo_estrategico(db, user_uid: str | None, objetivo_id: str) -> dict:
+    """Conteúdo inteiro de um objetivo: título, pilar, status, métrica com fonte,
+    histórico, diretrizes, indicadores e marcos com id, data alvo e esperado."""
+    ref, data = carregar_objetivo_estrategico(db, user_uid, objetivo_id)
+    if not ref:
+        return {"status": "error", "reason": "objetivo_nao_encontrado"}
+    return {"status": "ok", "objetivo": _objetivo_completo(ref.id, data)}
+
+
+def listar_objetivos_estrategicos(db, user_uid: str | None, completo: bool = True, status: str | None = None) -> dict:
+    """Objetivos do usuário. `completo=false` devolve só id, título, pilar, status e contagens."""
+    if not user_uid:
+        return {"status": "error", "reason": "auth_required"}
+    if isinstance(completo, str):  # o MCP não converte tipos: "false" em texto seria verdadeiro
+        completo = completo.strip().lower() not in ("false", "0", "nao", "não", "")
+    filtro = str(status or "").strip().lower()
+    objetivos = []
+    for snap in db.collection('estrategia_pessoal').where('userId', '==', user_uid).stream():
+        data = snap.to_dict() or {}
+        if data.get('userId') != user_uid or (filtro and str(data.get("status") or "").lower() != filtro):
+            continue
+        if completo:
+            objetivos.append(_objetivo_completo(snap.id, data))
+        else:
+            marcos = data.get("marcos") or []
+            objetivos.append({"id": snap.id, "objetivoMacro": data.get("objetivoMacro"), "pilar": data.get("pilar"),
+                              "status": data.get("status"), "marcos": len(marcos),
+                              "marcos_concluidos": sum(1 for m in marcos if isinstance(m, dict) and m.get("concluido"))})
+    objetivos.sort(key=lambda o: (str(o.get("pilar") or ""), str(o.get("objetivoMacro") or "")))
+    return {"status": "ok", "total": len(objetivos), "objetivos": objetivos}
 
 
 def excluir_objetivo_estrategico(db, user_uid: str | None, objetivo_id: str) -> dict:

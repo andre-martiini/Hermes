@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
 import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta, Tarefa } from '../../types';
 import { normalizeSearchText } from '../utils/helpers';
+import { paraGravar, paraRascunho } from '../utils/itensEstrategia';
 
 
 type StrategyIndicatorDraft = EstrategiaIndicadorSucesso;
@@ -58,92 +59,17 @@ const parseMetricNumber = (value: number | string | undefined) => Number(String(
 const createIndicatorId = () => `indicador-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createMilestoneId = () => `marco-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createRecordId = () => `registro-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const getPersistedIndicatorId = (item: string | EstrategiaIndicadorSucesso, index: number) => {
-  if (typeof item !== 'string' && item.id) return item.id;
-  return `indicador-legado-${index}`;
-};
-const getPersistedMilestoneId = (item: string | EstrategiaMarco, index: number) => {
-  if (typeof item !== 'string' && item.id) return item.id;
-  return `marco-legado-${index}`;
-};
 
 
-const toIndicatorDrafts = (items?: Array<string | EstrategiaIndicadorSucesso>): StrategyIndicatorDraft[] => {
-  const converted = (items || []).map((item, index) => {
-    if (typeof item === 'string') {
-      return { id: getPersistedIndicatorId(item, index), descricao: item, concluido: false };
-    }
-    return {
-      id: getPersistedIndicatorId(item, index),
-      descricao: item.descricao || '',
-      concluido: Boolean(item.concluido),
-      dataConclusao: item.dataConclusao,
-      evidencia: item.evidencia || '',
-      registros: item.registros || [],
-    };
-  }).filter(item => item.descricao.trim() || item.evidencia?.trim());
-  return converted.length ? converted : [{ id: createIndicatorId(), descricao: '', concluido: false }];
-};
-
-
+// Preservam os campos que a tela não conhece (`dataAlvo`, `esperado`...): ver `itensEstrategia.ts`.
+const toIndicatorDrafts = (items?: Array<string | EstrategiaIndicadorSucesso>): StrategyIndicatorDraft[] =>
+  paraRascunho('indicador', items);
 const normalizeIndicators = (items?: StrategyIndicatorDraft[]): EstrategiaIndicadorSucesso[] =>
-  (items || [])
-    .map(item => {
-      const normalized: EstrategiaIndicadorSucesso = {
-        id: item.id || createIndicatorId(),
-        descricao: item.descricao.trim(),
-        concluido: Boolean(item.concluido),
-        registros: item.registros || [],
-      };
-      if (normalized.concluido) {
-        normalized.dataConclusao = item.dataConclusao || new Date().toISOString();
-      }
-      const evidencia = item.evidencia?.trim();
-      if (evidencia) {
-        normalized.evidencia = evidencia;
-      }
-      return normalized;
-    })
-    .filter(item => item.descricao);
-
-
-const toMilestoneDrafts = (items?: Array<string | EstrategiaMarco>): StrategyMilestoneDraft[] => {
-  const converted = (items || []).map((item, index) => {
-    if (typeof item === 'string') {
-      return { id: getPersistedMilestoneId(item, index), descricao: item, concluido: false };
-    }
-    return {
-      id: getPersistedMilestoneId(item, index),
-      descricao: item.descricao || '',
-      concluido: Boolean(item.concluido),
-      dataConclusao: item.dataConclusao,
-      evidencia: item.evidencia || '',
-      registros: item.registros || [],
-    };
-  }).filter(item => item.descricao.trim() || item.evidencia?.trim());
-  return converted.length ? converted : [{ id: createMilestoneId(), descricao: '', concluido: false }];
-};
-
-
+  paraGravar('indicador', items);
+const toMilestoneDrafts = (items?: Array<string | EstrategiaMarco>): StrategyMilestoneDraft[] =>
+  paraRascunho('marco', items);
 const normalizeMilestones = (items?: StrategyMilestoneDraft[]): EstrategiaMarco[] =>
-  (items || [])
-    .map(item => {
-      const normalized: EstrategiaMarco = {
-        id: item.id || createMilestoneId(),
-        descricao: item.descricao.trim(),
-        concluido: Boolean(item.concluido),
-        registros: item.registros || [],
-      };
-      if (normalized.concluido) {
-        normalized.dataConclusao = item.dataConclusao || new Date().toISOString();
-      }
-      const evidencia = item.evidencia?.trim();
-      if (evidencia) {
-        normalized.evidencia = evidencia;
-      }
-      return normalized;
-    })
-    .filter(item => item.descricao);
+  paraGravar('marco', items);
 
 
 const computeProgress = (item: EstrategiaPessoal) => {

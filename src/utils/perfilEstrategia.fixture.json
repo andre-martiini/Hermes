@@ -1,0 +1,158 @@
+{
+  "_leia": "Fixture ÚNICA de functions/test_perfil_estrategia.py e src/utils/perfilEstrategia.test.ts. As três metas são as do relançamento de 30/10/2026 (ciclo 02/11/2026 a 30/01/2027). Dinheiro sai em centavos inteiros; o resto, na unidade.",
+  "metas": {
+    "saude": {
+      "ciclo": { "inicio": "2026-11-02", "fim": "2027-01-30" },
+      "linhaBase": { "data": "2026-11-02", "valores": { "peso": 93.4, "cintura": 110 } },
+      "indicadores": [
+        { "chave": "peso", "rotulo": "Peso", "unidade": "kg", "sentido": "menor_melhor", "fonte": "peso", "inicial": 93.4, "alvoFinal": 88 },
+        { "chave": "cintura", "rotulo": "Cintura", "unidade": "cm", "sentido": "menor_melhor", "fonte": "cintura", "inicial": 110, "alvoFinal": 104 }
+      ],
+      "marcos": [
+        { "id": "m1", "descricao": "91,7 kg e 108 cm", "concluido": false, "registros": [], "dataAlvo": "2026-11-30", "esperado": { "peso": 91.7, "cintura": 108 } },
+        { "id": "m2", "descricao": "89,9 kg e 106 cm", "concluido": false, "registros": [], "dataAlvo": "2026-12-30", "esperado": { "peso": 89.9, "cintura": 106 } },
+        { "id": "m3", "descricao": "88 kg e 104 cm", "concluido": false, "registros": [], "dataAlvo": "2027-01-30", "esperado": { "peso": 88, "cintura": 104 } }
+      ]
+    },
+    "financeira": {
+      "ciclo": { "inicio": "2026-11-02", "fim": "2027-01-30" },
+      "linhaBase": { "data": "2026-11-02", "valores": { "guardado": 0, "renda_produto": 0 } },
+      "indicadores": [
+        { "chave": "guardado", "rotulo": "Guardado acumulado", "unidade": "R$", "sentido": "maior_melhor", "fonte": "guardado_acumulado", "inicial": 0, "alvoFinal": 9000 },
+        { "chave": "renda_produto", "rotulo": "Renda recorrente de produto", "unidade": "R$", "sentido": "maior_melhor", "fonte": "manual", "inicial": 0, "alvoFinal": 2000 }
+      ],
+      "marcos": [
+        { "id": "f1", "descricao": "R$ 3.000 guardados", "concluido": false, "registros": [], "dataAlvo": "2026-11-30", "esperado": { "guardado": 3000 } },
+        { "id": "f2", "descricao": "R$ 6.000 guardados", "concluido": false, "registros": [], "dataAlvo": "2026-12-30", "esperado": { "guardado": 6000 } },
+        { "id": "f3", "descricao": "R$ 9.000 guardados e R$ 2.000/mês de produto", "concluido": false, "registros": [], "dataAlvo": "2027-01-30", "esperado": { "guardado": 9000, "renda_produto": 2000 } }
+      ]
+    },
+    "sistemas": {
+      "ciclo": { "inicio": "2026-11-02", "fim": "2027-01-30" },
+      "marcos": [
+        { "id": "s1", "descricao": "Tabela de preços aprovada", "concluido": false, "registros": [], "dataAlvo": "2026-11-30" },
+        { "id": "s2", "descricao": "Contrato-modelo pronto", "concluido": false, "registros": [], "dataAlvo": "2026-12-30" },
+        { "id": "s3", "descricao": "1 clínica pagando", "concluido": false, "registros": [], "dataAlvo": "2027-01-30" }
+      ]
+    },
+    "sistemas_tabela_feita": {
+      "ciclo": { "inicio": "2026-11-02", "fim": "2027-01-30" },
+      "marcos": [
+        { "id": "s1", "descricao": "Tabela de preços aprovada", "concluido": true, "registros": [], "dataAlvo": "2026-11-30" },
+        { "id": "s2", "descricao": "Contrato-modelo pronto", "concluido": false, "registros": [], "dataAlvo": "2026-12-30" },
+        { "id": "s3", "descricao": "1 clínica pagando", "concluido": false, "registros": [], "dataAlvo": "2027-01-30" }
+      ]
+    },
+    "esperado_estranho": {
+      "indicadores": [
+        { "chave": "peso", "unidade": "kg", "sentido": "menor_melhor", "fonte": "peso", "inicial": 93.4, "alvoFinal": 88 }
+      ],
+      "ciclo": { "inicio": "2026-11-02", "fim": "2027-01-30" },
+      "marcos": [
+        { "id": "e1", "descricao": "esperado em lista", "concluido": false, "dataAlvo": "2026-11-30", "esperado": [1] },
+        { "id": "e2", "descricao": "chave que não é indicador", "concluido": false, "dataAlvo": "2026-12-01", "esperado": { "Peso": 90 } }
+      ]
+    },
+    "legado": {
+      "metricaAlvo": { "valorInicial": 95.7, "valorAtual": 95.7, "valorObjetivo": 88, "unidade": "kg", "fonte": "peso" },
+      "marcos": ["Chegar a 90 kg", { "id": "x", "descricao": "Correr 5 km", "concluido": false, "registros": [] }]
+    }
+  },
+  "casos": [
+    {
+      "nome": "o caso do prompt: em 15/12 o esperado é 90,8 kg e 90,5 kg está no perfil",
+      "meta": "saude", "hoje": "2026-12-15", "atuais": { "peso": 90.5, "cintura": 106.5 },
+      "estado": "no_perfil", "proximo_marco": "2026-12-30",
+      "indicadores": { "peso": { "esperado_hoje": 90.8, "estado": "no_perfil", "proximo_valor": 89.9 }, "cintura": { "esperado_hoje": 107, "estado": "no_perfil", "proximo_valor": 106 } }
+    },
+    {
+      "nome": "91,5 kg em 15/12 está atrasado, e a meta fica atrasada",
+      "meta": "saude", "hoje": "2026-12-15", "atuais": { "peso": 91.5, "cintura": 106.5 },
+      "estado": "atrasado", "proximo_marco": "2026-12-30",
+      "indicadores": { "peso": { "esperado_hoje": 90.8, "estado": "atrasado" }, "cintura": { "esperado_hoje": 107, "estado": "no_perfil" } }
+    },
+    {
+      "nome": "já no valor do próximo marco antes da data: adiantado",
+      "meta": "saude", "hoje": "2026-12-15", "atuais": { "peso": 89.9, "cintura": 105 },
+      "estado": "adiantado", "proximo_marco": "2026-12-30",
+      "indicadores": { "peso": { "esperado_hoje": 90.8, "estado": "adiantado" }, "cintura": { "esperado_hoje": 107, "estado": "adiantado" } }
+    },
+    {
+      "nome": "cintura sem medida é sem_dado, nunca zero, e pesa no estado da meta",
+      "meta": "saude", "hoje": "2026-12-15", "atuais": { "peso": 90.5 },
+      "estado": "sem_dado", "proximo_marco": "2026-12-30",
+      "indicadores": { "peso": { "esperado_hoje": 90.8, "estado": "no_perfil" }, "cintura": { "esperado_hoje": 107, "estado": "sem_dado", "atual": null } }
+    },
+    {
+      "nome": "meio do primeiro trecho: entre a linha de base e o 1º marco",
+      "meta": "saude", "hoje": "2026-11-16", "atuais": { "peso": 92.55, "cintura": 109 },
+      "estado": "no_perfil", "proximo_marco": "2026-11-30",
+      "indicadores": { "peso": { "esperado_hoje": 92.55, "estado": "no_perfil" }, "cintura": { "esperado_hoje": 109, "estado": "no_perfil" } }
+    },
+    {
+      "nome": "antes do ciclo vale o inicial",
+      "meta": "saude", "hoje": "2026-10-20", "atuais": { "peso": 93.4, "cintura": 110 },
+      "estado": "no_perfil", "proximo_marco": "2026-11-30",
+      "indicadores": { "peso": { "esperado_hoje": 93.4, "estado": "no_perfil" }, "cintura": { "esperado_hoje": 110, "estado": "no_perfil" } }
+    },
+    {
+      "nome": "depois do último marco vale o último, e não há mais adiantado",
+      "meta": "saude", "hoje": "2027-03-01", "atuais": { "peso": 87, "cintura": 105 },
+      "estado": "atrasado", "proximo_marco": null,
+      "indicadores": { "peso": { "esperado_hoje": 88, "estado": "no_perfil", "proximo_valor": null }, "cintura": { "esperado_hoje": 104, "estado": "atrasado" } }
+    },
+    {
+      "nome": "guardado em centavos: R$ 0 em 15/12 contra R$ 4.500 esperados",
+      "meta": "financeira", "hoje": "2026-12-15", "atuais": { "guardado": 0 },
+      "estado": "atrasado", "proximo_marco": "2026-12-30",
+      "indicadores": { "guardado": { "esperado_hoje": 450000, "estado": "atrasado", "atual": 0, "proximo_valor": 600000 }, "renda_produto": { "esperado_hoje": 96629, "estado": "sem_dado" } }
+    },
+    {
+      "nome": "guardado exatamente no esperado do marco, no dia do marco",
+      "meta": "financeira", "hoje": "2026-11-30", "atuais": { "guardado": 3000, "renda_produto": 0 },
+      "estado": "atrasado", "proximo_marco": "2026-11-30",
+      "indicadores": { "guardado": { "esperado_hoje": 300000, "estado": "no_perfil" }, "renda_produto": { "esperado_hoje": 62921, "estado": "atrasado" } }
+    },
+    {
+      "nome": "marco sem número com a data vencida e não concluído: atrasado",
+      "meta": "sistemas", "hoje": "2026-12-15", "atuais": {},
+      "estado": "atrasado", "proximo_marco": "2026-12-30",
+      "marcos_sem_numero": { "s1": "atrasado", "s2": "no_perfil", "s3": "no_perfil" }
+    },
+    {
+      "nome": "marco sem número concluído não atrasa a meta",
+      "meta": "sistemas_tabela_feita", "hoje": "2026-12-15", "atuais": {},
+      "estado": "no_perfil", "proximo_marco": "2026-12-30",
+      "marcos_sem_numero": { "s1": "no_perfil", "s2": "no_perfil", "s3": "no_perfil" }
+    },
+    {
+      "nome": "valor acima do teto é sem_dado, nunca zero (zero seria 'adiantado' em menor_melhor)",
+      "meta": "saude", "hoje": "2026-12-15", "atuais": { "peso": "1e20", "cintura": 106.5 },
+      "estado": "sem_dado", "proximo_marco": "2026-12-30",
+      "indicadores": { "peso": { "esperado_hoje": 90.8, "estado": "sem_dado", "atual": null }, "cintura": { "esperado_hoje": 107, "estado": "no_perfil" } }
+    },
+    {
+      "nome": "esperado malformado (lista, ou chave que não é indicador) conta como marco qualitativo nos dois lados",
+      "meta": "esperado_estranho", "hoje": "2026-12-15", "atuais": { "peso": 90 },
+      "estado": "atrasado", "proximo_marco": null,
+      "indicadores": { "peso": { "esperado_hoje": 90.79, "estado": "no_perfil", "proximo_valor": null } },
+      "marcos_sem_numero": { "e1": "atrasado", "e2": "atrasado" }
+    },
+    {
+      "nome": "meta legada (marco em texto e metricaAlvo) não tem perfil e não quebra",
+      "meta": "legado", "hoje": "2026-12-15", "atuais": { "peso": 93.4 },
+      "estado": null, "proximo_marco": null, "indicadores": {}, "marcos_sem_numero": {}
+    }
+  ],
+  "hoje_invalido": ["", "15/12/2026", "2026-02-30", null],
+  "hoje_brasilia": [
+    { "utc": "2026-12-16T01:30:00Z", "hoje": "2026-12-15" },
+    { "utc": "2026-12-16T03:00:00Z", "hoje": "2026-12-16" },
+    { "utc": "2026-11-02T02:59:59Z", "hoje": "2026-11-01" }
+  ],
+  "id_legado": [
+    { "tipo": "marco", "indice": 0, "descricao": "Tabela de preços aprovada", "id": "marco-legado-4ee8a37e" },
+    { "tipo": "marco", "indice": 1, "descricao": "Ação ç", "id": "marco-legado-486f153e" },
+    { "tipo": "indicador", "indice": 2, "descricao": "", "id": "indicador-legado-51f23b0b" }
+  ]
+}

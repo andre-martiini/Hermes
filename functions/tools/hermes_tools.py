@@ -3282,6 +3282,8 @@ _HANDLERS: dict = {
     "editar_objetivo_estrategico": _strategy("editar_objetivo_estrategico"),
     "gerenciar_item_estrategico": _strategy("gerenciar_item_estrategico"),
     "excluir_objetivo_estrategico": _strategy("excluir_objetivo_estrategico"),
+    "obter_objetivo_estrategico": _strategy("obter_objetivo_estrategico"),
+    "listar_objetivos_estrategicos": _strategy("listar_objetivos_estrategicos"),
 
     # Extraidas das closures
     "pesquisar_internet": pesquisar_internet,

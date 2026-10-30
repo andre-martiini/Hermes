@@ -432,6 +432,26 @@ export interface EstrategiaMarco {
         data: string;
         nota: string;
     }>;
+    /** YYYY-MM-DD: quando o marco deve estar cumprido. Ausente = marco legado, sem data. */
+    dataAlvo?: string;
+    /**
+     * Valor esperado de cada indicador nesta data (chave do indicador -> número, na unidade
+     * dele; dinheiro em reais). Vazio = marco qualitativo. Toda escrita de marco precisa
+     * preservar `dataAlvo` e `esperado`: recompor o marco só com os campos antigos os apaga.
+     */
+    esperado?: Record<string, number>;
+}
+
+/** Indicador numérico do perfil de 3 meses (`src/utils/perfilEstrategia.ts`). */
+export interface EstrategiaIndicadorPerfil {
+    chave: string;
+    rotulo: string;
+    unidade: string;
+    sentido: 'menor_melhor' | 'maior_melhor';
+    /** Quem alimenta o valor atual; `manual` lê o `historicoMetrica`. */
+    fonte: 'peso' | 'cintura' | 'guardado_acumulado' | 'manual';
+    inicial?: number;
+    alvoFinal?: number;
 }
 
 export interface EstrategiaPessoal {
@@ -464,6 +484,10 @@ export interface EstrategiaPessoal {
     diretrizesDerivadas: string[];
     status: EstrategiaStatus;
     timestamp: any;
+    /** Perfil de 3 meses (30/10/2026). Os três campos são opcionais: meta legada segue como era. */
+    ciclo?: { inicio: string; fim: string };
+    linhaBase?: { data: string; valores: Record<string, number> };
+    indicadores?: EstrategiaIndicadorPerfil[];
 }
 
 
