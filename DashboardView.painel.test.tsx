@@ -244,6 +244,29 @@ describe('Painel do dia — com briefing_dia', () => {
         concluida[1].status = 'concluído';
         rerender(<DashboardView {...propsBase({ tarefas: concluida })} />);
         expect(screen.queryByTestId('linha-decidir')).toBeNull();
+        // Sem itens, mas com 3 sugestões de elevação esperando: ainda há o que decidir.
+        expect(screen.getByRole('region', { name: 'Decidir' })).toBeInTheDocument();
+    });
+
+    it('tudo decidido (itens feitos e nenhuma elevação esperando): o bloco Decidir some', () => {
+        armazem[`briefing_dia/${HOJE}`] = {
+            ...briefingCompleto(),
+            decidir: [decidir('d1', 'Ezequiel', { status: 'feito', resolvido_em: `${HOJE}T09:00:00-03:00` })],
+        };
+        ['e1', 'e2', 'e3'].forEach(id => { armazem[`elevacoes_sugeridas/${id}`].status = 'nunca'; });
+        render(<DashboardView {...propsBase()} />);
+        expect(screen.queryByRole('region', { name: 'Decidir' })).toBeNull();
+        expect(screen.queryByText('A varredura de elevações está parada.')).toBeNull();
+    });
+
+    it('com um item pendente o bloco Decidir continua, mesmo sem elevação esperando', () => {
+        armazem[`briefing_dia/${HOJE}`] = {
+            ...briefingCompleto(),
+            decidir: [decidir('d1', 'Ezequiel', { status: 'feito' }), decidir('d2', 'Hildo')],
+        };
+        ['e1', 'e2', 'e3'].forEach(id => { armazem[`elevacoes_sugeridas/${id}`].status = 'nunca'; });
+        render(<DashboardView {...propsBase()} />);
+        expect(screen.getByRole('region', { name: 'Decidir' })).toBeInTheDocument();
     });
 
     it('Foco: chip com o motivo na ação ativa e só o ícone com tooltip na linha de espera', () => {

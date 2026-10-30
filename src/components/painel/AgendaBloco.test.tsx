@@ -125,6 +125,8 @@ describe('AgendaBloco — animação e prefers-reduced-motion', () => {
 describe('AgendaBloco — conflito', () => {
     const fora = [{ titulo: 'Conselho de Escola — EMEF', inicio: '13:50', fim: null }];
 
+    beforeEach(() => localStorage.clear());
+
     it('avisa no topo e marca na lista completa; o fora da agenda entra no cálculo e tracejado', () => {
         mostrar('08:00', { fora });
         expect(screen.getByTestId('aviso-conflito')).toHaveTextContent(
@@ -141,6 +143,48 @@ describe('AgendaBloco — conflito', () => {
     it('sem sobreposição não há aviso', () => {
         mostrar('08:00');
         expect(screen.queryByTestId('aviso-conflito')).toBeNull();
+    });
+
+    describe('ocultar com o X', () => {
+        const dois = [
+            { titulo: 'Devolver o carro', inicio: '08:00', fim: '09:00' },
+            { titulo: 'Buscar a Fabiana', inicio: '08:00', fim: '09:00' },
+            { titulo: 'Dentista', inicio: '08:30', fim: '09:30' },
+        ];
+
+        it('cada aviso tem o seu X; ocultar um deixa os outros e o último apaga a caixa', () => {
+            mostrar('07:00', { agenda: dois });
+            const antes = screen.getAllByTestId('linha-conflito').length;
+            expect(antes).toBeGreaterThan(1);
+            fireEvent.click(screen.getAllByRole('button', { name: /^Ocultar aviso/ })[0]);
+            expect(screen.getAllByTestId('linha-conflito')).toHaveLength(antes - 1);
+            while (screen.queryByTestId('aviso-conflito')) {
+                fireEvent.click(screen.getAllByRole('button', { name: /^Ocultar aviso/ })[0]);
+            }
+            expect(screen.queryByTestId('aviso-conflito')).toBeNull();
+        });
+
+        it('continua oculto depois de recarregar, no mesmo dia', () => {
+            const { unmount } = mostrar('07:00', { fora: [{ titulo: 'Conselho', inicio: '13:50', fim: null }] });
+            fireEvent.click(screen.getByRole('button', { name: /^Ocultar aviso/ }));
+            unmount();
+            mostrar('07:00', { fora: [{ titulo: 'Conselho', inicio: '13:50', fim: null }] });
+            expect(screen.queryByTestId('aviso-conflito')).toBeNull();
+        });
+
+        it('se a agenda muda, o conflito novo aparece mesmo na posição do que foi ocultado', () => {
+            const { unmount } = mostrar('07:00', { fora: [{ titulo: 'Conselho', inicio: '13:50', fim: null }] });
+            fireEvent.click(screen.getByRole('button', { name: /^Ocultar aviso/ }));
+            unmount();
+            mostrar('07:00', { fora: [{ titulo: 'Reunião do PCA', inicio: '13:40', fim: null }] });
+            expect(screen.getByTestId('aviso-conflito')).toHaveTextContent('Reunião do PCA 13h40 bate com Acupuntura 13h30.');
+        });
+
+        it('não perde a agenda: o compromisso segue na linha do tempo', () => {
+            mostrar('07:00', { fora: [{ titulo: 'Conselho', inicio: '13:50', fim: null }] });
+            fireEvent.click(screen.getByRole('button', { name: /^Ocultar aviso/ }));
+            expect(screen.getAllByTestId('bloco-agenda')).toHaveLength(3);
+        });
     });
 
     it('o conflito é recalculado: tirando o compromisso, o aviso some', () => {
