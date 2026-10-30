@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autonomy.execution import PedidoDuravel
-from autonomy.pedido_repositorio import atualizar_pedido
+from autonomy.pedido_repositorio import _validar_id_documento, atualizar_pedido
 from autonomy.requests import DEFAULT_LEASE_SEGUNDOS, _exigir_tz_aware
 from autonomy.runner_aplicacao import acordar_espera_externa
 from autonomy.runs import AgentRun
@@ -37,6 +37,7 @@ def acordar_pedido(
     duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
     por_evento: bool = False,
 ) -> ResultadoDespertar:
+    _validar_id_documento(run_id, "run_id")  # falha antes de gravar, não ao arquivar depois
     if agora is not None:
         _exigir_tz_aware(agora, "agora")
     agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)

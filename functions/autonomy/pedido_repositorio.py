@@ -37,10 +37,14 @@ class PedidoCorrompido(ValueError):
 
 
 def _validar_request_id(request_id: Any) -> str:
+    return _validar_id_documento(request_id, "request_id")
+
+
+def _validar_id_documento(request_id: Any, nome: str) -> str:
     if not isinstance(request_id, str) or not request_id.strip() or "/" in request_id:
-        raise ValueError("request_id deve ser str não vazia sem '/'.")
+        raise ValueError(f"{nome} deve ser str não vazia sem '/'.")
     if request_id != request_id.strip():
-        raise ValueError("request_id não pode ter espaços nas pontas.")
+        raise ValueError(f"{nome} não pode ter espaços nas pontas.")
     # Ids que o Firestore real recusa com InvalidArgument (o duplo de teste não).
     if (
         request_id in (".", "..")
@@ -49,7 +53,7 @@ def _validar_request_id(request_id: Any) -> str:
         or len(request_id.encode("utf-8")) > 1500
         or any(ord(c) < 32 or ord(c) == 127 for c in request_id)
     ):
-        raise ValueError("request_id recusado pelo Firestore (reservado, longo ou com controle).")
+        raise ValueError(f"{nome} recusado pelo Firestore (reservado, longo ou com controle).")
     return request_id
 
 
@@ -193,17 +197,22 @@ def atualizar_pedido(
         doc = pedido_para_dict(novo)
         _validar_para_firestore(doc)
         if doc != pedido_para_dict(atual):
-            transaction.set(ref, {"pedido": doc, "revisao": revisao + 1})
             antigo = run_encerrado() if run_encerrado is not None else None
+            ref_run = doc_run = None
             if antigo is not None:
                 if not isinstance(antigo, AgentRun) or antigo.request_id != request_id:
                     raise ValueError("run_encerrado deve ser AgentRun do mesmo request_id.")
                 doc_run = run_para_dict(antigo)
                 _validar_para_firestore(doc_run, "run_encerrado")
-                transaction.set(
-                    ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(_validar_request_id(antigo.run_id)),
-                    doc_run,
-                )
+                ref_run = ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(
+                    _validar_id_documento(antigo.run_id, "run_id"))
+                # Leituras antes de qualquer escrita (regra das transações do Firestore).
+                existente = ref_run.get(transaction=transaction)
+                if existente.exists and existente.to_dict() != doc_run:
+                    raise ValueError(f"run_id '{antigo.run_id}' já arquivado com outro conteúdo.")
+            transaction.set(ref, {"pedido": doc, "revisao": revisao + 1})
+            if ref_run is not None:
+                transaction.set(ref_run, doc_run)
         return novo
 
     return _exec(tx)

@@ -47,6 +47,19 @@ class TestAcordarPedido(unittest.TestCase):
             acordar_pedido(self.db, "req-1", "ex-c", "run-3", agora=T0 + timedelta(hours=2))
         self.assertEqual(repo.ler_pedido(self.db, "req-1").run.run_id, "run-2")
 
+    def test_run_id_invalido_recusa_antes_de_gravar(self):
+        for ruim in ("a/b", "__x__", " r"):
+            with self.assertRaises(ValueError):
+                acordar_pedido(self.db, "req-1", "ex-b", ruim, agora=T0 + timedelta(hours=2))
+        self.assertEqual(self.db.docs["req-1"]["revisao"], 1)
+
+    def test_run_id_reutilizado_nao_sobrescreve_arquivo(self):
+        self.db.docs[self.caminho] = {"run_id": "outro-conteudo"}
+        with self.assertRaises(ValueError):
+            acordar_pedido(self.db, "req-1", "ex-b", "run-2", agora=T0 + timedelta(hours=2))
+        self.assertEqual(self.db.docs[self.caminho], {"run_id": "outro-conteudo"})
+        self.assertEqual(self.db.docs["req-1"]["revisao"], 1)
+
     def test_inexistente_e_agora_sem_fuso(self):
         with self.assertRaises(repo.PedidoNaoEncontrado):
             acordar_pedido(self.db, "nao", "ex-b", "run-2", agora=T0)
