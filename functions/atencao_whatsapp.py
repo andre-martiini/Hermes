@@ -48,7 +48,8 @@ _PADROES_PROMESSA_RAW = [
     r"te (retorno|aviso|falo) (ainda hoje|hoje|amanha|depois|mais tarde|em breve|assim que)",
     r"vou (verificar|checar|conferir|olhar) e (te )?(retorno|aviso|falo)",
     r"deixa comigo",
-    r"pode deixar",
+    # "pode deixar que eu guardo/cuido/fico..." aceita um favor continuo: nao ha retorno a dar.
+    r"pode deixar(?! que eu (guardo|cuido|fico|levo|deixo))",
 ]
 _PADROES_PROMESSA = [re.compile(p) for p in _PADROES_PROMESSA_RAW]
 
