@@ -7,12 +7,16 @@ so o le e resume, sem gravar nada.
 
 A projecao separa o Ifes dos servicos: o Ifes e a ultima "Renda Principal"
 recebida (sem o 13o), os servicos sao as parcelas pendentes pela data prevista.
+Parcela `sem_previsao`, ou pendente sem data, fica de fora (ver `fora_da_previsao`).
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 
 STATUS_ATIVOS = ("Ativo", "Em Pausa")
+# Parcela que continua no contrato mas nao e esperada: nao gera renda do mes, nao
+# entra na projecao nem nas parcelas restantes. Volta com status "pendente".
+STATUS_SEM_PREVISAO = "sem_previsao"
 LIMITE_ACABANDO = 2
 # O mes trabalhado e pago no mes seguinte: o PLS MEC, prorrogado ate dezembro/2026,
 # tem a ultima parcela em 08/01/2027. So passa disso e erro de cadastro.
@@ -37,21 +41,40 @@ def _mes(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
+def _iso(parcela: dict) -> str | None:
+    d = _data(parcela.get("data_prevista"))
+    return d.isoformat() if d else None
+
+
+def _datas_previstas(parcelas: list[dict]) -> list[date]:
+    return [d for d in (_data(p.get("data_prevista")) for p in parcelas
+                        if p.get("status") != STATUS_SEM_PREVISAO) if d]
+
+
+def fora_da_previsao(parcela: dict) -> bool:
+    """Marcada sem_previsao, ou ainda nao paga e sem data: nao gera renda do mes nem entra na projecao."""
+    if parcela.get("status") == STATUS_SEM_PREVISAO:
+        return True
+    return parcela.get("status") != "pago" and _data(parcela.get("data_prevista")) is None
+
+
 def resumir_contrato(servico: dict, hoje: date) -> dict:
     parcelas = sorted((p for p in servico.get("parcelas") or [] if isinstance(p, dict)),
                       key=lambda p: str(p.get("data_prevista") or ""))
     pagas = [p for p in parcelas if p.get("status") == "pago"]
-    pendentes = [p for p in parcelas if p.get("status") != "pago"]
-    datas = [d for d in (_data(p.get("data_prevista")) for p in parcelas) if d]
+    sem_previsao = [p for p in parcelas if p.get("status") == STATUS_SEM_PREVISAO]
+    pendentes = [p for p in parcelas if p.get("status") not in ("pago", STATUS_SEM_PREVISAO)]
+    datas = _datas_previstas(parcelas)
     ultima = max(datas) if datas else None
-    proxima = next((p for p in pendentes if (_data(p.get("data_prevista")) or hoje) >= hoje), None)
+    # Pendente sem data nao e a proxima nem esta atrasada: ainda nao tem quando.
+    proxima = next((p for p in pendentes if (_data(p.get("data_prevista")) or date.min) >= hoje), None)
     atrasadas = [p for p in pendentes if (_data(p.get("data_prevista")) or hoje) < hoje]
 
     # So o contrato de mensalidade "acaba" e tem prazo que as parcelas devam
     # respeitar; o pacote fechado e pago de uma vez, em geral depois da entrega.
     mensal = servico.get("tipo_contrato") == "Mensalidade"
     inconsistencias = []
-    if parcelas and not pendentes and servico.get("status") in STATUS_ATIVOS:
+    if parcelas and not pendentes and not sem_previsao and servico.get("status") in STATUS_ATIVOS:
         inconsistencias.append("todas as parcelas pagas, mas o contrato continua ativo")
     termino = _data(servico.get("data_termino"))
     if mensal and termino and ultima and ultima > termino + DEFASAGEM_PAGAMENTO:
@@ -74,13 +97,15 @@ def resumir_contrato(servico: dict, hoje: date) -> dict:
         "parcelas_pagas": len(pagas),
         "parcelas_restantes": len(pendentes),
         "valor_restante": round(sum(_num(p.get("valor")) for p in pendentes), 2),
-        "proxima": ({"id": proxima.get("id"), "data": str(proxima.get("data_prevista"))[:10],
+        "proxima": ({"id": proxima.get("id"), "data": _iso(proxima),
                      "valor": _num(proxima.get("valor")), "descricao": proxima.get("descricao")} if proxima else None),
-        "atrasadas": [{"id": p.get("id"), "data": str(p.get("data_prevista"))[:10], "valor": _num(p.get("valor")),
+        "atrasadas": [{"id": p.get("id"), "data": _iso(p), "valor": _num(p.get("valor")),
                        "descricao": p.get("descricao")} for p in atrasadas],
         # ids para editar_parcela_servico (adiar, marcar paga/pendente).
-        "pendentes": [{"id": p.get("id"), "data": str(p.get("data_prevista"))[:10], "valor": _num(p.get("valor"))}
-                      for p in pendentes],
+        "pendentes": [{"id": p.get("id"), "data": _iso(p), "valor": _num(p.get("valor"))} for p in pendentes],
+        # Fora da renda do mes e da projecao; status "pendente" em editar_parcela_servico as reativa.
+        "sem_previsao": [{"id": p.get("id"), "data": _iso(p), "valor": _num(p.get("valor")),
+                          "descricao": p.get("descricao")} for p in sem_previsao],
         "termina_em": ultima.isoformat() if ultima else None,
         "tipo_contrato": servico.get("tipo_contrato"),
         "acabando": mensal and 0 < len(pendentes) <= LIMITE_ACABANDO,
@@ -100,11 +125,9 @@ def projetar(contratos_brutos: list[dict], renda_ifes: float, hoje: date, meses:
     meses_proj = {c: {"mes": c, "ifes": round(renda_ifes, 2), "servicos": 0.0, "detalhe": []} for c in chaves}
     for servico in contratos_brutos:
         for parcela in servico.get("parcelas") or []:
-            if not isinstance(parcela, dict) or parcela.get("status") == "pago":
+            if not isinstance(parcela, dict) or parcela.get("status") == "pago" or fora_da_previsao(parcela):
                 continue
             quando = _data(parcela.get("data_prevista"))
-            if quando is None:
-                continue
             chave = max(_mes(quando), chaves[0])
             if chave not in meses_proj:
                 continue
@@ -169,8 +192,8 @@ def posicao_da_parcela(servico: dict, parcela_id: str) -> dict | None:
                       key=lambda p: str(p.get("data_prevista") or ""))
     for indice, parcela in enumerate(parcelas, start=1):
         if parcela.get("id") == parcela_id:
-            pendentes = sum(1 for p in parcelas if p.get("status") != "pago")
-            datas = [d for d in (_data(p.get("data_prevista")) for p in parcelas) if d]
+            pendentes = sum(1 for p in parcelas if p.get("status") not in ("pago", STATUS_SEM_PREVISAO))
+            datas = _datas_previstas(parcelas)
             return {"parcela": f"{indice}/{len(parcelas)}", "parcelas_restantes": pendentes,
                     "termina_em": max(datas).isoformat() if datas else None}
     return None

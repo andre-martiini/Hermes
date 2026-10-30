@@ -211,7 +211,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
       .filter(s => s.status === 'Ativo' || s.status === 'Concluído')
       .reduce((acc, curr) => {
         const pendingAmount = curr.parcelas
-          .filter(p => new Date(p.data_prevista) > today)
+          .filter(p => p.status !== 'sem_previsao' && new Date(p.data_prevista) > today)
           .reduce((sum, p) => sum + p.valor, 0);
         return acc + pendingAmount;
       }, 0);
@@ -261,9 +261,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
       .forEach(service => {
         (service.parcelas || []).forEach(parcela => {
           const dateParts = getDateParts(parcela.data_prevista);
-          if (!dateParts) return;
+          if (!dateParts || parcela.status === 'sem_previsao') return;
 
-          const key = `${dateParts.year}-${String(dateParts.month + 1).padStart(2, '0')}`;
+          const key =`${dateParts.year}-${String(dateParts.month + 1).padStart(2, '0')}`;
           const monthData = dataByMonth.get(key);
           if (!monthData) return;
 
@@ -848,6 +848,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                   <div className="mt-5 space-y-3">
                     {(localDoc?.parcelas || []).map((parcela, index) => {
                       const isReceived = new Date(parcela.data_prevista) <= new Date();
+                      const foraDaPrevisao = parcela.status === 'sem_previsao';
 
                       return (
                         <div key={parcela.id} className="grid grid-cols-1 gap-3 rounded-2xl border border-[#f3f4f6] bg-white p-4 shadow-sm md:grid-cols-[40px_minmax(0,1fr)_160px_160px_140px_40px] md:items-center">
@@ -890,9 +891,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                             }}
                             className={fieldClass}
                           />
-                          <span className={`inline-flex w-fit items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.05em] ${isReceived ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${isReceived ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                            {isReceived ? 'Recebida' : 'Pendente'}
+                          <span className={`inline-flex w-fit items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.05em] ${foraDaPrevisao ? 'border-slate-200 bg-slate-50 text-slate-500' : isReceived ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${foraDaPrevisao ? 'bg-slate-400' : isReceived ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            {foraDaPrevisao ? 'Sem previsão' : isReceived ? 'Recebida' : 'Pendente'}
                           </span>
                           <IconButton
                             title="Excluir parcela"

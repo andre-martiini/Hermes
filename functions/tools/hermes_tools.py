@@ -150,6 +150,11 @@ def editar_parcela_servico(ctx: ToolContext, args: dict):
     return financas_itens.editar_parcela_servico(ctx.db, args)
 
 
+def deduplicar_rendas_servico(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.deduplicar_rendas_servico(ctx.db, args)
+
+
 def _consultar_lista_compras(ctx: ToolContext, args: dict):
     """Contraparte de leitura de `mutar_lista_compras`, na mesma unica copia."""
     from tools import lista_compras
@@ -3229,6 +3234,7 @@ _HANDLERS: dict = {
     "editar_item_financeiro_v2": editar_item_financeiro_v2,
     "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
     "editar_parcela_servico": editar_parcela_servico,
+    "deduplicar_rendas_servico": deduplicar_rendas_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 
     # Delegadas a modulos dedicados
