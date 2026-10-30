@@ -14854,6 +14854,7 @@ from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajust
 
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
+from checkin_estrategia import checkin_estrategia_semanal
 from health_calendar_sync import sincronizar_eventos_saude_agenda
 from health_weekly_report import gerar_relatorio_semanal_saude
 

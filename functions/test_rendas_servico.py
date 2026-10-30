@@ -101,6 +101,56 @@ class TestProjecao(unittest.TestCase):
         self.assertNotIn("2027-12", [m["mes"] for m in p])
 
 
+class TestForaDaPrevisao(unittest.TestCase):
+    """Parcela sem_previsao (ou pendente sem data) fica no contrato, mas sai das contas e da projecao."""
+
+    def _sigex(self, **mudancas):
+        parcelas = [dict(p) for p in SIGEX["parcelas"]]
+        parcelas[7].update(mudancas)  # p8, 2026-11-05: a primeira pendente
+        return dict(SIGEX, parcelas=parcelas)
+
+    def test_resumo_nao_conta_a_parcela_marcada(self):
+        r = rs.resumir_contrato(self._sigex(status="sem_previsao"), HOJE)
+        self.assertEqual((r["parcelas_total"], r["parcelas_restantes"], r["valor_restante"]), (12, 4, 18000.0))
+        self.assertEqual([p["id"] for p in r["sem_previsao"]], ["p8"])
+        self.assertNotIn("p8", [p["id"] for p in r["pendentes"]])
+        self.assertEqual(r["inconsistencias"], [])
+
+    def test_termino_ignora_a_parcela_marcada(self):
+        ultima = self._sigex(status="sem_previsao", data_prevista="2030-01-05")
+        self.assertEqual(rs.resumir_contrato(ultima, HOJE)["termina_em"], "2027-03-05")
+
+    def test_so_marcadas_restando_nao_diz_que_esta_tudo_pago(self):
+        parcelas = [dict(p, status="pago") for p in SIGEX["parcelas"][:11]] + [dict(SIGEX["parcelas"][11],
+                                                                                    status="sem_previsao")]
+        r = rs.resumir_contrato(dict(SIGEX, parcelas=parcelas), HOJE)
+        self.assertEqual((r["parcelas_restantes"], r["acabando"], r["inconsistencias"]), (0, False, []))
+
+    def test_pendente_sem_data_nao_e_proxima_nem_atrasada(self):
+        r = rs.resumir_contrato(self._sigex(data_prevista=""), HOJE)
+        self.assertEqual(r["parcelas_restantes"], 5)
+        self.assertEqual(r["proxima"]["id"], "p9")
+        self.assertEqual([p["data"] for p in r["pendentes"]].count(None), 1)
+
+    def test_projecao_ignora_marcada_e_sem_data(self):
+        cheia = rs.projetar([SIGEX], 0, HOJE, meses=3)
+        marcada = rs.projetar([self._sigex(status="sem_previsao")], 0, HOJE, meses=3)
+        sem_data = rs.projetar([self._sigex(data_prevista="")], 0, HOJE, meses=3)
+        self.assertEqual([m["servicos"] for m in cheia], [0.0, 4500.0, 4500.0])
+        self.assertEqual([m["servicos"] for m in marcada], [0.0, 0.0, 4500.0])
+        self.assertEqual(marcada, sem_data)
+
+    def test_posicao_da_parcela_nao_conta_a_marcada_nas_restantes(self):
+        sigex = self._sigex(status="sem_previsao")
+        self.assertEqual(rs.posicao_da_parcela(sigex, "p7")["parcelas_restantes"], 4)
+
+    def test_fora_da_previsao(self):
+        self.assertTrue(rs.fora_da_previsao({"status": "sem_previsao", "data_prevista": "2026-11-05"}))
+        self.assertTrue(rs.fora_da_previsao({"status": "pendente", "data_prevista": ""}))
+        self.assertFalse(rs.fora_da_previsao({"status": "pendente", "data_prevista": "2026-11-05T00:00:00.000Z"}))
+        self.assertFalse(rs.fora_da_previsao({"status": "pago", "data_prevista": ""}))
+
+
 class TestFontes(unittest.TestCase):
     def test_renda_ifes_e_a_ultima_recebida(self):
         db = _Db({"income_entries": {
@@ -175,6 +225,61 @@ class TestConsultaFinancas(unittest.TestCase):
         r = json.loads(telegram_extended.execute("consultar_financas_v2", {"mes": 9, "ano": 2026}, db=db))
         renda = r["detalhes"]["rendas"][0]
         self.assertEqual((renda["parcela"], renda["parcelas_restantes"]), ("7/12", 5))
+
+
+class TestExclusaoComLeiturasParalelas(unittest.TestCase):
+    """30/10/2026: renda excluida de parcela pendente voltava duplicada na leitura seguinte do financeiro.
+
+    O que recriava era a tela (index.tsx), nao a leitura; aqui fica travado que ler o
+    financeiro, mesmo em paralelo, nunca cria nem reativa renda (a tela e coberta em
+    src/utils/rendasDeServico.test.ts).
+    """
+
+    def _db(self):
+        return _Db({
+            "servicos": {"pls": dict(PLS, parcelas=_parcelas([("2026-09-08", "pago"), ("2026-10-08", "pago"),
+                                                              ("2026-11-08", "pendente")], valor=3500.0))},
+            "income_entries": {"r8": {"description": "Projeto PLS MEC - Parcela 3", "amount": 3500.0, "month": 10,
+                                      "year": 2026, "status": "active", "isReceived": False,
+                                      "service_id": "pls", "parcela_id": "p3"}},
+            "finance_settings": {"config": {}},
+        })
+
+    def _ler_em_paralelo(self, db, vezes=8):
+        import json
+        from concurrent.futures import ThreadPoolExecutor
+
+        from tools import telegram_extended
+
+        def ler(_):
+            return json.loads(telegram_extended.execute("consultar_financas_v2", {"mes": 10, "ano": 2026}, db=db))
+
+        with ThreadPoolExecutor(max_workers=vezes) as pool:
+            return list(pool.map(ler, range(vezes)))
+
+    def _ativas(self, db, parcela_id="p3"):
+        return [i for i, d in db.banco["income_entries"].items()
+                if d.get("parcela_id") == parcela_id and d.get("status") != "deleted"]
+
+    def test_excluir_e_ler_em_paralelo_nao_recria_a_renda(self):
+        from tools import financas_itens
+
+        db = self._db()
+        financas_itens.excluir(db, {"tipo": "renda", "id": "r8"})
+        leituras = self._ler_em_paralelo(db)
+        self.assertEqual(self._ativas(db), [])
+        self.assertEqual(len(db.banco["income_entries"]), 1)
+        self.assertTrue(all(l["detalhes"]["rendas"] == [] and l["resumo"]["total_renda"] == 0 for l in leituras))
+
+    def test_parcela_sem_previsao_fica_com_zero_rendas_ativas_e_fora_da_projecao(self):
+        from tools import financas_itens
+
+        db = self._db()
+        financas_itens.editar_parcela_servico(db, {"service_id": "pls", "parcela_id": "p3", "status": "sem_previsao"})
+        self._ler_em_paralelo(db)
+        self.assertEqual(self._ativas(db), [])
+        projecao = rs.resumo(db, date(2026, 10, 30), meses=3)["projecao"]
+        self.assertEqual([m["servicos"] for m in projecao], [0.0, 0.0, 0.0])
 
 
 class TestFerramenta(unittest.TestCase):

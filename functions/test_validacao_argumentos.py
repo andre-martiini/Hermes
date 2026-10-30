@@ -825,7 +825,7 @@ class TestValoresInvalidos(unittest.TestCase):
                 "campo": "origem",
                 "esperado": [
                     "acao", "whatsapp", "email", "agenda", "repo",
-                    "financeiro", "saude", "secretario_whatsapp", "sessao",
+                    "financeiro", "saude", "secretario_whatsapp", "sessao", "estrategia",
                 ],
                 "recebido": "WhatsApp",
             }],

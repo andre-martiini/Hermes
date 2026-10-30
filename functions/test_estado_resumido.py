@@ -165,3 +165,20 @@ class TestHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSoBlocos(unittest.TestCase):
+    """B4: pedir só a estratégia não pode devolver os 10 mil tokens do estado inteiro."""
+
+    def test_so_o_pedido_mais_data_e_falhas(self):
+        from tools.estado_resumido import so_blocos
+
+        estado = {"data": "2026-10-30", "dia_semana": "sexta", "estrategia": {"metas": []}, "saude": {},
+                  "pops_ativos": [1], "perfil_pessoal": "x", "fontes_indisponiveis": ["agenda"]}
+        self.assertEqual(so_blocos(estado, ["estrategia"]),
+                         {"data": "2026-10-30", "dia_semana": "sexta", "estrategia": {"metas": []},
+                          "fontes_indisponiveis": ["agenda"]})
+        self.assertIs(so_blocos(estado, None), estado)  # sem blocos: tudo, como antes
+        r = so_blocos(estado, ["estrategia", "estrategias"])
+        self.assertEqual(r["blocos_desconhecidos"], ["estrategias"])
+        self.assertIn("saude", r["blocos_disponiveis"])

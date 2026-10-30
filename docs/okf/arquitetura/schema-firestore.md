@@ -4,7 +4,7 @@ title: Schema do Firestore
 description: Coleções do Firestore usadas pelo Gaspar, agrupadas por domínio, com campos principais, quem escreve em cada uma e suas relações.
 resource: types.ts
 tags: [hermes, okf, firestore, schema, arquitetura]
-timestamp: 2026-08-22T00:00:00-03:00
+timestamp: 2026-10-30T00:00:00-03:00
 ---
 
 # Schema do Firestore
@@ -28,6 +28,14 @@ Núcleo de toda a aplicação — ações/tarefas do usuário.
 
 ### `estrategia_pessoal`
 Objetivos/metas estratégicas pessoais do usuário (equivalente a metas de PGD/plano de gestão, mas de escopo pessoal). Campos: `userId`, `pilar` (`carreira`\|`financas`\|`saude`\|`intelectual`\|`estilo_vida`), `objetivoMacro`, `tipoMeta` (`absoluta`\|`relativa_qualitativa`), `metricaAlvo` (`valorInicial`, `valorAtual`, `valorObjetivo`, `unidade`), `historicoMetrica[]`, `indicadoresSucesso[]`, `marcos[]`, `diretrizesDerivadas[]`, `status` (`ativo`\|`concluido`\|`revisar`). Escrito pelo frontend (`StrategyDashboardView.tsx`), pelo refinamento por IA (`estrategia_pessoal_refinar`) e pelas tools de chat do Copiloto e do Godmode (CRUD compartilhado em `strategy_tools.py`, usado por `main.py:10296-10520` e `godmode.py`). Lido também pelo planejador de notificações de IA (ver `scheduled_notifications` abaixo). Relação: `tarefas.estrategia_objetivo_id`/`estrategia_indicador_id` apontam de volta para cá.
+
+Perfil de 3 meses (30/10/2026), todos opcionais, meta legada segue igual: `ciclo` (`inicio`, `fim`, YYYY-MM-DD), `linhaBase` (`data`, `valores` chave→número), `indicadores[]` (`chave`, `rotulo`, `unidade`, `sentido` `menor_melhor`\|`maior_melhor`, `fonte` `peso`\|`cintura`\|`guardado_acumulado`\|`manual`, `inicial`, `alvoFinal`) e, em cada marco, `dataAlvo` e `esperado` (chave do indicador→número; dinheiro em reais). O esperado de hoje e o estado (`no_perfil`, `atrasado`, `adiantado`, `sem_dado`) saem de `functions/perfil_estrategia.py`, espelhado em `src/utils/perfilEstrategia.ts` com a mesma fixture. Toda escrita de marco preserva campos desconhecidos (`strategy_tools.normalizar_item` e `src/utils/itensEstrategia.ts`); marco legado em texto puro tem id estável (`id_legado`), o mesmo na leitura e na gravação. Status `pausada` exige `dataRetomada` (YYYY-MM-DD): fica fora de paradas, da contagem de metas servidas, das sugestões de elevação e do check-in, e a fila `atencao` (origem `estrategia`, tipo `meta_retomada`) avisa quando a data chega. Indicador `manual` lê a última entrada de `historicoMetrica` com a mesma `chave` (ou sem chave, se for o único manual).
+
+### `estrategia_historico`
+Antes e depois de toda mudança em `estrategia_pessoal` (título, status, fonte, métrica, marcos, indicadores, exclusão), para reverter sem depender do diário: `objetivo_id`, `userId`, `origem` (`mcp`\|`tela`), `operacao` (`editar`, `marco:adicionar`, `excluir`...), `antes`, `depois`, `em`, `em_iso`. Gravado na mesma transação ou lote da mudança (`strategy_tools.registrar_historico` e `StrategyDashboardView.gravarComHistorico`).
+
+### `estrategia_checkins`
+Um documento por data (`YYYY-MM-DD`) com a mensagem do check-in semanal (`checkin_estrategia.py`), `enviado` e `em_iso`; impede envio repetido.
 
 ## Conhecimento e RAG
 
@@ -115,11 +123,13 @@ Contas a pagar fixas/recorrentes e seus templates de rubrica. `fixed_bills`: `de
 ### `income_entries` / `income_rubrics`
 Receitas e seus templates de rubrica. `income_entries`: `description`, `amount`, `day`/`month`/`year`, `rubricId` → `income_rubrics`, `service_id` → `servicos`, `isReceived`. Sincronizado por `sync_pix_emails`.
 
+Renda de parcela de serviço (`service_id` + `parcela_id`): a tela cria uma por parcela (`src/utils/rendasDeServico.ts`, aplicado em `index.tsx`), com id fixo `svc_{service_id}_{parcela_id}` criado só se ainda não existir, e lê o mês pelo texto de `data_prevista` (nunca por `new Date`, que em Brasília desloca o 1º dia para o mês anterior). Renda excluída fica com `status: 'deleted'` e a sincronia não a recria. `retirada_por` diz quem a tirou: `'previsao'` (a parcela saiu da previsão; a renda volta com ela), `'duplicata'` (cópia extra, com `duplicata_de`; nunca volta) ou ausente (exclusão do usuário). Duplicatas por `service_id` + `parcela_id` + mês saem com a tool `deduplicar_rendas_servico` (simulação por padrão).
+
 ### `finance_settings` / `finance_goals`
 Configurações globais (orçamento mensal, reserva de emergência, categorias) e metas financeiras (`targetAmount`, `currentAmount`, `status`).
 
 ### `servicos`
-Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `tipo_contrato`, `valor_total`, `parcelas[]` (`ParcelaServico`), `categoria_financeira`, `base_id` → `knowledge_bases`. Referenciado por `income_entries.service_id`.
+Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `tipo_contrato`, `valor_total`, `parcelas[]` (`ParcelaServico`), `categoria_financeira`, `base_id` → `knowledge_bases`. Referenciado por `income_entries.service_id`. `parcelas[].status` é `pendente`, `pago` ou `sem_previsao`; esta e a parcela pendente sem `data_prevista` ficam fora da renda do mês e da projeção de `consultar_rendas_servico` (`functions/rendas_servico.py::fora_da_previsao`), sem apagar o contrato. `editar_parcela_servico` marca, limpa a data e reativa (status `pendente`).
 
 ## Saúde
 

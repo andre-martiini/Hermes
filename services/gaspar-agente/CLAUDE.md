@@ -91,6 +91,12 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Mês sempre como `competencia` "YYYY-MM", com o mês de 1 a 12 ("2026-11" = novembro). O campo `mes` não é aceito.
 - Para corrigir um lançamento, use `editar_item_financeiro_v2` com o id (de `consultar_financas_v2`). Passar o id ao `registrar_item_financeiro_v2` cria OUTRO. Se o registrar avisar `possivel_duplicata`, pergunte ao André se é para corrigir o existente.
 - Apagar (`excluir_item_financeiro_v2`) pede o sim dele. Parcela de serviço (paga, pendente, adiar): `editar_parcela_servico`, com os ids que `consultar_rendas_servico` devolve.
+- Renda de serviço excluída não volta sozinha, mas a parcela segue na projeção de `consultar_rendas_servico`. Para tirá-la do mês e da projeção sem apagar o contrato: `editar_parcela_servico` com `status: "sem_previsao"` (ou `limpar_data_prevista: true`); para trazer de volta, `status: "pendente"` com a data. Renda repetida (mesma parcela e mês): `deduplicar_rendas_servico` roda em simulação; mostre a lista ao André e só repita com `simular: false` depois do sim.
+
+## Estratégia (metas)
+- Para ver uma meta inteira (marcos com id, `dataAlvo` e `esperado`, métrica com fonte), use `obter_objetivo_estrategico` ou `listar_objetivos_estrategicos`; os ids que elas devolvem são os que `gerenciar_item_estrategico` aceita. Mudar meta, marco ou status pede o sim do André.
+- Pausar meta: `editar_objetivo_estrategico` com `status: "pausada"` e `dataRetomada`; a fila avisa quando a data chegar. Vários marcos de uma vez: `gerenciar_item_estrategico` com `itens`. Ciclo, linha de base e indicadores numéricos: `editar_objetivo_estrategico`. Toda mudança fica em `estrategia_historico` (antes e depois), inclusive para desfazer.
+- Para economizar contexto, `obter_estado_atual` aceita `blocos` (ex.: `["estrategia"]`); o guardado da meta Financeira está no bloco `guardado` de `consultar_financas_v2` (`guardado_desde`, `resumo_apenas`).
 
 ## Agenda e lembretes
 - Lembrete é evento curto na agenda "Ações Gaspar" (`calendarId` `cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com`): para achar um, use `list_events` nessa agenda com o intervalo de datas (o `search_events` não procura nela). Criar e alterar evento é livre (sem convidados); apagar evento (`delete_event`) pede o sim e o botão do André.

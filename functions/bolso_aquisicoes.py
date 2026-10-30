@@ -132,12 +132,34 @@ def bolso(settings: dict, contas_do_mes) -> float:
     """
     emergencia_atual = centavos(settings.get("emergencyReserveCurrent"))
     emergencia_alvo = centavos(settings.get("emergencyReserveTarget"))
-    poupado = sum(
-        centavos(c.get("amount")) for c in (contas_do_mes or [])
-        if c.get("category") == CATEGORIA_POUPANCA and c.get("isPaid")
-    )
+    poupado = poupado_centavos(contas_do_mes)
     investimento = centavos(settings.get("investmentReserveCurrent"))
     return (investimento + (poupado if emergencia_atual >= emergencia_alvo else 0)) / 100
+
+
+def _poupanca_paga(conta: dict) -> bool:
+    return conta.get("category") == CATEGORIA_POUPANCA and bool(conta.get("isPaid"))
+
+
+def poupado_centavos(contas) -> int:
+    """Soma, em centavos, das contas PAGAS da categoria Poupança. A regra do bolso, num lugar só."""
+    return sum(centavos(c.get("amount")) for c in (contas or []) if isinstance(c, dict) and _poupanca_paga(c))
+
+
+def guardado_acumulado(contas, desde: str) -> int | None:
+    """Centavos guardados (Poupança paga) com competência a partir do mês de `desde` (YYYY-MM-DD).
+
+    Fonte `guardado_acumulado` das metas (perfil de 3 meses). Competência é o mês da
+    conta (`month` 0-11, `year`), como no resto do financeiro. Zero é resposta: a
+    fonte existe e ninguém guardou. `desde` inválido devolve None.
+    """
+    achado = re.match(r"^(\d{4})-(\d{2})-\d{2}", str(desde or ""))
+    if not achado:
+        return None
+    inicio = (int(achado.group(1)), int(achado.group(2)) - 1)
+    no_ciclo = [c for c in (contas or []) if isinstance(c, dict)
+                and (int(numero(c.get("year"))), int(numero(c.get("month")))) >= inicio]
+    return poupado_centavos(no_ciclo)
 
 
 def cobertura(meta: dict, disponivel: float) -> float:

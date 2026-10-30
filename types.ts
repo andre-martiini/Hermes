@@ -406,7 +406,8 @@ export interface FinanceSettings {
 
 export type EstrategiaPilar = 'carreira' | 'financas' | 'saude' | 'intelectual' | 'estilo_vida';
 export type EstrategiaTipoMeta = 'absoluta' | 'relativa_qualitativa';
-export type EstrategiaStatus = 'ativo' | 'concluido' | 'revisar';
+/** `pausada` (30/10/2026) exige `dataRetomada`: sai de paradas, vínculo, elevação e check-in até lá. */
+export type EstrategiaStatus = 'ativo' | 'concluido' | 'revisar' | 'pausada';
 
 export interface EstrategiaIndicadorSucesso {
     id: string;
@@ -432,6 +433,26 @@ export interface EstrategiaMarco {
         data: string;
         nota: string;
     }>;
+    /** YYYY-MM-DD: quando o marco deve estar cumprido. Ausente = marco legado, sem data. */
+    dataAlvo?: string;
+    /**
+     * Valor esperado de cada indicador nesta data (chave do indicador -> número, na unidade
+     * dele; dinheiro em reais). Vazio = marco qualitativo. Toda escrita de marco precisa
+     * preservar `dataAlvo` e `esperado`: recompor o marco só com os campos antigos os apaga.
+     */
+    esperado?: Record<string, number>;
+}
+
+/** Indicador numérico do perfil de 3 meses (`src/utils/perfilEstrategia.ts`). */
+export interface EstrategiaIndicadorPerfil {
+    chave: string;
+    rotulo: string;
+    unidade: string;
+    sentido: 'menor_melhor' | 'maior_melhor';
+    /** Quem alimenta o valor atual; `manual` lê o `historicoMetrica`. */
+    fonte: 'peso' | 'cintura' | 'guardado_acumulado' | 'manual';
+    inicial?: number;
+    alvoFinal?: number;
 }
 
 export interface EstrategiaPessoal {
@@ -464,6 +485,12 @@ export interface EstrategiaPessoal {
     diretrizesDerivadas: string[];
     status: EstrategiaStatus;
     timestamp: any;
+    /** Perfil de 3 meses (30/10/2026). Os três campos são opcionais: meta legada segue como era. */
+    ciclo?: { inicio: string; fim: string };
+    linhaBase?: { data: string; valores: Record<string, number> };
+    indicadores?: EstrategiaIndicadorPerfil[];
+    /** YYYY-MM-DD, só com `status: 'pausada'`; a fila de atenção avisa quando chega. */
+    dataRetomada?: string;
 }
 
 
@@ -506,6 +533,14 @@ export interface IncomeEntry {
     status?: 'active' | 'deleted';
     parcela_id?: string;
     service_id?: string;
+    /**
+     * Quem tirou a renda de serviço (`status: 'deleted'`). 'previsao': a parcela saiu da
+     * previsão e a renda volta com ela. 'duplicata': era cópia extra, nunca volta. Ausente:
+     * exclusão do usuário, que a sincronia respeita e não recria.
+     */
+    retirada_por?: 'previsao' | 'duplicata' | null;
+    /** Id da renda mantida, quando `retirada_por` é 'duplicata'. */
+    duplicata_de?: string;
 }
 
 export interface IncomeRubric {
@@ -1173,8 +1208,13 @@ export interface ParcelaServico {
     id: string;
     descricao: string;
     valor: number;
+    /** YYYY-MM-DD ou ISO com hora; vazio = sem data. */
     data_prevista: string;
-    status: 'pendente' | 'pago';
+    /**
+     * `sem_previsao`: continua no contrato, mas não gera renda do mês nem entra na projeção
+     * (functions/rendas_servico.py::fora_da_previsao). Pendente sem data vale o mesmo.
+     */
+    status: 'pendente' | 'pago' | 'sem_previsao';
 }
 
 // ─── Knowledge Graph ──────────────────────────────────────────────────────────
@@ -1383,6 +1423,9 @@ export interface ResumoMeta {
     gerida_por_acoes: boolean;
     objetivo: string;
     status?: EstrategiaStatus;
+    /** Pausada até `data_retomada`: fora de `paradas` e da contagem de metas servidas. */
+    pausada?: boolean;
+    data_retomada?: string | null;
     acoes_hoje: number;
     titulos_hoje: string[];
     ultimo_movimento: string | null;
@@ -1401,6 +1444,26 @@ export interface ResumoMeta {
     unidade: string | null;
     marcos_abertos: number;
     marcos_total: number;
+    /** Perfil de 3 meses (functions/morning_summary.py::_perfil_da_meta); null sem perfil. */
+    perfil?: {
+        estado: 'adiantado' | 'no_perfil' | 'sem_dado' | 'atrasado' | null;
+        proximo_marco: { data: string; descricao: string } | null;
+        indicadores: Array<{
+            chave: string;
+            rotulo: string;
+            /** Dinheiro (`em_centavos`): atual e esperado em centavos inteiros. */
+            atual: number | null;
+            esperado_hoje: number | null;
+            proximo_marco: { data: string; valor: number } | null;
+            unidade: string;
+            em_centavos: boolean;
+            estado: 'adiantado' | 'no_perfil' | 'sem_dado' | 'atrasado' | null;
+            origem: 'automatica' | 'manual';
+        }>;
+        marcos_sem_numero: Array<{ id?: string; descricao: string; dataAlvo: string | null; concluido: boolean; estado: string }>;
+    } | null;
+    /** Meta de saúde em kg digitada à mão que diverge mais de 1 kg da última pesagem. */
+    aviso_metrica?: string | null;
 }
 
 export interface ResumoMatinal {

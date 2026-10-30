@@ -64,7 +64,7 @@ def _db():
             "dez": {"description": "Remuneração Ifes", "amount": 9441.10, "month": 11, "year": 2026, "status": "active"},
             "nov": {"description": "Remuneração Ifes", "amount": 9441.10, "month": 10, "year": 2026, "status": "active"},
             "ligada": {"description": "[Serviço: Sigex] Parcela 8", "amount": 4500, "month": 10, "year": 2026,
-                       "status": "active", "parcela_id": "p8", "isReceived": False},
+                       "status": "active", "parcela_id": "p8", "service_id": "sigex", "isReceived": False},
         },
         "fixed_bills": {"luz": {"description": "Luz", "amount": 200, "month": 9, "year": 2026}},
         "servicos": {"sigex": {"parcelas": [
@@ -108,6 +108,140 @@ class TestEditarExcluir(unittest.TestCase):
                                                                          "status": "talvez"}))
 
 
+def _parcela(db, parcela_id="p8"):
+    return next(p for p in db.collection("servicos").docs["sigex"]["parcelas"] if p["id"] == parcela_id)
+
+
+class TestParcelaForaDaPrevisao(unittest.TestCase):
+    """30/10/2026: renda excluida voltava duas vezes; faltava um jeito de tirar a parcela da previsao."""
+
+    def test_sem_previsao_retira_a_renda_e_pendente_devolve(self):
+        db = _db()
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "status": "sem_previsao"})
+        self.assertEqual((r["rendas_retiradas"], r["rendas_atualizadas"]), (["ligada"], []))
+        self.assertEqual(_parcela(db)["status"], "sem_previsao")
+        renda = db.collection("income_entries").docs["ligada"]
+        self.assertEqual((renda["status"], renda["retirada_por"]), ("deleted", "previsao"))
+
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "status": "pendente"})
+        self.assertEqual((r["rendas_reativadas"], r["rendas_retiradas"]), (["ligada"], []))
+        renda = db.collection("income_entries").docs["ligada"]
+        self.assertEqual((renda["status"], renda["retirada_por"], renda["month"], renda["day"]),
+                         ("active", None, 10, 10))
+
+    def test_parcela_paga_nao_sai_da_previsao(self):
+        db = _db()
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p7",
+                                                       "status": "sem_previsao"})
+        self.assertIn("erro", r)
+        self.assertEqual(_parcela(db, "p7")["status"], "pago")
+
+    def test_limpar_a_data_tira_da_previsao_e_nova_data_devolve(self):
+        db = _db()
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "limpar_data_prevista": True})
+        self.assertEqual(r["alterado"], {"data_prevista": ["2026-11-10", ""]})
+        self.assertEqual(r["rendas_retiradas"], ["ligada"])
+        self.assertIn("sem data_prevista", r["aviso"])
+
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "data_prevista": "2026-12-15"})
+        self.assertEqual(r["rendas_reativadas"], ["ligada"])
+        renda = db.collection("income_entries").docs["ligada"]
+        self.assertEqual((renda["status"], renda["month"], renda["year"], renda["day"]), ("active", 11, 2026, 15))
+
+    def test_data_e_limpar_data_juntos_dao_erro(self):
+        r = financas_itens.editar_parcela_servico(_db(), {"service_id": "sigex", "parcela_id": "p8",
+                                                          "data_prevista": "2026-12-15", "limpar_data_prevista": True})
+        self.assertIn("erro", r)
+
+    def test_reativar_nao_traz_de_volta_renda_de_duplicata(self):
+        db = _db()
+        db.collection("income_entries").docs["ligada"].update({"status": "deleted", "retirada_por": "duplicata"})
+        db.collection("servicos").docs["sigex"]["parcelas"][1]["status"] = "sem_previsao"
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "status": "pendente"})
+        self.assertEqual(r["rendas_reativadas"], [])
+        self.assertEqual(db.collection("income_entries").docs["ligada"]["status"], "deleted")
+
+    def test_adiar_nao_ressuscita_renda_que_o_usuario_excluiu(self):
+        db = _db()
+        financas_itens.excluir(db, {"tipo": "renda", "id": "ligada"})
+        r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                       "data_prevista": "2026-12-15"})
+        self.assertEqual((r["rendas_atualizadas"], r["rendas_reativadas"]), ([], []))
+        self.assertEqual(db.collection("income_entries").docs["ligada"]["status"], "deleted")
+
+    def test_sem_previsao_e_pendente_recupera_a_renda_que_o_usuario_excluiu(self):
+        db = _db()
+        financas_itens.excluir(db, {"tipo": "renda", "id": "ligada"})
+        for status in ("sem_previsao", "pendente"):
+            r = financas_itens.editar_parcela_servico(db, {"service_id": "sigex", "parcela_id": "p8",
+                                                           "status": status})
+        self.assertEqual(r["rendas_reativadas"], ["ligada"])
+        self.assertEqual(db.collection("income_entries").docs["ligada"]["status"], "active")
+
+    def test_excluir_renda_de_parcela_pendente_avisa_da_projecao(self):
+        db = _db()
+        r = financas_itens.excluir(db, {"tipo": "renda", "id": "ligada"})
+        self.assertIn("sem_previsao", r["aviso"])
+
+    def test_excluir_copia_extra_ou_renda_de_parcela_paga_nao_avisa(self):
+        db = _db()
+        db.collection("income_entries").docs["copia"] = dict(db.collection("income_entries").docs["ligada"])
+        self.assertNotIn("aviso", financas_itens.excluir(db, {"tipo": "renda", "id": "copia"}))
+        db.collection("servicos").docs["sigex"]["parcelas"][1]["status"] = "pago"
+        self.assertNotIn("aviso", financas_itens.excluir(db, {"tipo": "renda", "id": "ligada"}))
+
+
+class TestDeduplicarRendas(unittest.TestCase):
+    def _rendas(self):
+        base = {"description": "[Serviço: PLS MEC] Parcela 8", "amount": 3500, "service_id": "pls",
+                "parcela_id": "8n3849jxq", "month": 10, "year": 2026, "status": "active", "isReceived": False}
+        return {
+            "a": {**base, "data_criacao": "2026-10-30T10:59:22.044Z"},
+            "b": {**base, "data_criacao": "2026-10-30T10:59:22.045Z"},
+            "outro_mes": {**base, "month": 11, "data_criacao": "2026-10-30T11:00:00.000Z"},
+            "excluida": {**base, "status": "deleted", "data_criacao": "2026-10-29T10:00:00.000Z"},
+            "sem_vinculo": {"description": "Remuneração Ifes", "amount": 9441.10, "month": 10, "year": 2026,
+                            "status": "active"},
+        }
+
+    def test_simulacao_lista_e_nao_grava(self):
+        db = _Db({"income_entries": self._rendas()})
+        r = financas_itens.deduplicar_rendas_servico(db, {})
+        self.assertEqual((r["modo"], r["grupos_duplicados"], r["rendas_extras"]), ("simulacao", 1, 1))
+        grupo = r["mudancas"][0]
+        self.assertEqual((grupo["competencia"], grupo["mantida"]["id"], [e["id"] for e in grupo["extras"]]),
+                         ("2026-11", "a", ["b"]))
+        self.assertEqual(db.collection("income_entries").docs["b"]["status"], "active")
+
+    def test_aplicar_marca_so_a_extra_e_repetir_nao_acha_mais(self):
+        db = _Db({"income_entries": self._rendas()})
+        r = financas_itens.deduplicar_rendas_servico(db, {"simular": False})
+        self.assertEqual((r["modo"], r["rendas_extras"]), ("aplicado", 1))
+        docs = db.collection("income_entries").docs
+        self.assertEqual((docs["b"]["status"], docs["b"]["retirada_por"], docs["b"]["duplicata_de"]),
+                         ("deleted", "duplicata", "a"))
+        self.assertEqual([docs[i]["status"] for i in ("a", "outro_mes", "sem_vinculo")], ["active"] * 3)
+        self.assertEqual(financas_itens.deduplicar_rendas_servico(db, {"simular": False})["grupos_duplicados"], 0)
+
+    def test_mantem_a_ja_recebida_mesmo_sendo_mais_nova(self):
+        rendas = self._rendas()
+        rendas["b"]["isReceived"] = True
+        db = _Db({"income_entries": rendas})
+        r = financas_itens.deduplicar_rendas_servico(db, {"simular": False})
+        self.assertEqual(r["mudancas"][0]["mantida"]["id"], "b")
+        self.assertEqual(db.collection("income_entries").docs["a"]["status"], "deleted")
+
+    def test_pela_tool_do_mcp_a_simulacao_e_o_padrao(self):
+        db = _Db({"income_entries": self._rendas()})
+        r = hermes_tools.deduplicar_rendas_servico(_Ctx(db), {})
+        self.assertEqual(r["modo"], "simulacao")
+
+
 class TestCanalMcp(unittest.TestCase):
     def test_mes_cru_e_recusado_no_mcp(self):
         ctx = _Ctx(_db())
@@ -127,6 +261,38 @@ class TestCanalMcp(unittest.TestCase):
         slots = execute.call_args[0][1]
         self.assertNotIn("confirmar_duplicata", slots)
         self.assertEqual(slots["categoria"], "Geral")
+
+
+class TestGuardadoNoFinanceiro(unittest.TestCase):
+    """B5: bloco guardado (Poupança paga, mesma regra do bolso) e resposta só com os totais."""
+
+    def _db(self):
+        return _Db({
+            "fixed_bills": {
+                "p_out": {"description": "Poupança", "category": "Poupança", "isPaid": True, "amount": 500, "month": 9, "year": 2026},
+                "p_nov": {"description": "Poupança", "category": "Poupança", "isPaid": True, "amount": 1000, "month": 10, "year": 2026},
+                "p_nov2": {"description": "Poupança", "category": "Poupança", "isPaid": False, "amount": 700, "month": 10, "year": 2026},
+                "luz": {"description": "Luz", "category": "Moradia", "isPaid": True, "amount": 200, "month": 10, "year": 2026},
+            },
+            "income_entries": {"r": {"description": "Ifes", "amount": 9000, "month": 10, "year": 2026, "status": "active"}},
+            "finance_settings": {"config": {"emergencyReserveCurrent": 100, "emergencyReserveTarget": 1000}},
+        })
+
+    def _ler(self, args):
+        import json
+        return json.loads(hermes_tools._via_telegram("consultar_financas_v2")(_Ctx(self._db()), args))
+
+    def test_guardado_do_mes_e_acumulado_desde(self):
+        r = self._ler({"competencia": "2026-11", "guardado_desde": "2026-11-02"})
+        self.assertEqual(r["guardado"]["poupanca_paga_mes"], 1000)
+        self.assertEqual(r["guardado"]["acumulado_desde"], {"desde": "2026-11-02", "valor": 1000})
+        self.assertEqual(r["guardado"]["reserva_emergencia"], {"alvo": 1000, "atual": 100})
+        self.assertIn("detalhes", r)
+
+    def test_resumo_apenas_tira_as_listas(self):
+        r = self._ler({"competencia": "2026-11", "resumo_apenas": True})
+        self.assertNotIn("detalhes", r)
+        self.assertEqual(r["resumo"]["total_renda"], 9000)
 
 
 if __name__ == "__main__":

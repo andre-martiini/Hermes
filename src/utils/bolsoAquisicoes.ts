@@ -144,11 +144,33 @@ export interface SettingsBolso {
 export function bolso(settings: SettingsBolso, contasDoMes: ContaDoMes[]): number {
     const emergenciaAtual = centavos(settings.emergencyReserveCurrent);
     const emergenciaAlvo = centavos(settings.emergencyReserveTarget);
-    const poupado = (contasDoMes || [])
-        .filter(c => c.category === CATEGORIA_POUPANCA && c.isPaid)
-        .reduce((acc, c) => acc + centavos(c.amount), 0);
+    const poupado = poupadoCentavos(contasDoMes);
     const investimento = centavos(settings.investmentReserveCurrent);
     return (investimento + (emergenciaAtual >= emergenciaAlvo ? poupado : 0)) / 100;
+}
+
+/** Soma, em centavos, das contas PAGAS da categoria Poupança. A regra do bolso, num lugar só. */
+export function poupadoCentavos(contas: ContaDoMes[]): number {
+    return (contas || [])
+        .filter(c => c && c.category === CATEGORIA_POUPANCA && c.isPaid)
+        .reduce((acc, c) => acc + centavos(c.amount), 0);
+}
+
+/**
+ * Centavos guardados (Poupança paga) com competência a partir do mês de `desde` (YYYY-MM-DD).
+ * Fonte `guardado_acumulado` das metas; zero é resposta, `desde` inválido é null.
+ * Espelho de `functions/bolso_aquisicoes.py::guardado_acumulado`.
+ */
+export function guardadoAcumulado(contas: Array<ContaDoMes & { month?: unknown; year?: unknown }>, desde: string): number | null {
+    const achado = String(desde ?? '').match(/^(\d{4})-(\d{2})-\d{2}/);
+    if (!achado) return null;
+    const [anoIni, mesIni] = [Number(achado[1]), Number(achado[2]) - 1];
+    return poupadoCentavos((contas || []).filter(c => {
+        if (!c) return false;
+        const ano = Math.trunc(numero(c.year));
+        const mes = Math.trunc(numero(c.month));
+        return ano > anoIni || (ano === anoIni && mes >= mesIni);
+    }));
 }
 
 /**

@@ -150,6 +150,11 @@ def editar_parcela_servico(ctx: ToolContext, args: dict):
     return financas_itens.editar_parcela_servico(ctx.db, args)
 
 
+def deduplicar_rendas_servico(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.deduplicar_rendas_servico(ctx.db, args)
+
+
 def _consultar_lista_compras(ctx: ToolContext, args: dict):
     """Contraparte de leitura de `mutar_lista_compras`, na mesma unica copia."""
     from tools import lista_compras
@@ -2572,10 +2577,11 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         if perfil_pessoal:
             estado["perfil_pessoal"] = perfil_pessoal
         # `enum` de `detalhe` já é validado no preflight (schema de entrada).
-        if (args.get("detalhe") or "auto") == "completo":
-            return estado
-        from tools.estado_resumido import resumir_estado
-        return resumir_estado(estado)
+        from tools.estado_resumido import resumir_estado, so_blocos
+
+        if (args.get("detalhe") or "auto") != "completo":
+            estado = resumir_estado(estado)
+        return so_blocos(estado, args.get("blocos"))
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 
@@ -3229,6 +3235,7 @@ _HANDLERS: dict = {
     "editar_item_financeiro_v2": editar_item_financeiro_v2,
     "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
     "editar_parcela_servico": editar_parcela_servico,
+    "deduplicar_rendas_servico": deduplicar_rendas_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 
     # Delegadas a modulos dedicados
@@ -3282,6 +3289,8 @@ _HANDLERS: dict = {
     "editar_objetivo_estrategico": _strategy("editar_objetivo_estrategico"),
     "gerenciar_item_estrategico": _strategy("gerenciar_item_estrategico"),
     "excluir_objetivo_estrategico": _strategy("excluir_objetivo_estrategico"),
+    "obter_objetivo_estrategico": _strategy("obter_objetivo_estrategico"),
+    "listar_objetivos_estrategicos": _strategy("listar_objetivos_estrategicos"),
 
     # Extraidas das closures
     "pesquisar_internet": pesquisar_internet,
