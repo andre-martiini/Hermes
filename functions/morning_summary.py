@@ -1010,6 +1010,67 @@ def _progresso_da_meta(data: dict, medicoes: dict) -> dict:
             "metrica_fonte": fonte, "valor_atual": atual}
 
 
+def _valor_manual(data: dict, chave: str, so_um_manual: bool):
+    """Último valor do `historicoMetrica` deste indicador (entrada com `chave`, ou sem chave
+    quando a meta tem um único indicador manual)."""
+    entradas = [h for h in data.get("historicoMetrica") or [] if isinstance(h, dict)
+                and (h.get("chave") == chave or (so_um_manual and not h.get("chave")))]
+    entradas.sort(key=lambda h: str(h.get("data") or ""))
+    return entradas[-1].get("valor") if entradas else None
+
+
+def _perfil_da_meta(data: dict, hoje: str, medicoes: dict, guardado) -> dict | None:
+    """Perfil de 3 meses da meta (atual, esperado de hoje e estado por indicador), ou None se ela não tem perfil.
+
+    `guardado` é chamado só quando alguma meta usa a fonte `guardado_acumulado`
+    (lê as contas de Poupança uma vez e devolve centavos desde a data pedida).
+    """
+    import perfil_estrategia as pe
+
+    indicadores = [i for i in data.get("indicadores") or [] if isinstance(i, dict) and i.get("chave")]
+    datados = [m for m in data.get("marcos") or [] if isinstance(m, dict) and pe.dia(m.get("dataAlvo"))]
+    if not indicadores and not datados:
+        return None
+    manuais = [i for i in indicadores if i.get("fonte") not in ("peso", "cintura", "guardado_acumulado")]
+    atuais, origens = {}, {}
+    for ind in indicadores:
+        chave, fonte = ind["chave"], ind.get("fonte")
+        if fonte in ("peso", "cintura"):
+            atuais[chave], origens[chave] = medicoes.get(fonte), "automatica"
+        elif fonte == "guardado_acumulado":
+            centavos = guardado((data.get("ciclo") or {}).get("inicio"))
+            atuais[chave] = None if centavos is None else centavos / 100
+            origens[chave] = "automatica"
+        else:
+            atuais[chave], origens[chave] = _valor_manual(data, chave, len(manuais) == 1), "manual"
+    avaliado = pe.avaliar_meta(data, atuais, hoje)
+    return {
+        "estado": avaliado["estado"],
+        "proximo_marco": avaliado["proximo_marco"],
+        "indicadores": [{"chave": i["chave"], "rotulo": i["rotulo"], "atual": i["atual"],
+                         "esperado_hoje": i["esperado_hoje"], "proximo_marco": i["proximo_marco"],
+                         "unidade": i["unidade"], "em_centavos": i["em_centavos"], "estado": i["estado"],
+                         "origem": origens.get(i["chave"], "manual")} for i in avaliado["indicadores"]],
+        "marcos_sem_numero": avaliado["marcos_sem_numero"],
+    }
+
+
+def _aviso_metrica_manual(data: dict, progresso: dict, medicoes: dict) -> str | None:
+    """Meta de saúde em kg mantida à mão que diverge mais de 1 kg da última pesagem.
+
+    Caso real de 30/10/2026: a meta mostrava 95,7 kg digitados contra 93,4 kg medidos.
+    """
+    unidade = str((data.get("metricaAlvo") or {}).get("unidade") or "").strip().lower()
+    pesagem = medicoes.get("peso")
+    if (_pilar(data.get("pilar")) != "saude" or unidade not in ("kg", "quilo", "quilos")
+            or progresso.get("progresso_origem") != "manual" or pesagem is None or progresso.get("valor_atual") is None):
+        return None
+    if abs(float(progresso["valor_atual"]) - float(pesagem)) <= 1:
+        return None
+    return (f"Valor digitado {progresso['valor_atual']:g} kg diverge da última pesagem {float(pesagem):g} kg; "
+            "ligue metrica_fonte='peso' em editar_objetivo_estrategico.")
+
+
 def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta: dict,
                        movimento_saude: str | None = None,
                        medicoes: dict | None = None) -> dict:
@@ -1036,6 +1097,22 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar estrategia_pessoal: {exc}")
         docs = []
+
+    contas_poupanca: list | None = None
+
+    def _guardado(desde):
+        """Centavos da Poupança paga desde `desde`; lê as contas uma vez e só se alguém precisar."""
+        nonlocal contas_poupanca
+        from bolso_aquisicoes import CATEGORIA_POUPANCA, guardado_acumulado
+
+        if contas_poupanca is None:
+            try:
+                contas_poupanca = [s.to_dict() or {} for s in
+                                   db.collection("fixed_bills").where("category", "==", CATEGORIA_POUPANCA).stream()]
+            except Exception as exc:
+                print(f"[ResumoMatinal] Falha ao ler contas de Poupança: {exc}")
+                return None  # sem dado, e não zero
+        return guardado_acumulado(contas_poupanca, desde)
 
     for doc in docs:
         data = doc.to_dict() or {}
@@ -1092,6 +1169,9 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
             "unidade": metrica.get("unidade") or None,
             "marcos_abertos": len([m for m in marcos if not m.get("concluido")]),
             "marcos_total": len(marcos),
+            # Perfil de 3 meses: atual x esperado de hoje por indicador (None sem perfil).
+            "perfil": _perfil_da_meta(data, hoje, medicoes or {}, _guardado),
+            "aviso_metrica": _aviso_metrica_manual(data, progresso, medicoes or {}),
         })
 
     metas.sort(key=lambda m: (-m["acoes_hoje"], -(m["dias_parada"] if m["dias_parada"] is not None else 999)))

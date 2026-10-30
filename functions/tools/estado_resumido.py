@@ -121,3 +121,26 @@ def resumir_estado(estado: dict) -> dict:
     resumido["detalhe"] = "auto"
     resumido["observacao"] = _OBSERVACAO
     return resumido
+
+
+# Sempre vão junto, mesmo com `blocos`: situam o dia e dizem o que falhou ao montar.
+_SEMPRE = ("data", "dia_semana", "fontes_indisponiveis")
+
+
+def so_blocos(estado: dict, blocos) -> dict:
+    """Só os blocos pedidos (`blocos=["estrategia", "saude"]`), mais data e falhas.
+
+    Medido em 30/10/2026: a resposta inteira passava de 10 mil tokens, repetindo
+    pops_ativos, perfil_pessoal, fila e agenda a cada chamada de quem só queria
+    a estratégia. Sem `blocos`, devolve tudo, como antes. Nome que não existe vem
+    em `blocos_desconhecidos`, para quem pediu saber que errou o nome.
+    """
+    if not isinstance(estado, dict) or not blocos:
+        return estado
+    pedidos = [str(b).strip() for b in blocos if str(b).strip()]
+    saida = {k: v for k, v in estado.items() if k in pedidos or k in _SEMPRE}
+    desconhecidos = [b for b in pedidos if b not in estado]
+    if desconhecidos:
+        saida["blocos_desconhecidos"] = desconhecidos
+        saida["blocos_disponiveis"] = sorted(estado)
+    return saida

@@ -482,6 +482,55 @@ class TestEstrategia(unittest.TestCase):
         mago = next(m for m in est["metas"] if m["id"] == "mago")
         self.assertEqual((mago["pausada"], mago["data_retomada"]), (True, "2027-01-30"))
 
+    def test_perfil_de_cada_meta_com_origem_do_numero(self):
+        """A7: atual x esperado de hoje por indicador, com a origem automática ou manual."""
+        ciclo = {"inicio": "2026-11-02", "fim": "2027-01-30"}
+        db = _FakeDb({
+            "estrategia_pessoal": {
+                "saude": {"objetivoMacro": "Saúde", "pilar": "saude", "status": "ativo", "ciclo": ciclo,
+                          "linhaBase": {"data": "2026-11-02", "valores": {"peso": 93.4}},
+                          "indicadores": [{"chave": "peso", "unidade": "kg", "sentido": "menor_melhor", "fonte": "peso"}],
+                          "marcos": [{"id": "m1", "descricao": "91,7 kg", "dataAlvo": "2026-11-30", "esperado": {"peso": 91.7}},
+                                     {"id": "m2", "descricao": "89,9 kg", "dataAlvo": "2026-12-30", "esperado": {"peso": 89.9}}]},
+                "fin": {"objetivoMacro": "Financeira", "pilar": "financas", "status": "ativo", "ciclo": ciclo,
+                        "linhaBase": {"data": "2026-11-02", "valores": {"guardado": 0, "renda_produto": 0}},
+                        "indicadores": [{"chave": "guardado", "unidade": "R$", "sentido": "maior_melhor", "fonte": "guardado_acumulado"},
+                                        {"chave": "renda_produto", "unidade": "R$", "sentido": "maior_melhor", "fonte": "manual"}],
+                        "historicoMetrica": [{"id": "h1", "data": "2026-12-01", "valor": 150}],
+                        "marcos": [{"id": "f1", "descricao": "R$ 3.000", "dataAlvo": "2026-11-30", "esperado": {"guardado": 3000}},
+                                   {"id": "f3", "descricao": "R$ 9.000", "dataAlvo": "2027-01-30",
+                                    "esperado": {"guardado": 9000, "renda_produto": 2000}}]},
+                "legada": {"objetivoMacro": "Legada", "pilar": "carreira", "status": "ativo", "marcos": ["texto"]},
+            },
+            "fixed_bills": {
+                "p1": {"category": "Poupança", "isPaid": True, "amount": 1000, "month": 10, "year": 2026},
+                "p0": {"category": "Poupança", "isPaid": True, "amount": 500, "month": 9, "year": 2026},
+            },
+        })
+        est = _coletar_estrategia(db, "2026-12-15", {}, {}, medicoes={"peso": 90.5})
+        por_id = {m["id"]: m for m in est["metas"]}
+        peso = por_id["saude"]["perfil"]["indicadores"][0]
+        self.assertEqual((peso["atual"], peso["esperado_hoje"], peso["estado"], peso["origem"]),
+                         (90.5, 90.8, "no_perfil", "automatica"))
+        self.assertEqual(por_id["saude"]["perfil"]["proximo_marco"]["data"], "2026-12-30")
+        fin = {i["chave"]: i for i in por_id["fin"]["perfil"]["indicadores"]}
+        self.assertEqual((fin["guardado"]["atual"], fin["guardado"]["origem"], fin["guardado"]["estado"]),
+                         (100000, "automatica", "atrasado"))  # só novembro: outubro é antes do ciclo
+        self.assertEqual((fin["renda_produto"]["atual"], fin["renda_produto"]["origem"]), (15000, "manual"))
+        self.assertIsNone(por_id["legada"]["perfil"])
+        self.assertEqual(por_id["saude"]["progresso_pct"], None)  # campos antigos continuam lá
+
+    def test_meta_de_saude_digitada_que_diverge_da_pesagem_avisa(self):
+        """B6: a meta mostrava 95,7 kg digitados contra 93,4 kg medidos."""
+        db = _FakeDb({"estrategia_pessoal": {
+            "s": {"objetivoMacro": "Saúde", "pilar": "saude", "status": "ativo", "tipoMeta": "absoluta",
+                  "metricaAlvo": {"valorInicial": 98, "valorAtual": 95.7, "valorObjetivo": 88, "unidade": "kg", "fonte": ""}},
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {}, medicoes={"peso": 93.4})["metas"][0]
+        self.assertIn("95.7 kg diverge da última pesagem 93.4 kg", meta["aviso_metrica"])
+        meta = _coletar_estrategia(db, HOJE, {}, {}, medicoes={"peso": 95.2})["metas"][0]
+        self.assertIsNone(meta["aviso_metrica"])
+
     def test_meta_servida_hoje_nao_entra_em_paradas(self):
         db = _FakeDb({"estrategia_pessoal": {
             "m1": {"objetivoMacro": "Meta viva", "pilar": "carreira", "status": "ativo"},

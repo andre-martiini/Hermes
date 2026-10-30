@@ -359,3 +359,16 @@ class TestPausaPerfilEHistorico(unittest.TestCase):
         self.assertEqual((lista, r["reason"], r["item"]), (None, "dataAlvo_invalida", "ruim"))
         self.assertEqual(st.aplicar_item(data, "marco", "editar", item_id="m1", itens=[{"descricao": "x"}])[1]["reason"],
                          "itens_so_em_adicionar_e_nao_vazio")
+
+
+class TestAvisoMetaDeSaudeSemFonte(unittest.TestCase):
+    """B6: meta numérica de saúde em kg ou cm criada sem fonte avisa no resultado."""
+
+    def test_avisa_sem_fonte_e_cala_com_fonte(self):
+        db = _MockDb()
+        base = dict(db=db, user_uid="uid-1", objetivoMacro="Peso", pilar="saude", tipoMeta="absoluta",
+                    diretrizes=["d"], metrica_valor_atual=93.4, metrica_valor_objetivo=88, metrica_unidade="kg")
+        self.assertIn("metrica_fonte='peso'", st.criar_objetivo_estrategico(**base)["aviso"])
+        self.assertNotIn("aviso", st.criar_objetivo_estrategico(**base, metrica_fonte="peso"))
+        self.assertIn("'cintura'", st.criar_objetivo_estrategico(**{**base, "metrica_unidade": "cm"})["aviso"])
+        self.assertNotIn("aviso", st.criar_objetivo_estrategico(**{**base, "pilar": "financas", "metrica_unidade": "kg"}))

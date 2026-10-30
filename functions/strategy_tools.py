@@ -201,7 +201,15 @@ def criar_objetivo_estrategico(
 
     ref = db.collection('estrategia_pessoal').document()
     ref.set(payload)
-    return {"status": "created", "objetivo_id": ref.id, "objetivoMacro": titulo, "pilar": pilar_norm}
+    resultado = {"status": "created", "objetivo_id": ref.id, "objetivoMacro": titulo, "pilar": pilar_norm}
+    unidade = str(metrica_unidade or "").strip().lower()
+    if (pilar_norm == "saude" and tipo_norm == "absoluta" and unidade in ("kg", "cm")
+            and not payload["metricaAlvo"]["fonte"]):
+        # Caso real: a meta de Saúde mostrou 95,7 kg digitados contra 93,4 kg medidos.
+        fonte = "peso" if unidade == "kg" else "cintura"
+        resultado["aviso"] = (f"Meta de saúde em {unidade} sem fonte: o valor atual fica parado no que foi "
+                              f"digitado. Ligue metrica_fonte='{fonte}' com editar_objetivo_estrategico.")
+    return resultado
 
 
 def editar_objetivo_estrategico(

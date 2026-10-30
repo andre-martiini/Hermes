@@ -1270,6 +1270,27 @@ def execute(tool_name: str, slots: dict, db) -> str:
                 "rendas": income
             }
         }
+
+        # Guardado (30/10/2026): a meta Financeira mede "guardado acumulado" = Poupança
+        # paga, pela mesma regra do bolso. `guardado_desde` (YYYY-MM-DD) soma do mês
+        # dessa data em diante; sem ele, só o do mês consultado.
+        summary["guardado"] = {
+            "poupanca_paga_mes": bolso_aquisicoes.poupado_centavos(bills) / 100,
+            "reserva_emergencia": summary["reserva_emergencia"],
+            "bolso": aquisicoes["bolso_aquisicoes"],
+        }
+        desde = str(slots.get("guardado_desde") or "").strip()
+        if desde:
+            poupanca = [s.to_dict() or {} for s in db.collection("fixed_bills")
+                        .where("category", "==", bolso_aquisicoes.CATEGORIA_POUPANCA).stream()]
+            acumulado = bolso_aquisicoes.guardado_acumulado(poupanca, desde)
+            if acumulado is None:
+                return "ERRO|" + json.dumps({"erro": "guardado_desde deve ser YYYY-MM-DD."}, ensure_ascii=False)
+            summary["guardado"]["acumulado_desde"] = {"desde": desde, "valor": acumulado / 100}
+
+        resumo_apenas = slots.get("resumo_apenas")
+        if resumo_apenas is True or str(resumo_apenas).strip().lower() == "true":
+            summary.pop("detalhes")  # sem a lista inteira de contas e rendas
         return json.dumps(summary, ensure_ascii=False)
 
     if tool_name == "registrar_item_financeiro_v2":

@@ -263,5 +263,37 @@ class TestCanalMcp(unittest.TestCase):
         self.assertEqual(slots["categoria"], "Geral")
 
 
+class TestGuardadoNoFinanceiro(unittest.TestCase):
+    """B5: bloco guardado (Poupança paga, mesma regra do bolso) e resposta só com os totais."""
+
+    def _db(self):
+        return _Db({
+            "fixed_bills": {
+                "p_out": {"description": "Poupança", "category": "Poupança", "isPaid": True, "amount": 500, "month": 9, "year": 2026},
+                "p_nov": {"description": "Poupança", "category": "Poupança", "isPaid": True, "amount": 1000, "month": 10, "year": 2026},
+                "p_nov2": {"description": "Poupança", "category": "Poupança", "isPaid": False, "amount": 700, "month": 10, "year": 2026},
+                "luz": {"description": "Luz", "category": "Moradia", "isPaid": True, "amount": 200, "month": 10, "year": 2026},
+            },
+            "income_entries": {"r": {"description": "Ifes", "amount": 9000, "month": 10, "year": 2026, "status": "active"}},
+            "finance_settings": {"config": {"emergencyReserveCurrent": 100, "emergencyReserveTarget": 1000}},
+        })
+
+    def _ler(self, args):
+        import json
+        return json.loads(hermes_tools._via_telegram("consultar_financas_v2")(_Ctx(self._db()), args))
+
+    def test_guardado_do_mes_e_acumulado_desde(self):
+        r = self._ler({"competencia": "2026-11", "guardado_desde": "2026-11-02"})
+        self.assertEqual(r["guardado"]["poupanca_paga_mes"], 1000)
+        self.assertEqual(r["guardado"]["acumulado_desde"], {"desde": "2026-11-02", "valor": 1000})
+        self.assertEqual(r["guardado"]["reserva_emergencia"], {"alvo": 1000, "atual": 100})
+        self.assertIn("detalhes", r)
+
+    def test_resumo_apenas_tira_as_listas(self):
+        r = self._ler({"competencia": "2026-11", "resumo_apenas": True})
+        self.assertNotIn("detalhes", r)
+        self.assertEqual(r["resumo"]["total_renda"], 9000)
+
+
 if __name__ == "__main__":
     unittest.main()

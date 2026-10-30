@@ -2577,10 +2577,11 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         if perfil_pessoal:
             estado["perfil_pessoal"] = perfil_pessoal
         # `enum` de `detalhe` já é validado no preflight (schema de entrada).
-        if (args.get("detalhe") or "auto") == "completo":
-            return estado
-        from tools.estado_resumido import resumir_estado
-        return resumir_estado(estado)
+        from tools.estado_resumido import resumir_estado, so_blocos
+
+        if (args.get("detalhe") or "auto") != "completo":
+            estado = resumir_estado(estado)
+        return so_blocos(estado, args.get("blocos"))
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 
