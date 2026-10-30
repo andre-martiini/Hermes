@@ -28,12 +28,24 @@ class _Consulta:
         self.filtro = valor
         return self
 
+    def order_by(self, campo):
+        assert campo == "__name__"
+        return self
+
+    def start_after(self, doc):
+        self.apos = doc.id
+        return self
+
+    apos = None
+
     def limit(self, n):
         self.n = n
         return self
 
     def stream(self):
-        docs = [i for i, d in self.db.docs.items() if d["pedido"]["status"] in self.filtro]
+        docs = sorted(i for i, d in self.db.docs.items() if d["pedido"]["status"] in self.filtro)
+        if self.apos is not None:
+            docs = [i for i in docs if i > self.apos]
         return [_Doc(i) for i in docs[: self.n]]
 
 
@@ -94,22 +106,35 @@ class TestSweepLote(unittest.TestCase):
         r = sl.varrer_candidatos(self.db, agora=self.depois, max_tentativas=3)
         self.assertEqual([d.request_id for d in r.diagnosticos], ["a"])
 
-    def test_apagado_entre_consulta_e_varredura_e_ignorado(self):
-        repo.criar_pedido(self.db, _andamento("a"))
-        original = sl.listar_candidatos
-        sl.listar_candidatos = lambda db, limite: ["a", "fantasma"]
-        try:
-            r = sl.varrer_candidatos(self.db, agora=self.depois)
-        finally:
-            sl.listar_candidatos = original
-        self.assertEqual(r.varridos, (("a", "lease_vencida"),))
-        self.assertEqual(r.erros, ())
+    def test_pagina_ate_alcancar_vencido_atras_de_muitos_nao_vencidos(self):
+        for i in range(5):
+            repo.criar_pedido(self.db, _andamento(f"a{i}", agora=self.depois))
+        repo.criar_pedido(self.db, _andamento("z"))
+        r = sl.varrer_candidatos(self.db, agora=self.depois, limite=2)
+        self.assertEqual(r.candidatos, 6)
+        self.assertFalse(r.truncado)
+        self.assertEqual(r.varridos, (("z", "lease_vencida"),))
+
+    def test_teto_de_paginas_marca_truncado(self):
+        for i in range(5):
+            repo.criar_pedido(self.db, _andamento(f"a{i}", agora=self.depois))
+        r = sl.varrer_candidatos(self.db, agora=self.depois, limite=2, max_paginas=2)
+        self.assertEqual((r.candidatos, r.truncado), (4, True))
+        exato = sl.varrer_candidatos(self.db, agora=self.depois, limite=5, max_paginas=1)
+        self.assertEqual((exato.candidatos, exato.truncado), (5, True))  # página cheia no teto: pode haver mais
+
+    def test_parametros_invalidos(self):
+        for ruim in (0, True, "2"):
+            with self.assertRaises(ValueError):
+                sl.varrer_candidatos(self.db, agora=T0, max_paginas=ruim)
+            with self.assertRaises(ValueError):
+                sl.varrer_candidatos(self.db, agora=T0, limite=ruim)
 
     def test_agora_naive_recusado_e_sem_candidatos(self):
         with self.assertRaises(ValueError):
             sl.varrer_candidatos(self.db, agora=datetime(2026, 1, 1))
         r = sl.varrer_candidatos(self.db, agora=T0)
-        self.assertEqual((r.candidatos, r.varridos, r.erros), (0, (), ()))
+        self.assertEqual((r.candidatos, r.truncado, r.varridos, r.erros), (0, False, (), ()))
 
 
 if __name__ == "__main__":

@@ -29,29 +29,46 @@ STATUS_VARRIVEIS = (
     RequestStatus.VERIFICANDO,
 )
 LIMITE_PADRAO = 100
+MAX_PAGINAS_PADRAO = 10
 
 
 @dataclass(frozen=True)
 class ResultadoLote:
     """`varridos`: (request_id, acao) dos pedidos gravados; `erros`:
-    (request_id, "Tipo: mensagem"); `candidatos`: quantos a consulta trouxe."""
+    (request_id, "Tipo: mensagem"); `candidatos`: quantos a consulta trouxe;
+    `truncado`: True se o teto de páginas foi atingido com mais pedidos por ler
+    (a próxima passada começa de novo do início: aumentar o teto ou a cadência)."""
 
     candidatos: int
+    truncado: bool
     varridos: tuple[tuple[str, str], ...]
     diagnosticos: tuple[DiagnosticoPedido, ...]
     erros: tuple[tuple[str, str], ...]
 
 
-def listar_candidatos(db: Any, limite: int = LIMITE_PADRAO) -> list[str]:
-    """Ids (ordenados) dos pedidos em status varrível, no máximo `limite`."""
-    if isinstance(limite, bool) or not isinstance(limite, int) or limite < 1:
-        raise ValueError("limite deve ser inteiro >= 1.")
+def _validar_inteiro_positivo(valor: Any, nome: str) -> None:
+    if isinstance(valor, bool) or not isinstance(valor, int) or valor < 1:
+        raise ValueError(f"{nome} deve ser inteiro >= 1.")
+
+
+def _pagina(db: Any, limite: int, apos: Any = None) -> list[Any]:
+    """Uma página de documentos em status varrível, em ordem de id. Sem
+    ordenação+cursor um `limit` devolveria sempre os mesmos documentos (pedidos
+    com lease válida ou com erro permanente ocupariam a página para sempre)."""
     consulta = (
         db.collection(COLECAO_PEDIDOS)
         .where("pedido.status", "in", [s.value for s in STATUS_VARRIVEIS])
-        .limit(limite)
+        .order_by("__name__")
     )
-    return sorted(doc.id for doc in consulta.stream())
+    if apos is not None:
+        consulta = consulta.start_after(apos)
+    return list(consulta.limit(limite).stream())
+
+
+def listar_candidatos(db: Any, limite: int = LIMITE_PADRAO) -> list[str]:
+    """Ids (primeira página, em ordem de id) em status varrível."""
+    _validar_inteiro_positivo(limite, "limite")
+    return [doc.id for doc in _pagina(db, limite)]
 
 
 def varrer_candidatos(
@@ -59,25 +76,40 @@ def varrer_candidatos(
     agora: datetime | None = None,
     limite: int = LIMITE_PADRAO,
     max_tentativas: int = DEFAULT_MAX_TENTATIVAS,
+    max_paginas: int = MAX_PAGINAS_PADRAO,
 ) -> ResultadoLote:
-    """Uma passada do sweep. `agora` é resolvido uma vez para todo o lote."""
+    """Uma passada do sweep, paginando por cursor até esgotar os candidatos ou
+    atingir `max_paginas` (`truncado`). `agora` é resolvido uma vez."""
     if agora is not None:
         _exigir_tz_aware(agora, "agora")
+    _validar_inteiro_positivo(limite, "limite")
+    _validar_inteiro_positivo(max_paginas, "max_paginas")
     agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    ids = listar_candidatos(db, limite)
     varridos: list[tuple[str, str]] = []
     diagnosticos: list[DiagnosticoPedido] = []
     erros: list[tuple[str, str]] = []
-    for request_id in ids:
-        try:
-            r = varrer_pedido(db, request_id, agora=agora_resolvido, max_tentativas=max_tentativas)
-        except PedidoNaoEncontrado:
-            continue  # apagado entre a consulta e a varredura
-        except Exception as exc:  # isolamento por pedido: anomalia vira item de erro
-            erros.append((request_id, f"{type(exc).__name__}: {exc}"))
-            continue
-        if r.acao is not None:
-            varridos.append((request_id, r.acao))
-        if r.diagnostico is not None:
-            diagnosticos.append(r.diagnostico)
-    return ResultadoLote(len(ids), tuple(varridos), tuple(diagnosticos), tuple(erros))
+    total = 0
+    apos = None
+    truncado = False
+    for pagina_n in range(max_paginas):
+        docs = _pagina(db, limite, apos)
+        total += len(docs)
+        for doc in docs:
+            request_id = doc.id
+            try:
+                r = varrer_pedido(db, request_id, agora=agora_resolvido, max_tentativas=max_tentativas)
+            except PedidoNaoEncontrado:
+                continue  # apagado entre a consulta e a varredura
+            except Exception as exc:  # isolamento por pedido: anomalia vira item de erro
+                erros.append((request_id, f"{type(exc).__name__}: {exc}"))
+                continue
+            if r.acao is not None:
+                varridos.append((request_id, r.acao))
+            if r.diagnostico is not None:
+                diagnosticos.append(r.diagnostico)
+        if len(docs) < limite:
+            break
+        apos = docs[-1]
+        if pagina_n == max_paginas - 1:
+            truncado = True
+    return ResultadoLote(total, truncado, tuple(varridos), tuple(diagnosticos), tuple(erros))
