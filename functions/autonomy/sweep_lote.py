@@ -36,11 +36,14 @@ MAX_PAGINAS_PADRAO = 10
 class ResultadoLote:
     """`varridos`: (request_id, acao) dos pedidos gravados; `erros`:
     (request_id, "Tipo: mensagem"); `candidatos`: quantos a consulta trouxe;
-    `truncado`: True se o teto de páginas foi atingido com a última página cheia (pode haver mais pedidos por ler; falso positivo quando o total é exatamente limite*max_paginas)
+    `truncado`: True se o teto de páginas foi atingido com a última página cheia (pode haver mais pedidos por ler; falso positivo quando o total é exatamente limite*max_paginas).
+    `proximo_cursor`: id do último pedido lido quando `truncado` (senão None); passar como
+    `apos_id` na passada seguinte para continuar dali em vez de reler o mesmo prefixo
     (a próxima passada começa de novo do início: aumentar o teto ou a cadência)."""
 
     candidatos: int
     truncado: bool
+    proximo_cursor: str | None
     varridos: tuple[tuple[str, str], ...]
     diagnosticos: tuple[DiagnosticoPedido, ...]
     erros: tuple[tuple[str, str], ...]
@@ -51,7 +54,7 @@ def _validar_inteiro_positivo(valor: Any, nome: str) -> None:
         raise ValueError(f"{nome} deve ser inteiro >= 1.")
 
 
-def _pagina(db: Any, limite: int, apos: Any = None) -> list[Any]:
+def _pagina(db: Any, limite: int, apos: str | None = None) -> list[Any]:
     """Uma página de documentos em status varrível, em ordem de id. Sem
     ordenação+cursor um `limit` devolveria sempre os mesmos documentos (pedidos
     com lease válida ou com erro permanente ocupariam a página para sempre)."""
@@ -61,7 +64,7 @@ def _pagina(db: Any, limite: int, apos: Any = None) -> list[Any]:
         .order_by("__name__")
     )
     if apos is not None:
-        consulta = consulta.start_after(apos)
+        consulta = consulta.start_after({"__name__": apos})
     return list(consulta.limit(limite).stream())
 
 
@@ -77,19 +80,23 @@ def varrer_candidatos(
     limite: int = LIMITE_PADRAO,
     max_tentativas: int = DEFAULT_MAX_TENTATIVAS,
     max_paginas: int = MAX_PAGINAS_PADRAO,
+    apos_id: str | None = None,
 ) -> ResultadoLote:
     """Uma passada do sweep, paginando por cursor até esgotar os candidatos ou
-    atingir `max_paginas` (`truncado`). `agora` é resolvido uma vez."""
+    atingir `max_paginas` (`truncado`; continue com `apos_id=proximo_cursor`). `agora` é resolvido uma vez."""
     if agora is not None:
         _exigir_tz_aware(agora, "agora")
     _validar_inteiro_positivo(limite, "limite")
     _validar_inteiro_positivo(max_paginas, "max_paginas")
+    _validar_inteiro_positivo(max_tentativas, "max_tentativas")
+    if apos_id is not None and (not isinstance(apos_id, str) or not apos_id):
+        raise ValueError("apos_id deve ser str não vazia ou None.")
     agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
     varridos: list[tuple[str, str]] = []
     diagnosticos: list[DiagnosticoPedido] = []
     erros: list[tuple[str, str]] = []
     total = 0
-    apos = None
+    apos = apos_id
     truncado = False
     for pagina_n in range(max_paginas):
         docs = _pagina(db, limite, apos)
@@ -109,7 +116,7 @@ def varrer_candidatos(
                 diagnosticos.append(r.diagnostico)
         if len(docs) < limite:
             break
-        apos = docs[-1]
+        apos = docs[-1].id
         if pagina_n == max_paginas - 1:
             truncado = True
-    return ResultadoLote(total, truncado, tuple(varridos), tuple(diagnosticos), tuple(erros))
+    return ResultadoLote(total, truncado, apos if truncado else None, tuple(varridos), tuple(diagnosticos), tuple(erros))

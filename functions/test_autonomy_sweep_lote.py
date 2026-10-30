@@ -32,8 +32,8 @@ class _Consulta:
         assert campo == "__name__"
         return self
 
-    def start_after(self, doc):
-        self.apos = doc.id
+    def start_after(self, cursor):
+        self.apos = cursor["__name__"]
         return self
 
     apos = None
@@ -119,11 +119,19 @@ class TestSweepLote(unittest.TestCase):
         for i in range(5):
             repo.criar_pedido(self.db, _andamento(f"a{i}", agora=self.depois))
         r = sl.varrer_candidatos(self.db, agora=self.depois, limite=2, max_paginas=2)
-        self.assertEqual((r.candidatos, r.truncado), (4, True))
+        self.assertEqual((r.candidatos, r.truncado, r.proximo_cursor), (4, True, "a3"))
+        resto = sl.varrer_candidatos(self.db, agora=self.depois, limite=2, max_paginas=2, apos_id=r.proximo_cursor)
+        self.assertEqual((resto.candidatos, resto.truncado, resto.proximo_cursor), (1, False, None))
         exato = sl.varrer_candidatos(self.db, agora=self.depois, limite=5, max_paginas=1)
         self.assertEqual((exato.candidatos, exato.truncado), (5, True))  # página cheia no teto: pode haver mais
 
     def test_parametros_invalidos(self):
+        for ruim in (0, -1, False, "2", None):
+            with self.assertRaises(ValueError):
+                sl.varrer_candidatos(self.db, agora=T0, max_tentativas=ruim)
+        for ruim in ("", 5):
+            with self.assertRaises(ValueError):
+                sl.varrer_candidatos(self.db, agora=T0, apos_id=ruim)
         for ruim in (0, True, "2"):
             with self.assertRaises(ValueError):
                 sl.varrer_candidatos(self.db, agora=T0, max_paginas=ruim)
