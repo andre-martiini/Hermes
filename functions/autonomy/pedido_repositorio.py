@@ -17,9 +17,11 @@ from typing import Any, Callable
 from firebase_admin import firestore
 
 from autonomy.execution import PedidoDuravel
-from autonomy.pedido_serializacao import pedido_de_dict, pedido_para_dict
+from autonomy.pedido_serializacao import pedido_de_dict, pedido_para_dict, run_para_dict
+from autonomy.runs import AgentRun
 
 COLECAO_PEDIDOS = "autonomy_pedidos"
+SUBCOLECAO_RUNS_ENCERRADOS = "runs_encerrados"
 
 
 class PedidoJaExiste(Exception):
@@ -159,10 +161,18 @@ def atualizar_pedido(
     db: Any,
     request_id: str,
     transformar: Callable[[PedidoDuravel], PedidoDuravel],
+    run_encerrado: Callable[[], AgentRun | None] | None = None,
 ) -> PedidoDuravel:
     """Read-modify-write transacional. `transformar` deve ser PURA: o
     Firestore a reexecuta sobre o estado novo quando há contenção. Se ela
-    levanta, nada é gravado e a exceção sobe. Devolve o pedido gravado."""
+    levanta, nada é gravado e a exceção sobe. Devolve o pedido gravado.
+
+    `run_encerrado` (opcional) é chamado logo após `transformar`, na mesma
+    transação, e devolve o run antigo fechado que a transição deixou de
+    guardar no pedido (ex.: `acordar_espera_externa`); ele é gravado em
+    `autonomy_pedidos/{id}/runs_encerrados/{run_id}` junto com o pedido
+    (atômico), sem o que ficaria ativo para sempre. Só é gravado se o pedido
+    também mudou."""
     request_id = _validar_request_id(request_id)
     if not callable(transformar):
         raise TypeError("transformar deve ser callable.")
@@ -184,6 +194,16 @@ def atualizar_pedido(
         _validar_para_firestore(doc)
         if doc != pedido_para_dict(atual):
             transaction.set(ref, {"pedido": doc, "revisao": revisao + 1})
+            antigo = run_encerrado() if run_encerrado is not None else None
+            if antigo is not None:
+                if not isinstance(antigo, AgentRun) or antigo.request_id != request_id:
+                    raise ValueError("run_encerrado deve ser AgentRun do mesmo request_id.")
+                doc_run = run_para_dict(antigo)
+                _validar_para_firestore(doc_run, "run_encerrado")
+                transaction.set(
+                    ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(_validar_request_id(antigo.run_id)),
+                    doc_run,
+                )
         return novo
 
     return _exec(tx)

@@ -139,6 +139,20 @@ def _json_puro(valor: Any, nome: str) -> Any:
         raise ValueError(f"{nome}: valor não é JSON puro.") from exc
 
 
+def run_para_dict(run: AgentRun) -> dict[str, Any]:
+    return {
+        "run_id": run.run_id,
+        "request_id": run.request_id,
+        "executor_id": run.executor_id,
+        "lease_token": run.lease_token,
+        "generation": run.generation,
+        "status": AgentRunStatus(run.status).value,
+        "iniciado_em": _instante_para_str(run.iniciado_em),
+        "finalizado_em": _instante_para_str(run.finalizado_em),
+        "resultado": _json_mutavel(run.resultado),
+    }
+
+
 def pedido_para_dict(pedido: PedidoDuravel) -> dict[str, Any]:
     if not isinstance(pedido, PedidoDuravel):
         raise TypeError("pedido deve ser PedidoDuravel.")
@@ -170,17 +184,7 @@ def pedido_para_dict(pedido: PedidoDuravel) -> dict[str, Any]:
             "resultado": _json_mutavel(entrada.resultado),
             "resultado_registrado_em": _instante_para_str(entrada.resultado_registrado_em),
         },
-        "run": None if run is None else {
-            "run_id": run.run_id,
-            "request_id": run.request_id,
-            "executor_id": run.executor_id,
-            "lease_token": run.lease_token,
-            "generation": run.generation,
-            "status": AgentRunStatus(run.status).value,
-            "iniciado_em": _instante_para_str(run.iniciado_em),
-            "finalizado_em": _instante_para_str(run.finalizado_em),
-            "resultado": _json_mutavel(run.resultado),
-        },
+        "run": None if run is None else run_para_dict(run),
         "tentativas": pedido.tentativas,
         "proximo_tentativa_em": _instante_para_str(pedido.proximo_tentativa_em),
         "pausas": pedido.pausas,
