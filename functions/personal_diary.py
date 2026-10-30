@@ -56,7 +56,9 @@ def _load_settings(db) -> dict:
 
     doc = _cached_doc_get(db, "system", "settings")
     cfg = ((doc.to_dict() or {}) if doc.exists else {}).get("personal_diary") or {}
-    return {"enabled": bool(cfg.get("enabled", False))}
+    # `notificar` só corta o envio ao Telegram: o diário continua sendo gerado,
+    # porque alimenta a consolidação semanal do perfil (o André não lê o diário, 30/10/2026).
+    return {"enabled": bool(cfg.get("enabled", False)), "notificar": cfg.get("notificar", True) is not False}
 
 
 def _day_bounds(date_str: str) -> tuple[datetime, datetime]:
@@ -404,7 +406,7 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
         "confirmado": False,
     }, merge=True)
 
-    chat_id = _resolve_default_telegram_chat_id(db)
+    chat_id = _resolve_default_telegram_chat_id(db) if settings["notificar"] else None
     if chat_id:
         preview = texto if len(texto) <= 3500 else texto[:3500] + "…"
         keyboard = [[

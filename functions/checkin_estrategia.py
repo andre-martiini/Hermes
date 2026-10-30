@@ -13,7 +13,7 @@ O padrão é domingo às 18h de Brasília, a partir de 08/11/2026 (provisório: 
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from firebase_functions import options, scheduler_fn
 from google.api_core.exceptions import AlreadyExists
@@ -142,10 +142,20 @@ def checkin_estrategia_semanal(event: scheduler_fn.ScheduledEvent = None) -> Non
     medicoes = {k: v for k, v in {"peso": (saude.get("peso") or {}).get("ultimo"),
                                   "cintura": (saude.get("cintura") or {}).get("ultimo")}.items() if v}
     metas = ms._coletar_estrategia(db, hoje, {}, {}, saude.get("ultimo_registro"), medicoes=medicoes)["metas"]
-    mensagem = montar_mensagem(metas, agora.date())
+    partes = [montar_mensagem(metas, agora.date())]
+    try:  # a linha do teto não pode derrubar o check-in da estratégia
+        import avisos_teto
+
+        dia = agora.date()
+        fin = db.collection("finance_settings").document("config").get()
+        transacoes = avisos_teto.carregar_transacoes(db, min(dia.replace(day=1), dia - timedelta(days=6)))
+        partes.append(avisos_teto.linha_semanal(transacoes, fin.to_dict() if fin.exists else {}, dia))
+    except Exception as exc:
+        print(f"[CheckinEstrategia] Linha do teto falhou: {exc}")
+    mensagem = "\n\n".join(p for p in partes if p) or None
     marca.update({"enviado": bool(mensagem), "mensagem": mensagem})
     if not mensagem:
-        print("[CheckinEstrategia] Nenhuma meta ativa com perfil; nada enviado.")
+        print("[CheckinEstrategia] Nenhuma meta ativa com perfil nem teto; nada enviado.")
         return
     chat_id = _get_allowed_chat_id()
     if chat_id:
