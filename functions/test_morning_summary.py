@@ -481,6 +481,7 @@ class TestEstrategia(unittest.TestCase):
         self.assertEqual((est["servidas_hoje"], est["total_geridas_por_acoes"]), (1, 1))
         mago = next(m for m in est["metas"] if m["id"] == "mago")
         self.assertEqual((mago["pausada"], mago["data_retomada"]), (True, "2027-01-30"))
+        self.assertIsNone(mago["perfil"])  # pausada não aparece "atrasada" a quem lê o bloco
 
     def test_perfil_de_cada_meta_com_origem_do_numero(self):
         """A7: atual x esperado de hoje por indicador, com a origem automática ou manual."""

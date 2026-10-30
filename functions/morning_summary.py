@@ -1148,6 +1148,7 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
         progresso = _progresso_da_meta(data, medicoes or {})
 
         acoes = acoes_por_meta.get(doc.id) or []
+        pausada = str(data.get("status") or "").lower() == "pausada"
         metas.append({
             "id": doc.id,
             "pilar": data.get("pilar"),
@@ -1155,7 +1156,7 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
             "gerida_por_acoes": gerida_por_acoes,
             "objetivo": data.get("objetivoMacro") or "(sem título)",
             "status": data.get("status"),
-            "pausada": str(data.get("status") or "").lower() == "pausada",
+            "pausada": pausada,
             "data_retomada": _data_valida(data.get("dataRetomada")) or None,
             "acoes_hoje": len(acoes),
             "titulos_hoje": [a["titulo"] for a in acoes][:AMOSTRA_FILA],
@@ -1170,8 +1171,9 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
             "marcos_abertos": len([m for m in marcos if not m.get("concluido")]),
             "marcos_total": len(marcos),
             # Perfil de 3 meses: atual x esperado de hoje por indicador (None sem perfil).
-            "perfil": _perfil_da_meta(data, hoje, medicoes or {}, _guardado),
-            "aviso_metrica": _aviso_metrica_manual(data, progresso, medicoes or {}),
+            # Pausada de propósito: sem perfil nem aviso, para não aparecer "atrasada" a quem lê o bloco.
+            "perfil": None if pausada else _perfil_da_meta(data, hoje, medicoes or {}, _guardado),
+            "aviso_metrica": None if pausada else _aviso_metrica_manual(data, progresso, medicoes or {}),
         })
 
     metas.sort(key=lambda m: (-m["acoes_hoje"], -(m["dias_parada"] if m["dias_parada"] is not None else 999)))

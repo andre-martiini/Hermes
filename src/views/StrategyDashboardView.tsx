@@ -405,6 +405,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     if (pausada && !/^\d{4}-\d{2}-\d{2}$/.test(draft.dataRetomada || '')) {
       throw new Error('Meta pausada precisa da data de retomada.');
     }
+    if (pausada && (draft.dataRetomada as string) <= hoje) throw new Error('A data de retomada precisa ser futura.');
     if (id) {
       const { timestamp, ...semTimestamp } = payload;
       await gravarComHistorico(id, { ...payload, dataRetomada: pausada ? draft.dataRetomada : deleteField() }, 'editar',

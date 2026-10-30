@@ -72,9 +72,32 @@ class _MockCollection:
         return [_MockDocSnap(k, v) for k, v in self._docs.items()]
 
 
+class _MockBatch:
+    """Lote que só aplica no commit: falhar antes do commit não grava nada."""
+
+    def __init__(self):
+        self.ops = []
+
+    def update(self, ref, dados):
+        self.ops.append(lambda: ref.update(dados))
+
+    def set(self, ref, dados):
+        self.ops.append(lambda: ref.set(dados))
+
+    def delete(self, ref):
+        self.ops.append(ref.delete)
+
+    def commit(self):
+        for op in self.ops:
+            op()
+
+
 class _MockDb:
     def __init__(self):
         self._cols: dict[str, _MockCollection] = {}
+
+    def batch(self):
+        return _MockBatch()
 
     def collection(self, name: str):
         if name not in self._cols:
@@ -275,6 +298,12 @@ class TestPausaPerfilEHistorico(unittest.TestCase):
     """A5, B2 e B3: status pausada, campos do perfil pelo editar e o histórico de antes e depois."""
 
     def setUp(self):
+        from unittest import mock
+
+        # Data fixa: "retomada no futuro" não pode depender do dia em que o teste roda.
+        patcher = mock.patch.object(st, "hoje_brasilia", return_value="2026-10-30")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.db = _MockDb()
         self.db.collection("estrategia_pessoal").document("mago").set(
             {"userId": "uid-1", "objetivoMacro": "MAGO", "pilar": "carreira", "status": "ativo",
@@ -372,3 +401,49 @@ class TestAvisoMetaDeSaudeSemFonte(unittest.TestCase):
         self.assertNotIn("aviso", st.criar_objetivo_estrategico(**base, metrica_fonte="peso"))
         self.assertIn("'cintura'", st.criar_objetivo_estrategico(**{**base, "metrica_unidade": "cm"})["aviso"])
         self.assertNotIn("aviso", st.criar_objetivo_estrategico(**{**base, "pilar": "financas", "metrica_unidade": "kg"}))
+
+
+class TestCorrecoesDaSegundaRevisao(TestPausaPerfilEHistorico):
+    """2ª revisão: vazio não apaga, retomada no passado recusada, histórico com datas e atômico."""
+
+    def test_vazio_e_nao_enviado(self):
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", indicadores=[
+            {"chave": "peso", "sentido": "menor_melhor", "fonte": "peso"}])
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", ciclo={}, linhaBase={}, indicadores=[],
+                                           objetivoMacro="MAGO 2")
+        self.assertEqual(r["campos_alterados"], ["objetivoMacro"])
+        self.assertEqual(len(self._doc()["indicadores"]), 1)  # `indicadores: []` não apagou
+        lista, r = st.aplicar_item(_objetivo_com_marcos(), "marco", "concluir", item_id="m1", itens=[])
+        self.assertTrue(lista[1]["concluido"])
+
+    def test_retomada_no_passado_ou_hoje_e_recusada(self):
+        for data in ("2026-10-29", "2026-10-30"):
+            r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada", dataRetomada=data)
+            self.assertEqual(r["reason"], "dataRetomada_deve_ser_futura", data)
+
+    def test_historico_guarda_datas_como_texto(self):
+        from datetime import datetime, timezone
+
+        self.db.collection("estrategia_pessoal").document("mago").update(
+            {"timestamp": datetime(2026, 10, 30, 12, tzinfo=timezone.utc)})
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        self.assertEqual(self._historico()[-1]["antes"]["timestamp"], "2026-10-30T12:00:00+00:00")
+
+    def test_editar_e_excluir_vao_num_lote_unico(self):
+        lotes = []
+        original = self.db.batch
+
+        def _espiao():
+            lote = original()
+            lotes.append(lote)
+            return lote
+
+        self.db.batch = _espiao
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", objetivoMacro="X")
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        self.assertEqual([len(l.ops) for l in lotes], [2, 2])  # mudança + histórico, juntos
+
+    def test_aviso_de_saude_aceita_quilos(self):
+        r = st.criar_objetivo_estrategico(self.db, "uid-1", "Peso", pilar="saude", tipoMeta="absoluta",
+                                          diretrizes=["d"], metrica_valor_objetivo=88, metrica_unidade="quilos")
+        self.assertIn("'peso'", r["aviso"])

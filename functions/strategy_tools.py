@@ -14,7 +14,11 @@ from datetime import datetime, timezone
 from firebase_admin import firestore
 
 from bolso_aquisicoes import numero
-from perfil_estrategia import FONTES, SENTIDOS, dia, id_legado
+from perfil_estrategia import FONTES, SENTIDOS, dia, hoje_brasilia, id_legado
+
+# Unidade de meta de saúde -> fonte automática que a alimenta (as mesmas do resumo matinal).
+_UNIDADES_FONTE = {"kg": "peso", "quilo": "peso", "quilos": "peso",
+                   "cm": "cintura", "centimetro": "cintura", "centimetros": "cintura"}
 
 PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
 # `pausada` (30/10/2026): sai de "paradas", das sugestões de vínculo e de elevação e do
@@ -37,7 +41,10 @@ def registrar_historico(destino, db, user_uid: str, objetivo_id: str, operacao: 
             return {k: _limpo(v) for k, v in valor.items()}
         if isinstance(valor, list):
             return [_limpo(v) for v in valor]
-        return valor if isinstance(valor, (str, int, float, bool, type(None))) else None
+        if isinstance(valor, (str, int, float, bool, type(None))):
+            return valor
+        # Datas (datetime, Timestamp do Firestore) viram texto, para o histórico reconstruir o documento.
+        return valor.isoformat() if hasattr(valor, "isoformat") else None
 
     registro = {"objetivo_id": objetivo_id, "userId": user_uid, "origem": origem, "operacao": operacao,
                 "antes": _limpo(antes), "depois": _limpo(depois),
@@ -203,10 +210,10 @@ def criar_objetivo_estrategico(
     ref.set(payload)
     resultado = {"status": "created", "objetivo_id": ref.id, "objetivoMacro": titulo, "pilar": pilar_norm}
     unidade = str(metrica_unidade or "").strip().lower()
-    if (pilar_norm == "saude" and tipo_norm == "absoluta" and unidade in ("kg", "cm")
+    if (pilar_norm == "saude" and tipo_norm == "absoluta" and unidade in _UNIDADES_FONTE
             and not payload["metricaAlvo"]["fonte"]):
         # Caso real: a meta de Saúde mostrou 95,7 kg digitados contra 93,4 kg medidos.
-        fonte = "peso" if unidade == "kg" else "cintura"
+        fonte = _UNIDADES_FONTE[unidade]
         resultado["aviso"] = (f"Meta de saúde em {unidade} sem fonte: o valor atual fica parado no que foi "
                               f"digitado. Ligue metrica_fonte='{fonte}' com editar_objetivo_estrategico.")
     return resultado
@@ -241,7 +248,7 @@ def editar_objetivo_estrategico(
     # Perfil de 3 meses: ciclo, linha de base e indicadores numéricos.
     for campo, valor, validar in (("ciclo", ciclo, _validar_ciclo), ("linhaBase", linhaBase, _validar_linha_base),
                                   ("indicadores", indicadores, _validar_indicadores)):
-        if valor is not None:
+        if valor not in (None, {}, []):  # vazio é "não enviado": `indicadores: []` não apaga o perfil
             limpo, erro = validar(valor)
             if erro:
                 return {"status": "error", "reason": erro}
@@ -274,6 +281,8 @@ def editar_objetivo_estrategico(
         d = dia(dataRetomada)
         if not d or len(str(dataRetomada).strip()) != 10:
             return {"status": "error", "reason": "dataRetomada_invalida"}
+        if d.isoformat() <= hoje_brasilia():
+            return {"status": "error", "reason": "dataRetomada_deve_ser_futura"}
         if status_final != "pausada":
             return {"status": "error", "reason": "dataRetomada_so_com_status_pausada"}
         updates["dataRetomada"] = d.isoformat()
@@ -311,9 +320,12 @@ def editar_objetivo_estrategico(
 
     alterados = [k for k in updates.keys() if k != "timestamp"]
     updates["timestamp"] = firestore.SERVER_TIMESTAMP
-    ref.update(updates)
-    registrar_historico(None, db, user_uid, ref.id, "editar",
+    # A mudança e o seu registro no mesmo lote: ou os dois, ou nenhum.
+    lote = db.batch()
+    lote.update(ref, updates)
+    registrar_historico(lote, db, user_uid, ref.id, "editar",
                         {k: data.get(k) for k in alterados}, {k: updates[k] for k in alterados}, origem)
+    lote.commit()
     return {
         "status": "updated",
         "objetivo_id": ref.id,
@@ -370,8 +382,10 @@ def aplicar_item(data: dict, tipo: str, acao: str, descricao: str | None = None,
     `itens` (só em adicionar): vários de uma vez, [{descricao, dataAlvo, esperado}]. Tudo
     ou nada: um item inválido recusa o lote inteiro.
     """
+    if itens == []:
+        itens = None  # vazio é "não enviado", como em dataAlvo e esperado
     if itens is not None:
-        if acao != "adicionar" or not isinstance(itens, list) or not itens:
+        if acao != "adicionar" or not isinstance(itens, list):
             return None, {"status": "error", "reason": "itens_so_em_adicionar_e_nao_vazio"}
         atual, ids = data, []
         for item in itens:
@@ -555,7 +569,9 @@ def excluir_objetivo_estrategico(db, user_uid: str | None, objetivo_id: str) -> 
     if not ref:
         return {"status": "error", "reason": "objetivo_nao_encontrado"}
     titulo = data.get("objetivoMacro", "")
-    ref.delete()
-    # O objetivo inteiro fica no histórico: excluir deixa de ser sem volta.
-    registrar_historico(None, db, user_uid, objetivo_id, "excluir", {k: v for k, v in data.items() if k != "userId"}, {})
+    # O objetivo inteiro fica no histórico, no mesmo lote: excluir deixa de ser sem volta.
+    lote = db.batch()
+    lote.delete(ref)
+    registrar_historico(lote, db, user_uid, objetivo_id, "excluir", {k: v for k, v in data.items() if k != "userId"}, {})
+    lote.commit()
     return {"status": "deleted", "objetivo_id": objetivo_id, "objetivoMacro": titulo}

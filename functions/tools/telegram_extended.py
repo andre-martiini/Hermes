@@ -1280,12 +1280,12 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "bolso": aquisicoes["bolso_aquisicoes"],
         }
         desde = str(slots.get("guardado_desde") or "").strip()
+        if desde and bolso_aquisicoes.guardado_acumulado([], desde) is None:
+            return "ERRO|" + json.dumps({"erro": "guardado_desde deve ser YYYY-MM-DD."}, ensure_ascii=False)
         if desde:
             poupanca = [s.to_dict() or {} for s in db.collection("fixed_bills")
                         .where("category", "==", bolso_aquisicoes.CATEGORIA_POUPANCA).stream()]
             acumulado = bolso_aquisicoes.guardado_acumulado(poupanca, desde)
-            if acumulado is None:
-                return "ERRO|" + json.dumps({"erro": "guardado_desde deve ser YYYY-MM-DD."}, ensure_ascii=False)
             summary["guardado"]["acumulado_desde"] = {"desde": desde, "valor": acumulado / 100}
 
         resumo_apenas = slots.get("resumo_apenas")

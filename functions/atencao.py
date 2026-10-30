@@ -638,6 +638,9 @@ def detectar_retomada_metas(db, hoje: date) -> list[dict]:
     itens = itens_retomada_metas(objetivos, hoje)
     if itens:
         _persistir_itens_atencao(db, itens)
+    # Meta retomada (ou com a data adiada) não deixa o aviso aberto para sempre.
+    _fechar_itens_obsoletos(db, TIPO_META_RETOMADA, {i["chave_dedupe"] for i in itens},
+                            "Meta retomada ou data de retomada alterada.")
     return itens
 
 

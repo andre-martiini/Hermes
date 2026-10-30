@@ -1460,3 +1460,15 @@ class TestRetomadaDeMetaPausada(unittest.TestCase):
         # Depois da data continua avisando com a MESMA chave (o persistir é idempotente).
         self.assertEqual(itens_retomada_metas(objetivos, date(2027, 2, 5))[0]["chave_dedupe"],
                          "meta_retomada:mago:2027-01-30")
+
+
+class TestRetomadaFechaSozinha(unittest.TestCase):
+    def test_meta_retomada_fecha_o_aviso(self):
+        import atencao
+
+        db = MagicMock()
+        db.collection.return_value.where.return_value.stream.return_value = []  # nenhuma pausada
+        with patch.object(atencao, "_fechar_itens_obsoletos") as fechar:
+            atencao.detectar_retomada_metas(db, date(2027, 2, 1))
+        fechar.assert_called_once()
+        self.assertEqual(fechar.call_args[0][1:3], (atencao.TIPO_META_RETOMADA, set()))
