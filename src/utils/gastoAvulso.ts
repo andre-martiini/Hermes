@@ -10,9 +10,12 @@ import { centavos, numero } from './bolsoAquisicoes';
 
 const BRT_MS = -3 * 3600 * 1000; // offset fixo: sem horário de verão desde 2019
 
-const CATEGORIAS_FORA_DO_CONSUMO = new Set(['transferencia', 'investimento', 'poupanca', 'reserva', 'conta fixa']);
+// Prefixos, para pegar singular e plural ("Investimentos", "Contas fixas").
+const FORA_DO_CONSUMO = ['transferenc', 'investiment', 'aporte', 'poupanc', 'reserva', 'conta fixa', 'contas fixa'];
 
-const DATA = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+// Mesmo espaço e mesma gramática do lado Python (lá o `\d` casaria dígito Unicode).
+const ESPACO = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+const DATA = /^([0-9]{4})-([0-9]{2})-([0-9]{2})(?:[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2})(\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})?)?$/;
 
 export interface LancamentoAvulso {
     amount?: unknown;
@@ -29,15 +32,18 @@ export interface SettingsOrcamento {
 }
 
 function normal(texto: unknown): string {
-    return String(texto ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+    return String(texto ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(ESPACO, '').toLowerCase();
 }
 
 /** [ano, mês 1-12] do lançamento no fuso de Brasília, ou null se ilegível. */
 export function mesBrt(data: unknown): [number, number] | null {
-    const m = DATA.exec(String(data ?? '').trim());
+    const m = DATA.exec(String(data ?? '').replace(ESPACO, ''));
     if (!m) return null;
-    const [, ano, mes, dia, hora, minuto, seg, fuso] = m;
-    if (hora === undefined) return [Number(ano), Number(mes)];
+    const [, ano, mes, dia, hora, minuto, seg, fracao, fuso] = m;
+    // Meia-noite UTC exata é o que o campo de data do app grava para "só o dia".
+    const meiaNoiteUtc = fuso === 'Z' && hora === '00' && minuto === '00' && (seg ?? '00') === '00'
+        && !/[1-9]/.test(fracao ?? '');
+    if (hora === undefined || meiaNoiteUtc) return [Number(ano), Number(mes)];
     let utc = Date.UTC(Number(ano), Number(mes) - 1, Number(dia), Number(hora), Number(minuto), Number(seg ?? 0));
     if (fuso && fuso !== 'Z') {
         const sinal = fuso[0] === '-' ? -1 : 1;
@@ -52,7 +58,8 @@ export function gastoAvulsoCentavos(transacoes: LancamentoAvulso[], ano: number,
     const vistos = new Set<string>();
     for (const t of transacoes) {
         if (t.status === 'deleted') continue;
-        if (CATEGORIAS_FORA_DO_CONSUMO.has(normal(t.category))) continue;
+        const categoria = normal(t.category);
+        if (FORA_DO_CONSUMO.some(p => categoria.startsWith(p))) continue;
         const m = mesBrt(t.date);
         if (!m || m[0] !== ano || m[1] !== mes) continue;
         const chaves = [['g', t.google_message_id], ['p', t.pix_id]]
@@ -67,8 +74,8 @@ export function gastoAvulsoCentavos(transacoes: LancamentoAvulso[], ano: number,
 
 /** Orçamento do mês (o do mês, senão o geral), ou null quando não há. */
 export function orcamentoCentavos(settings: SettingsOrcamento | null | undefined, ano: number, mes: number): number | null {
-    const doMes = numero(settings?.monthlyBudgets?.[`${ano}-${String(mes).padStart(2, '0')}`]);
-    const valor = doMes > 0 ? doMes : numero(settings?.monthlyBudget);
+    const doMes = settings?.monthlyBudgets?.[`${ano}-${String(mes).padStart(2, '0')}`];
+    const valor = numero(doMes !== undefined && doMes !== null ? doMes : settings?.monthlyBudget);
     return valor > 0 ? centavos(valor) : null;
 }
 
@@ -78,7 +85,8 @@ export function resumoDoMes(transacoes: LancamentoAvulso[], settings: SettingsOr
     return { gasto, orcamento, saldo: orcamento === null ? null : orcamento - gasto };
 }
 
-export function mesAtualBrt(agora: Date = new Date()): [number, number] {
+/** [ano, mês 1-12, dia] de agora em Brasília. */
+export function hojeBrt(agora: Date = new Date()): [number, number, number] {
     const local = new Date(agora.getTime() + BRT_MS);
-    return [local.getUTCFullYear(), local.getUTCMonth() + 1];
+    return [local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate()];
 }

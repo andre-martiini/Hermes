@@ -7,11 +7,14 @@ lados usam a MESMA fixture; mudou a regra aqui, muda la.
 
 A regra, e o que ela NAO resolve:
 - conta so o que esta em `finance_transactions` e nao esta `deleted`;
-- o mes e o de Brasilia. Data so com dia ("2026-10-28") vale o dia escrito; data
-  com hora e sem fuso e UTC, como `parse_iso_date` do `sync_pix_emails` le;
+- o mes e o de Brasilia. Data so com dia ("2026-10-28") vale o dia escrito, e
+  meia-noite UTC exata tambem: e o que o campo de data do app grava
+  (`new Date("2026-11-01").toISOString()`). Data com hora e sem fuso e UTC, como
+  `parse_iso_date` do `sync_pix_emails` le;
 - o mesmo `google_message_id` ou `pix_id` conta uma vez;
 - categoria de movimentacao que nao e consumo (transferencia, investimento,
-  poupanca, reserva, conta fixa) fica fora.
+  aporte, poupanca, reserva, conta fixa, no singular ou plural) fica fora;
+- orcamento do mes gravado (mesmo 0) vence o geral; 0 = sem orcamento, sem saldo.
 NAO separa sozinha um resumo mensal lancado a mao ("Mercado (outubro)") dos Pix
 individuais que ele ja inclui: nao ha campo que ligue um ao outro. Isso so a
 limpeza dos lancamentos resolve.
@@ -26,15 +29,20 @@ from bolso_aquisicoes import centavos, numero
 # ponytail: offset fixo; o Brasil nao tem horario de verao desde 2019. Se voltar, trocar por zoneinfo nos dois lados.
 BRT = timezone(timedelta(hours=-3))
 
-CATEGORIAS_FORA_DO_CONSUMO = {"transferencia", "investimento", "poupanca", "reserva", "conta fixa"}
+# Prefixos, para pegar singular e plural ("Investimentos", "Contas fixas").
+FORA_DO_CONSUMO = ("transferenc", "investiment", "aporte", "poupanc", "reserva", "conta fixa", "contas fixa")
 
+# `[0-9]` e espaco explicito, e nao `\d`/`strip()`: o `\d` do Python casa digito
+# Unicode e o `strip()` remove outro conjunto que o `trim()` do JS (ver bolso_aquisicoes).
+_ESPACO = " \t\n\r\f\v"
 _DATA = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
+    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2})(\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})?)?$")
 
 
 def _normal(texto) -> str:
     sem_acento = unicodedata.normalize("NFKD", str(texto or ""))
-    return "".join(c for c in sem_acento if not unicodedata.combining(c)).strip().lower()
+    return "".join(c for c in sem_acento if not unicodedata.combining(c)).strip(_ESPACO).lower()
 
 
 def mes_brt(data):
@@ -43,11 +51,13 @@ def mes_brt(data):
         dt = data if data.tzinfo else data.replace(tzinfo=timezone.utc)
         local = dt.astimezone(BRT)
         return local.year, local.month
-    m = _DATA.match(str(data or "").strip())
+    m = _DATA.match(str(data or "").strip(_ESPACO))
     if not m:
         return None
-    ano, mes, dia, hora, minuto, seg, fuso = m.groups()
-    if hora is None:
+    ano, mes, dia, hora, minuto, seg, fracao, fuso = m.groups()
+    # ponytail: um Pix real as 21:00:00.000 de Brasilia tambem cairia aqui; com segundos e ms zerados, improvavel.
+    meia_noite_utc = fuso == "Z" and (hora, minuto, seg or "00") == ("00", "00", "00") and not (fracao or ".0").strip(".0")
+    if hora is None or meia_noite_utc:
         return int(ano), int(mes)
     dt = datetime(int(ano), int(mes), int(dia), int(hora), int(minuto), int(seg or 0), tzinfo=timezone.utc)
     if fuso and fuso != "Z":
@@ -63,11 +73,11 @@ def gasto_avulso_centavos(transacoes, ano: int, mes: int) -> int:
     for t in transacoes:
         if t.get("status") == "deleted":
             continue
-        if _normal(t.get("category")) in CATEGORIAS_FORA_DO_CONSUMO:
+        if _normal(t.get("category")).startswith(FORA_DO_CONSUMO):
             continue
         if mes_brt(t.get("date")) != (ano, mes):
             continue
-        chaves = {("g", t.get("google_message_id")), ("p", t.get("pix_id"))} - {("g", None), ("p", None), ("g", ""), ("p", "")}
+        chaves = {f"{k}:{v}" for k, v in (("g", t.get("google_message_id")), ("p", t.get("pix_id"))) if v not in (None, "")}
         if chaves & vistos:
             continue
         vistos |= chaves
@@ -78,8 +88,9 @@ def gasto_avulso_centavos(transacoes, ano: int, mes: int) -> int:
 def orcamento_centavos(settings: dict, ano: int, mes: int):
     """Orcamento do mes (o do mes, senao o geral), ou None quando nao ha."""
     settings = settings or {}
-    do_mes = numero((settings.get("monthlyBudgets") or {}).get(f"{ano}-{mes:02d}"))
-    valor = do_mes if do_mes > 0 else numero(settings.get("monthlyBudget"))
+    por_mes = settings.get("monthlyBudgets") or {}
+    chave = f"{ano}-{mes:02d}"
+    valor = numero(por_mes[chave] if por_mes.get(chave) is not None else settings.get("monthlyBudget"))
     return centavos(valor) if valor > 0 else None
 
 

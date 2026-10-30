@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-10-30T19:11:23.687Z",
+        "reason": "user confirmed (30/10/2026): mesma fonte, grafia minúscula em index.css:1"
+      }
+    ]
+  }
+}

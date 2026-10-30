@@ -1960,7 +1960,8 @@ def sync_pix_emails(service, sync_ref, logs):
                 'pix_id': data.get('pix_id'),
                 'google_message_id': data.get('google_message_id'),
                 'status': data.get('status'),
-                'category': data.get('category')
+                'category': data.get('category'),
+                'data_original': data.get('date')  # gasto_avulso lê o texto: "2026-11-01" é o dia 1º, não 31/10 21h
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
@@ -2209,12 +2210,13 @@ def sync_pix_emails(service, sync_ref, logs):
                     }
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
                     inseridos_ou_alterados += 1
-                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id, 'status': None, 'category': 'Geral'})
+                    existing_transactions.append({**new_record, 'doc_id': doc_ref.id, 'date': dt, 'status': None, 'data_original': iso_date})
 
                     emit_notification_backend(
                         "Gasto Realizado via Pix",
                         gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
-                            existing_transactions, finance_settings_data, ano_brt, mes_brt)),
+                            [dict(t, date=t['data_original']) for t in existing_transactions],
+                            finance_settings_data, ano_brt, mes_brt)),
                         'expense', 'financeiro'
                     )
 

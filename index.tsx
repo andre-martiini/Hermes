@@ -36,7 +36,7 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
-import { gastoAvulsoCentavos, mesAtualBrt, resumoDoMes } from './src/utils/gastoAvulso';
+import { hojeBrt, resumoDoMes } from './src/utils/gastoAvulso';
 import { comDinheiro, comDinheiroNaLista } from './src/utils/dinheiroFirestore';
 import { planejarRendasDeServicos } from './src/utils/rendasDeServico';
 // Importações dos módulos extraídos pelo split.js
@@ -2185,14 +2185,13 @@ const App: React.FC = () => {
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
     if (appSettings.notifications.budgetRisk.enabled) {
       // Mesma conta da notificação de Pix do Telegram (functions/gasto_avulso.py).
-      const [anoBrt, mesBrtAtual] = mesAtualBrt();
+      const [anoBrt, mesBrtAtual, currentDay] = hojeBrt();
       const currentMonthStr = `${anoBrt}-${String(mesBrtAtual).padStart(2, '0')}`;
       const resumoMes = resumoDoMes(financeTransactions, financeSettings, anoBrt, mesBrtAtual);
       const monthlyBudget = (resumoMes.orcamento ?? 0) / 100;
       const totalSpend = resumoMes.gasto / 100;
       if (monthlyBudget > 0) {
         const daysInMonth = new Date(anoBrt, mesBrtAtual, 0).getDate();
-        const currentDay = new Date(Date.now() - 3 * 3600 * 1000).getUTCDate();
         const budgetRatio = totalSpend / monthlyBudget;
         const timeRatio = currentDay / daysInMonth;
         // Condition: Over budget velocity AND (New day OR spending increased since last notification)
@@ -6080,7 +6079,10 @@ const App: React.FC = () => {
                       setCurrentMonth(m);
                       setCurrentYear(y);
                     }}
-                    currentMonthTotal={gastoAvulsoCentavos(financeTransactions, currentYear, currentMonth + 1) / 100}
+                    currentMonthTotal={financeTransactions.filter(t => {
+                      const d = new Date(t.date);
+                      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                    }).reduce((acc, curr) => acc + curr.amount, 0)}
                     currentMonthIncome={incomeEntries.filter(e => {
                       return e.month === currentMonth && e.year === currentYear && e.isReceived;
                     }).reduce((acc, curr) => acc + curr.amount, 0)}
