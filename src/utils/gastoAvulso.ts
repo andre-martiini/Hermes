@@ -1,14 +1,16 @@
 /**
- * Gasto avulso do mês e saldo do orçamento — espelho de `functions/gasto_avulso.py`.
+ * Gasto do teto do PicPay no mês e quanto resta — espelho de `functions/gasto_avulso.py`.
  *
  * A notificação "Gasto Realizado via Pix" (Telegram) e o "Alerta de Orçamento"
  * do app têm de mostrar o mesmo número. Os testes dos dois lados usam a MESMA
- * fixture; mudou a regra aqui, muda lá. A regra e o que ela não resolve estão
- * no docstring do módulo Python.
+ * fixture; mudou a regra aqui, muda lá. O modelo (o orçamento é o teto da conta
+ * PicPay) e o que a regra não resolve estão no docstring do módulo Python.
  */
 import { centavos, numero } from './bolsoAquisicoes';
 
 const BRT_MS = -3 * 3600 * 1000; // offset fixo: sem horário de verão desde 2019
+
+export const CONTA_DO_TETO = 'picpay';
 
 // Prefixos, para pegar singular e plural ("Investimentos", "Contas fixas").
 const FORA_DO_CONSUMO = ['transferenc', 'investiment', 'aporte', 'poupanc', 'reserva', 'conta fixa', 'contas fixa'];
@@ -22,6 +24,7 @@ export interface LancamentoAvulso {
     date?: unknown;
     status?: unknown;
     category?: unknown;
+    conta?: unknown;
     google_message_id?: unknown;
     pix_id?: unknown;
 }
@@ -57,7 +60,7 @@ export function gastoAvulsoCentavos(transacoes: LancamentoAvulso[], ano: number,
     let total = 0;
     const vistos = new Set<string>();
     for (const t of transacoes) {
-        if (t.status === 'deleted') continue;
+        if (t.status === 'deleted' || normal(t.conta) !== CONTA_DO_TETO) continue;
         const categoria = normal(t.category);
         if (FORA_DO_CONSUMO.some(p => categoria.startsWith(p))) continue;
         const m = mesBrt(t.date);

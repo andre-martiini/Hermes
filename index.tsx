@@ -2200,9 +2200,13 @@ const App: React.FC = () => {
         const hasSpendIncreased = totalSpend > lastNotifiedSpend;
         if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1 && hasSpendIncreased && isNewDay) {
           const saldoDisponivel = monthlyBudget - totalSpend;
+          const diasRestantes = daysInMonth - currentDay + 1;
+          const linhaSaldo = saldoDisponivel > 0
+            ? `Restam R$ ${saldoDisponivel.toFixed(2)} no teto (R$ ${(Math.floor((saldoDisponivel * 100) / diasRestantes) / 100).toFixed(2)} por dia até o fim do mês)`
+            : `Teto do mês estourado em R$ ${(-saldoDisponivel).toFixed(2)}`;
           emitNotification(
             "Alerta de Orçamento",
-            `Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.\nSaldo disponível atual R$ ${saldoDisponivel.toFixed(2)}`,
+            `Você já usou ${(budgetRatio * 100).toFixed(0)}% do teto do PicPay em ${(timeRatio * 100).toFixed(0)}% do mês.\n${linhaSaldo}`,
             'warning',
             'financeiro',
             `budget-${todayStr}`

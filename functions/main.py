@@ -1961,6 +1961,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 'google_message_id': data.get('google_message_id'),
                 'status': data.get('status'),
                 'category': data.get('category'),
+                'conta': data.get('conta'),
                 'data_original': data.get('date')  # gasto_avulso lê o texto: "2026-11-01" é o dia 1º, não 31/10 21h
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
@@ -1997,7 +1998,8 @@ def sync_pix_emails(service, sync_ref, logs):
                                        'pix_recebedor': d.get('pix_recebedor')})
 
         # Gasto avulso e saldo das notificações de Pix: mesma regra do "Alerta de Orçamento" do app (gasto_avulso).
-        ano_brt, mes_brt = gasto_avulso.mes_atual_brt()
+        hoje_brt = gasto_avulso.hoje_brt()
+        ano_brt, mes_brt = hoje_brt[:2]
         finance_settings_doc = db.collection('finance_settings').document('config').get()
         finance_settings_data = finance_settings_doc.to_dict() if finance_settings_doc.exists else {}
 
@@ -2214,6 +2216,9 @@ def sync_pix_emails(service, sync_ref, logs):
                         'sprint': sprint, 'category': 'Geral',
                         'google_message_id': msg_id, 'pix_id': pix_id
                     }
+                    conta = conciliacao_pix.conta_do_email(sender, content)
+                    if conta:
+                        new_record['conta'] = conta
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
                     inseridos_ou_alterados += 1
                     existing_transactions.append({**new_record, 'doc_id': doc_ref.id, 'date': dt, 'status': None, 'data_original': iso_date})
@@ -2222,7 +2227,7 @@ def sync_pix_emails(service, sync_ref, logs):
                         "Gasto Realizado via Pix",
                         gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
                             [dict(t, date=t['data_original']) for t in existing_transactions],
-                            finance_settings_data, ano_brt, mes_brt)),
+                            finance_settings_data, ano_brt, mes_brt), hoje_brt),
                         'expense', 'financeiro'
                     )
 
@@ -10279,7 +10284,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "data_especifica": data_especifica,
             }, _ctx())
 
-        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
+        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None, conta: str = None):
             """
             Registra uma nova entrada financeira (renda, obrigacao_fixa ou transacao_avulsa).
             Obrigatório apresentar rascunho (draft) ao usuário para confirmação antes de persistir.
@@ -10287,11 +10292,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - tipo: 'renda', 'obrigacao_fixa' ou 'transacao_avulsa'
             - valor: valor numérico
             - mes/ano: período de competência (opcional)
+            - conta: só para transacao_avulsa, 'picpay', 'xp', 'caixa' ou 'mista'; só 'picpay' entra no teto do mês.
             - categoria não deve ser inferida nem solicitada por enquanto; o sistema grava "Geral" internamente.
             """
             try:
                 from tools.telegram_extended import execute
-                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data}
+                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data, "conta": conta}
                 return execute("registrar_item_financeiro_v2", slots, db)
             except Exception as e:
                 return f"Erro ao registrar item financeiro: {e}"

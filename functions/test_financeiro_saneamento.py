@@ -56,6 +56,19 @@ class TestNaoEComprovante(unittest.TestCase):
         self.assertFalse(cp.nao_e_comprovante(None))
 
 
+class TestContaDoEmail(unittest.TestCase):
+    def test_google_pay_e_picpay(self):
+        self.assertEqual(cp.conta_do_email("Google Pay <payments-noreply@google.com>",
+                                           "Seu Pix de R$8,90 no Google Pay foi realizado com sucesso"), "picpay")
+        self.assertEqual(cp.conta_do_email("PicPay <naoresponda@picpay.com>", "Pix enviado R$ 10,00"), "picpay")
+
+    def test_sem_sinal_nao_adivinha(self):
+        # registro.br: em outubro saiu da XP, mas o e-mail não diz.
+        self.assertIsNone(cp.conta_do_email("registro.br <cobranca@registro.br>",
+                                            "Confirmacao de pagamento - zelua.com.br R$ 40,00"))
+        self.assertIsNone(cp.conta_do_email("André <andre.martiini@gmail.com>", "Fwd: Pix realizado R$ 560,00"))
+
+
 class TestRubricaDoRecebedor(unittest.TestCase):
     def test_padaria_paga_na_cielo_nao_e_fatura_elo(self):
         recebedor = cp.extrair_recebedor(SNIPPET_PADARIA)
