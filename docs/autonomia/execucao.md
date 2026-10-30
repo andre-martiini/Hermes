@@ -655,31 +655,6 @@ pacote_concluido: P07
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 13/N -- sweep persistido de um pedido (autonomy/sweep_persistido.py, passo 4, wiring de persistência): decidir_varredura (pura) escolhe lease_vencida / retentativa_promovida / espera_vencida pelo status e varrer_pedido(db, request_id, agora) grava via atualizar_pedido (agora resolvido uma vez fora da transação; nada a varrer = nada gravado; diagnóstico devolvido é o da gravação que valeu). Estado incoerente (RESERVADO/EM_ANDAMENTO sem lease, retentativa sem horário, espera/verificação sem lease) sobe ValueError sem gravar. Nada chama o módulo em produção (shadow/off)."
-estado: validado
-inicio: "2026-10-30T10:50:00Z"
-fim: "2026-10-30T11:25:00Z"
-decisoes:
-  - id: p08-sub13-triagem
-    motivo: "PRs abertas: #565 (email/melhorias), #561 (finanças, muda saldo) e #556 (excluir_entrada_diario, apaga dados, pede aval do André): outra linha, nenhuma tocada. Nenhuma PR da autonomia pendente nem execução paralela."
-  - id: p08-sub13-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P08 sub 10 arquivado em execucao-archive-p08sub10.md."
-  - id: p08-sub13-sem-lease
-    motivo: "Espera/verificação SEM lease continua ValueError (contrato validado de varrer_espera_vencida, com teste próprio); não alterado aqui. Fixado por teste em sweep_persistido. Nada no domínio hoje cria AGUARDANDO_EXTERNO sem lease; decidir no wiring se o criador deve sempre manter lease."
-  - id: p08-sub13-escopo
-    motivo: "Fora de escopo: listar pedidos candidatos (consulta status+lease), persistir a fila de diagnóstico, agendamento do sweep."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4991 OK (diário, P08 sub 12); DEPOIS 4999 OK (suíte completa; 8 testes novos em test_autonomy_sweep_persistido, depois +1 do achado: 9 novos, rodados com test_autonomy_sweep: 38 OK)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 1 achado de confiança média -- espera/verificação sem lease levanta ValueError a cada passada. Decisão: é o contrato validado do sweep puro (não alterado); fixado por teste e registrado como pendência do wiring. Limites, fuso, não-escrita e diagnóstico verificados sem bug. Sem rodada 2: nenhuma mudança de código após a rodada (só teste)."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, listagem de candidatos + persistência da fila de diagnóstico ao redor de varrer_pedido, usar atualizar_pedido com decidir_continuacao + aplicar_decisao_continuacao, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease (decidir se o criador sempre mantém lease), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
-```
-
----
-
-```yaml
 pacote: "P08 sub-entrega 14/N -- sweep em lote (autonomy/sweep_lote.py, passo 4, wiring de persistência): listar_candidatos (consulta where pedido.status in [reservado, em_andamento, retentativa_agendada, aguardando_externo, verificando] + order_by __name__) e varrer_candidatos(db, agora, limite, max_tentativas, max_paginas) paginando por cursor (start_after) e chamando varrer_pedido por pedido, com isolamento de falhas (erro vira item de erros; pedido apagado no meio é ignorado). ResultadoLote: candidatos, truncado, varridos, diagnosticos, erros. Nada chama o módulo em produção (shadow/off)."
 estado: validado
 inicio: "2026-10-30T14:04:00Z"
@@ -725,4 +700,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 2 achados reais -- run_id novo sem validação de id do Firestore (pedido ficaria impossível de acordar de novo) e run_id reutilizado sobrescrevendo o arquivo; corrigidos e cobertos por teste (e a leitura do arquivo foi posta antes das escritas, exigência das transações do Firestore). Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Codex na PR #571: 1 achado P2 real -- run_id NOVO já presente no arquivo de runs encerrados travaria o despertar seguinte (conflito ao arquivá-lo); agora lido e recusado na mesma transação, antes das escritas; coberto por teste. Rodada 3 (focada na correção do Codex, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, reconciliar_resultado_desconhecido persistindo também o run antigo (usar run_encerrado), FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 16/N -- reconciliação persistida de resultado desconhecido (autonomy/reconciliar_persistido.py, passo 5, wiring de persistência): reconciliar_pedido(db, request_id, efeito_ocorreu, agora, executor_id, run_id, continuar_em, duracao_segundos) liga reconciliar_resultado_desconhecido a atualizar_pedido (run_encerrado), no molde de acordar_pedido: pedido e run antigo fechado por timeout (se ainda ativo) gravados na MESMA transação em runs_encerrados/{run_id}. run_id validado como id do Firestore antes da transação quando efeito_ocorreu=True. Reaproveita ResultadoDespertar; sem mudança em módulo existente. Nada chama o módulo em produção (shadow/off)."
+estado: validado
+inicio: "2026-10-30T19:48:00Z"
+fim: "2026-10-30T20:20:00Z"
+decisoes:
+  - id: p08-sub16-triagem
+    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias/finanças/email/MCP): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela (última branch claude/ de autonomia há mais de 2h)."
+  - id: p08-sub16-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 13 arquivado em execucao-archive-p08sub13.md."
+  - id: p08-sub16-escopo
+    motivo: "Fora de escopo: FALHA_FINAL por reconciliação (exige fencing do ledger), worker HTTP, Cloud Tasks, agendamento."
+testes:
+  resultados:
+    - "functions/ completo ANTES 5107 OK (diário, P08 sub 15); DEPOIS 5122 OK (205s; 10 testes novos em test_autonomy_reconciliar_persistido; o restante vem de merges de outras linhas)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada (run_id, retentativa que mantém o run fechado em pedido.run, reexecução da transformação, efeito_ocorreu não-bool e arquivamento duplicado conferidos). Não verificado contra Firestore real."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
