@@ -44,6 +44,18 @@ class TestRecebedor(unittest.TestCase):
         self.assertIsNone(cp.extrair_recebedor("Pagamento Recebido @fulano pagou você R$ 25,00"))
 
 
+class TestNaoEComprovante(unittest.TestCase):
+    def test_email_do_github_do_pr_573(self):
+        # "Re: [andre-martiini/Hermes] ... causa do −R$ 6.277" virou um "Pix" de R$ 6.277 em 30/10/2026.
+        self.assertTrue(cp.nao_e_comprovante('"André" <notifications@github.com>'))
+
+    def test_comprovantes_e_encaminhamentos_passam(self):
+        self.assertFalse(cp.nao_e_comprovante("Google Pay <payments-noreply@google.com>"))
+        self.assertFalse(cp.nao_e_comprovante("PicPay <naoresponda@picpay.com>"))
+        self.assertFalse(cp.nao_e_comprovante("André <andre.martiini@gmail.com>"))  # "Fwd: Pix realizado"
+        self.assertFalse(cp.nao_e_comprovante(None))
+
+
 class TestRubricaDoRecebedor(unittest.TestCase):
     def test_padaria_paga_na_cielo_nao_e_fatura_elo(self):
         recebedor = cp.extrair_recebedor(SNIPPET_PADARIA)

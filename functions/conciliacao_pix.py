@@ -44,6 +44,17 @@ def palavras_chave(descricao: str) -> list[str]:
             if len(p) > 2 and p not in _GENERICAS]
 
 
+def nao_e_comprovante(remetente: str) -> bool:
+    """Notificação do GitHub nunca é comprovante de Pix.
+
+    A busca do Gmail pega todo e-mail com "Pix", e o primeiro "R$" do assunto vira o
+    valor: o e-mail do PR #573 ("... causa do −R$ 6.277") virou um Pix de R$ 6.277.
+    Encaminhamento ("Fwd: Pix realizado") NÃO entra aqui: é como o André registra
+    comprovante de outro banco.
+    """
+    return "github.com" in str(remetente or "").lower()
+
+
 def extrair_recebedor(texto: str) -> str | None:
     achado = _RECEBEDOR.search(str(texto or ""))
     if not achado:
