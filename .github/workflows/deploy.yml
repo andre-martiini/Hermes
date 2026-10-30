@@ -56,7 +56,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Configurar Python 3.11
         uses: actions/setup-python@v5
