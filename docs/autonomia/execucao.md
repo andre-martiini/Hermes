@@ -650,29 +650,6 @@ pacote_concluido: P07
 
 
 ```yaml
-pacote: "P08 sub-entrega 10/N -- reconciliação de RESULTADO_DESCONHECIDO (autonomy/runner_aplicacao.py): função pura reconciliar_resultado_desconhecido(pedido, efeito_ocorreu, agora, ...). Exige lease anterior vencida. efeito_ocorreu=True -> VERIFICANDO com lease geração+1 e run novo (nunca retenta: duplicaria efeito); False -> RETENTATIVA_AGENDADA com tentativas+1, continuar_em futuro obrigatório e recusa acima de DEFAULT_MAX_TENTATIVAS. Devolve (pedido, run_antigo) para o wiring persistir. Sem I/O (shadow/off)."
-estado: validado
-inicio: "2026-10-29T10:48:00Z"
-fim: "2026-10-29T11:10:00Z"
-decisoes:
-  - id: p08-sub10-triagem
-    motivo: "Única PR aberta (#556, excluir_entrada_diario, outra linha) apaga dados e a própria descrição pede aval do André: não tocada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub10-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 7 arquivado em execucao-archive-p08sub7.md."
-  - id: p08-sub10-escopo
-    motivo: "FALHA_FINAL por reconciliação fica fora (selar o ledger exige fencing com lease válida); a evidência efeito_ocorreu é responsabilidade do chamador/wiring."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4912 OK (diário, P08 sub 9); DEPOIS 4950 OK (+8 em test_autonomy_runner_aplicacao; o restante vem de merges de outras linhas)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 1 achado real -- retentativa por reconciliação contornava o teto de tentativas; corrigido (ValueError acima de DEFAULT_MAX_TENTATIVAS, também recusa tentativas bool) e coberto por teste. Rodada 2 (focada na correção): não achei nada."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, sweep, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
-```
-
----
-
-```yaml
 pacote: "P08 sub-entrega 11/N -- serialização do pedido durável (autonomy/pedido_serializacao.py, passo 4, base do wiring de persistência): funções puras pedido_para_dict / pedido_de_dict. Documento só com tipos JSON/Firestore (instantes ISO UTC), leitura estrita (ValueError para chave ausente/extra, bool como int, instante sem fuso, status desconhecido, chave não-str aninhada, tupla, vazios em lease/ledger, sequencia de checkpoint não crescente, resultado sem resultado_registrado_em, lease.generation<1, run de outro pedido ou ativo divergente da lease, limites do domínio como checkpoint grande). pedido_para_dict relê o que produz e recusa o que a leitura recusaria. NaN no resultado faz round-trip. Sem I/O (shadow/off)."
 estado: validado
 inicio: "2026-10-29T13:52:00Z"
@@ -714,4 +691,29 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 2 achados reais de validação -- request_id reservado do Firestore passava; int fora de int64 e chaves vazias/__x__ eram gravados sem validação (erro opaco dentro da transação). Corrigidos e cobertos. Rodada 2 (focada na correção): 3 achados -- profundidade de mapa >20, surrogate solitário em ids/chaves/valores, chave >1500 bytes; corrigidos e cobertos por teste. Codex na PR #564: 1 achado P2 real -- array dentro de array passava na validação; corrigido e coberto por teste. Rodada 3 (focada na correção do Codex, agente sem contexto, somente leitura): não achei nada. Não verificado contra o servidor real do Firestore (regras citadas da documentação)."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, usar atualizar_pedido com decidir_continuacao + aplicar_decisao_continuacao, sweep persistindo, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 13/N -- sweep persistido de um pedido (autonomy/sweep_persistido.py, passo 4, wiring de persistência): decidir_varredura (pura) escolhe lease_vencida / retentativa_promovida / espera_vencida pelo status e varrer_pedido(db, request_id, agora) grava via atualizar_pedido (agora resolvido uma vez fora da transação; nada a varrer = nada gravado; diagnóstico devolvido é o da gravação que valeu). Estado incoerente (RESERVADO/EM_ANDAMENTO sem lease, retentativa sem horário, espera/verificação sem lease) sobe ValueError sem gravar. Nada chama o módulo em produção (shadow/off)."
+estado: validado
+inicio: "2026-10-30T10:50:00Z"
+fim: "2026-10-30T11:25:00Z"
+decisoes:
+  - id: p08-sub13-triagem
+    motivo: "PRs abertas: #565 (email/melhorias), #561 (finanças, muda saldo) e #556 (excluir_entrada_diario, apaga dados, pede aval do André): outra linha, nenhuma tocada. Nenhuma PR da autonomia pendente nem execução paralela."
+  - id: p08-sub13-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 10 arquivado em execucao-archive-p08sub10.md."
+  - id: p08-sub13-sem-lease
+    motivo: "Espera/verificação SEM lease continua ValueError (contrato validado de varrer_espera_vencida, com teste próprio); não alterado aqui. Fixado por teste em sweep_persistido. Nada no domínio hoje cria AGUARDANDO_EXTERNO sem lease; decidir no wiring se o criador deve sempre manter lease."
+  - id: p08-sub13-escopo
+    motivo: "Fora de escopo: listar pedidos candidatos (consulta status+lease), persistir a fila de diagnóstico, agendamento do sweep."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4991 OK (diário, P08 sub 12); DEPOIS 4999 OK (suíte completa; 8 testes novos em test_autonomy_sweep_persistido, depois +1 do achado: 9 novos, rodados com test_autonomy_sweep: 38 OK)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): 1 achado de confiança média -- espera/verificação sem lease levanta ValueError a cada passada. Decisão: é o contrato validado do sweep puro (não alterado); fixado por teste e registrado como pendência do wiring. Limites, fuso, não-escrita e diagnóstico verificados sem bug. Sem rodada 2: nenhuma mudança de código após a rodada (só teste)."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, listagem de candidatos + persistência da fila de diagnóstico ao redor de varrer_pedido, usar atualizar_pedido com decidir_continuacao + aplicar_decisao_continuacao, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease (decidir se o criador sempre mantém lease), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
