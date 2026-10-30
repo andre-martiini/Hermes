@@ -2,8 +2,8 @@
 
 Liga `reconciliar_resultado_desconhecido` (pura) ao repositório transacional,
 no molde de `acordar_persistido`: lê o pedido, reconcilia e grava o pedido junto
-com o run antigo, se ainda ativo e fechado por timeout
-(`runs_encerrados/{run_id}`), no mesmo read-modify-write. `agora` é resolvido
+com o run antigo (fechado por timeout aqui ou já terminal do sweep, quando o
+run novo o substitui) em `runs_encerrados/{run_id}`, no mesmo read-modify-write. `agora` é resolvido
 uma vez fora da transação. Pedido que a função pura recusa (lease válida,
 status errado, teto de tentativas) sobe ValueError/LeaseInvalida sem gravar.
 Nada chama este módulo em produção (shadow/off).
@@ -43,6 +43,12 @@ def reconciliar_pedido(
             atual, efeito_ocorreu, agora_resolvido, executor_id=executor_id, run_id=run_id,
             continuar_em=continuar_em, duracao_segundos=duracao_segundos,
         )
+        # Run já terminal (fechado pelo sweep) que o run novo vai substituir em pedido.run:
+        # sem arquivá-lo, ele some. O fechado por esta chamada (antigo) tem precedência.
+        if antigo is None and atual.run is not None and (
+            novo.run is None or novo.run.run_id != atual.run.run_id
+        ):
+            antigo = atual.run
         ultimo["antigo"] = antigo
         return novo
 

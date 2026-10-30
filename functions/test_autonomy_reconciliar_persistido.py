@@ -36,7 +36,9 @@ class TestReconciliarPedido(unittest.TestCase):
         self.assertEqual(r.pedido.status, RequestStatus.VERIFICANDO)
         self.assertEqual(r.pedido.run.run_id, "run-2")
         self.assertEqual(repo.ler_pedido(self.db, self.rid), r.pedido)
-        self.assertIsNone(r.run_antigo)  # sweep já tinha fechado o run
+        # sweep já tinha fechado o run: ele é arquivado ao ser substituído pelo run do verificador
+        self.assertEqual(r.run_antigo, self.p.run)
+        self.assertEqual(self.db.docs[f"{self.arq}/{self.p.run.run_id}"]["run_id"], self.p.run.run_id)
         self.assertEqual(self.db.docs[self.rid]["revisao"], 2)
 
     def test_efeito_nao_ocorreu_persiste_retentativa(self):
@@ -45,6 +47,8 @@ class TestReconciliarPedido(unittest.TestCase):
         self.assertEqual(r.pedido.status, RequestStatus.RETENTATIVA_AGENDADA)
         self.assertEqual(r.pedido.tentativas, self.p.tentativas + 1)
         self.assertEqual(repo.ler_pedido(self.db, self.rid), r.pedido)
+        self.assertIsNone(r.run_antigo)  # run terminal permanece em pedido.run
+        self.assertNotIn(f"{self.arq}/{self.p.run.run_id}", self.db.docs)
 
     def test_run_antigo_ativo_e_arquivado_na_mesma_transacao(self):
         db, p, agora = self._com_run_ativo()
