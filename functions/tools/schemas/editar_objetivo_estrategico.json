@@ -1,6 +1,6 @@
 {
   "name": "editar_objetivo_estrategico",
-  "description": "Edita campos de um objetivo estratégico existente",
+  "description": "Edita campos de um objetivo estratégico existente. Só muda o que for enviado; toda mudança fica no histórico (estrategia_historico) com antes e depois. Para pausar: status 'pausada' com dataRetomada.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -22,7 +22,7 @@
       },
       "status": {
         "type": "string",
-        "description": "Novo status"
+        "description": "Novo status: 'ativo', 'revisar', 'concluido' ou 'pausada' (exige dataRetomada; sair da pausa apaga a data)."
       },
       "diretrizes": {
         "type": "array",
@@ -54,6 +54,83 @@
       "gerida_por_acoes": {
         "type": "boolean",
         "description": "Se o objetivo e servido por acoes vinculadas ou por dado coletado. Com false ele fica fora de toda sugestao de vinculo e de elevacao."
+      },
+      "dataRetomada": {
+        "type": "string",
+        "description": "Só com status 'pausada': data de retomada, YYYY-MM-DD. A fila de atenção avisa quando chegar."
+      },
+      "ciclo": {
+        "type": "object",
+        "description": "Ciclo do perfil: {\"inicio\": \"YYYY-MM-DD\", \"fim\": \"YYYY-MM-DD\"}.",
+        "properties": {
+          "inicio": {
+            "type": "string"
+          },
+          "fim": {
+            "type": "string"
+          }
+        }
+      },
+      "linhaBase": {
+        "type": "object",
+        "description": "Linha de base: {\"data\": \"YYYY-MM-DD\", \"valores\": {chave: número}} (dinheiro em reais).",
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "valores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "indicadores": {
+        "type": "array",
+        "description": "Indicadores NUMÉRICOS do perfil (substitui a lista inteira). Diferente dos indicadores de sucesso em texto, que se editam com gerenciar_item_estrategico.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "chave": {
+              "type": "string"
+            },
+            "rotulo": {
+              "type": "string"
+            },
+            "unidade": {
+              "type": "string",
+              "description": "kg, cm, R$..."
+            },
+            "sentido": {
+              "type": "string",
+              "enum": [
+                "menor_melhor",
+                "maior_melhor"
+              ]
+            },
+            "fonte": {
+              "type": "string",
+              "enum": [
+                "peso",
+                "cintura",
+                "guardado_acumulado",
+                "manual"
+              ]
+            },
+            "inicial": {
+              "type": "number"
+            },
+            "alvoFinal": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "chave",
+            "sentido",
+            "fonte"
+          ]
+        }
       }
     },
     "required": [

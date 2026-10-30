@@ -406,7 +406,8 @@ export interface FinanceSettings {
 
 export type EstrategiaPilar = 'carreira' | 'financas' | 'saude' | 'intelectual' | 'estilo_vida';
 export type EstrategiaTipoMeta = 'absoluta' | 'relativa_qualitativa';
-export type EstrategiaStatus = 'ativo' | 'concluido' | 'revisar';
+/** `pausada` (30/10/2026) exige `dataRetomada`: sai de paradas, vínculo, elevação e check-in até lá. */
+export type EstrategiaStatus = 'ativo' | 'concluido' | 'revisar' | 'pausada';
 
 export interface EstrategiaIndicadorSucesso {
     id: string;
@@ -488,6 +489,8 @@ export interface EstrategiaPessoal {
     ciclo?: { inicio: string; fim: string };
     linhaBase?: { data: string; valores: Record<string, number> };
     indicadores?: EstrategiaIndicadorPerfil[];
+    /** YYYY-MM-DD, só com `status: 'pausada'`; a fila de atenção avisa quando chega. */
+    dataRetomada?: string;
 }
 
 
@@ -1420,6 +1423,9 @@ export interface ResumoMeta {
     gerida_por_acoes: boolean;
     objetivo: string;
     status?: EstrategiaStatus;
+    /** Pausada até `data_retomada`: fora de `paradas` e da contagem de metas servidas. */
+    pausada?: boolean;
+    data_retomada?: string | null;
     acoes_hoje: number;
     titulos_hoje: string[];
     ultimo_movimento: string | null;

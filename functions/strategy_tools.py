@@ -14,11 +14,80 @@ from datetime import datetime, timezone
 from firebase_admin import firestore
 
 from bolso_aquisicoes import numero
-from perfil_estrategia import dia, id_legado
+from perfil_estrategia import FONTES, SENTIDOS, dia, id_legado
 
 PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
-STATUS_VALUES = {'ativo', 'concluido', 'revisar'}
+# `pausada` (30/10/2026): sai de "paradas", das sugestões de vínculo e de elevação e do
+# check-in, até `dataRetomada`; a fila de atenção avisa quando a data chega.
+STATUS_VALUES = {'ativo', 'concluido', 'revisar', 'pausada'}
 TIPOS = {'absoluta', 'relativa_qualitativa'}
+COLECAO_HISTORICO = 'estrategia_historico'
+_CAMPOS_PERFIL = ('ciclo', 'linhaBase', 'indicadores')
+
+
+def registrar_historico(destino, db, user_uid: str, objetivo_id: str, operacao: str,
+                        antes: dict, depois: dict, origem: str = "mcp") -> None:
+    """Antes e depois de toda mudança da estratégia, para reverter sem depender do diário.
+
+    `destino` é a transação em curso (grava junto, ou nada) ou None (grava direto).
+    Sentinelas do Firestore (DELETE_FIELD, SERVER_TIMESTAMP) viram None no registro.
+    """
+    def _limpo(valor):
+        if isinstance(valor, dict):
+            return {k: _limpo(v) for k, v in valor.items()}
+        if isinstance(valor, list):
+            return [_limpo(v) for v in valor]
+        return valor if isinstance(valor, (str, int, float, bool, type(None))) else None
+
+    registro = {"objetivo_id": objetivo_id, "userId": user_uid, "origem": origem, "operacao": operacao,
+                "antes": _limpo(antes), "depois": _limpo(depois),
+                "em": firestore.SERVER_TIMESTAMP, "em_iso": datetime.now(timezone.utc).isoformat()}
+    ref = db.collection(COLECAO_HISTORICO).document()
+    if destino is not None:
+        destino.set(ref, registro)
+    else:
+        ref.set(registro)
+
+
+def _validar_ciclo(valor):
+    if not isinstance(valor, dict):
+        return None, "ciclo_invalido"
+    inicio, fim = dia(valor.get("inicio")), dia(valor.get("fim"))
+    if not inicio or not fim or fim <= inicio:
+        return None, "ciclo_invalido"
+    return {"inicio": inicio.isoformat(), "fim": fim.isoformat()}, None
+
+
+def _validar_linha_base(valor):
+    if not isinstance(valor, dict) or not dia(valor.get("data")):
+        return None, "linhaBase_invalida"
+    valores, erro = _esperado(valor.get("valores") or {})
+    if erro:
+        return None, "linhaBase_invalida"
+    return {"data": dia(valor["data"]).isoformat(), "valores": valores}, None
+
+
+def _validar_indicadores(valor):
+    if not isinstance(valor, list):
+        return None, "indicadores_invalidos"
+    limpos, chaves = [], set()
+    for ind in valor:
+        if not isinstance(ind, dict):
+            return None, "indicadores_invalidos"
+        chave = str(ind.get("chave") or "").strip()
+        if not chave or chave in chaves or ind.get("sentido") not in SENTIDOS or ind.get("fonte") not in FONTES:
+            return None, "indicadores_invalidos"
+        chaves.add(chave)
+        limpo = {"chave": chave, "rotulo": str(ind.get("rotulo") or chave).strip(),
+                 "unidade": str(ind.get("unidade") or "").strip(), "sentido": ind["sentido"], "fonte": ind["fonte"]}
+        for campo in ("inicial", "alvoFinal"):
+            if ind.get(campo) is not None:
+                n = numero(ind[campo], None)
+                if n is None or isinstance(ind[campo], bool):
+                    return None, "indicadores_invalidos"
+                limpo[campo] = n
+        limpos.append(limpo)
+    return limpos, None
 
 # Fontes que o proprio sistema ja alimenta. Uma meta numerica ligada a uma delas
 # le o valor de la em vez de depender de alguem lembrar de atualizar `valorAtual`.
@@ -83,6 +152,8 @@ def criar_objetivo_estrategico(
     if tipo_norm not in TIPOS:
         tipo_norm = "relativa_qualitativa"
     status_norm = (status or "ativo").strip().lower()
+    if status_norm == "pausada":
+        return {"status": "error", "reason": "pausar_com_editar_objetivo_estrategico_e_dataRetomada"}
     if status_norm not in STATUS_VALUES:
         status_norm = "ativo"
 
@@ -148,12 +219,25 @@ def editar_objetivo_estrategico(
     metrica_unidade: str | None = None,
     metrica_fonte: str | None = None,
     gerida_por_acoes: bool | None = None,
+    ciclo: dict | None = None,
+    linhaBase: dict | None = None,
+    indicadores: list | None = None,
+    dataRetomada: str | None = None,
+    origem: str = "mcp",
 ) -> dict:
     ref, data = carregar_objetivo_estrategico(db, user_uid, objetivo_id)
     if not ref:
         return {"status": "error", "reason": "objetivo_nao_encontrado"}
 
     updates = {}
+    # Perfil de 3 meses: ciclo, linha de base e indicadores numéricos.
+    for campo, valor, validar in (("ciclo", ciclo, _validar_ciclo), ("linhaBase", linhaBase, _validar_linha_base),
+                                  ("indicadores", indicadores, _validar_indicadores)):
+        if valor is not None:
+            limpo, erro = validar(valor)
+            if erro:
+                return {"status": "error", "reason": erro}
+            updates[campo] = limpo
     if objetivoMacro is not None and str(objetivoMacro).strip():
         updates["objetivoMacro"] = str(objetivoMacro).strip()
     if pilar is not None:
@@ -175,6 +259,20 @@ def editar_objetivo_estrategico(
         updates["diretrizesDerivadas"] = dz
     if gerida_por_acoes is not None:
         updates["gerida_por_acoes"] = bool(gerida_por_acoes)
+
+    # Pausada exige data de retomada (passada agora ou já gravada); sair da pausa a apaga.
+    status_final = updates.get("status", str(data.get("status") or "").lower())
+    if dataRetomada not in (None, ""):
+        d = dia(dataRetomada)
+        if not d or len(str(dataRetomada).strip()) != 10:
+            return {"status": "error", "reason": "dataRetomada_invalida"}
+        if status_final != "pausada":
+            return {"status": "error", "reason": "dataRetomada_so_com_status_pausada"}
+        updates["dataRetomada"] = d.isoformat()
+    if status_final == "pausada" and not updates.get("dataRetomada") and not dia(data.get("dataRetomada")):
+        return {"status": "error", "reason": "pausada_exige_dataRetomada"}
+    if status_final != "pausada" and "dataRetomada" in data:
+        updates["dataRetomada"] = firestore.DELETE_FIELD
 
     # Métrica: só aplica se o objetivo é/torna-se absoluto
     tipo_final = updates.get("tipoMeta", data.get("tipoMeta"))
@@ -203,12 +301,15 @@ def editar_objetivo_estrategico(
     if not updates:
         return {"status": "noop", "reason": "nenhum_campo_alterado"}
 
+    alterados = [k for k in updates.keys() if k != "timestamp"]
     updates["timestamp"] = firestore.SERVER_TIMESTAMP
     ref.update(updates)
+    registrar_historico(None, db, user_uid, ref.id, "editar",
+                        {k: data.get(k) for k in alterados}, {k: updates[k] for k in alterados}, origem)
     return {
         "status": "updated",
         "objetivo_id": ref.id,
-        "campos_alterados": [k for k in updates.keys() if k != "timestamp"],
+        "campos_alterados": alterados,
     }
 
 
@@ -255,8 +356,27 @@ def _esperado(valor):
 
 
 def aplicar_item(data: dict, tipo: str, acao: str, descricao: str | None = None, item_id: str | None = None,
-                 dataAlvo: str | None = None, esperado: dict | None = None):
-    """Parte pura de `gerenciar_item_estrategico`: (nova lista, resultado) ou (None, erro)."""
+                 dataAlvo: str | None = None, esperado: dict | None = None, itens: list | None = None):
+    """Parte pura de `gerenciar_item_estrategico`: (nova lista, resultado) ou (None, erro).
+
+    `itens` (só em adicionar): vários de uma vez, [{descricao, dataAlvo, esperado}]. Tudo
+    ou nada: um item inválido recusa o lote inteiro.
+    """
+    if itens is not None:
+        if acao != "adicionar" or not isinstance(itens, list) or not itens:
+            return None, {"status": "error", "reason": "itens_so_em_adicionar_e_nao_vazio"}
+        atual, ids = data, []
+        for item in itens:
+            if not isinstance(item, dict):
+                return None, {"status": "error", "reason": "item_invalido"}
+            lista, r = aplicar_item(atual, tipo, "adicionar", item.get("descricao"), None,
+                                    item.get("dataAlvo"), item.get("esperado"))
+            if lista is None:
+                return None, {**r, "item": item.get("descricao")}
+            atual = {**atual, ("indicadoresSucesso" if tipo == "indicador" else "marcos"): lista}
+            ids.append(r["item_id"])
+        return lista, {"item_id": ids[0], "item_ids": ids}
+
     campo = "indicadoresSucesso" if tipo == "indicador" else "marcos"
     if tipo != "marco":
         # Vazio é "não enviado": quem chama costuma preencher os opcionais assim.
@@ -324,6 +444,8 @@ def gerenciar_item_estrategico(
     item_id: str | None = None,
     dataAlvo: str | None = None,
     esperado: dict | None = None,
+    itens: list | None = None,
+    origem: str = "mcp",
 ) -> dict:
     if not user_uid or not objetivo_id:
         return {"status": "error", "reason": "objetivo_nao_encontrado"}
@@ -350,16 +472,19 @@ def gerenciar_item_estrategico(
         if data.get('userId') != user_uid:
             return {"status": "error", "reason": "objetivo_nao_encontrado"}
 
-        lista, resultado = aplicar_item(data, tipo_norm, acao_norm, descricao, item_id, dataAlvo, esperado)
+        lista, resultado = aplicar_item(data, tipo_norm, acao_norm, descricao, item_id, dataAlvo, esperado, itens)
         if lista is None:
             return resultado
         transaction.update(ref, {campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
+        # Na mesma transação: a mudança e o seu registro entram juntos, ou nenhum.
+        registrar_historico(transaction, db, user_uid, ref.id, f"{tipo_norm}:{acao_norm}",
+                            {campo: data.get(campo) or []}, {campo: lista}, origem)
         return {
             "status": "ok",
             "objetivo_id": ref.id,
             "tipo": tipo_norm,
             "acao": acao_norm,
-            "item_id": resultado["item_id"],
+            **resultado,
         }
 
     return _aplicar(db.transaction())
@@ -423,4 +548,6 @@ def excluir_objetivo_estrategico(db, user_uid: str | None, objetivo_id: str) -> 
         return {"status": "error", "reason": "objetivo_nao_encontrado"}
     titulo = data.get("objetivoMacro", "")
     ref.delete()
+    # O objetivo inteiro fica no histórico: excluir deixa de ser sem volta.
+    registrar_historico(None, db, user_uid, objetivo_id, "excluir", {k: v for k, v in data.items() if k != "userId"}, {})
     return {"status": "deleted", "objetivo_id": objetivo_id, "objetivoMacro": titulo}

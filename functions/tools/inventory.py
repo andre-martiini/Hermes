@@ -967,7 +967,8 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "repetir grava os mesmos valores de negócio de novo. Único campo que muda a cada chamada é "
         "`timestamp` (SERVER_TIMESTAMP), não lido por nenhuma decisão/rotina (confirmado por busca no "
         "código) -- mesmo espírito do caveat de `mcp_checked_at` já aceito em `registrar_saude` (P03 "
-        "sub-entrega 17/N) (P03 sub-entrega 18/N)",
+        "sub-entrega 17/N) (P03 sub-entrega 18/N). Desde 30/10/2026 cada chamada também acrescenta um registro "
+        "em `estrategia_historico` (antes e depois): é log de auditoria, não estado de negócio.",
     ),
     "gerenciar_item_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -979,7 +980,8 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "na segunda chamada porque o item já não está mais na lista (mesma ambiguidade de "
         "`revogar_promocao_autonomia`); `concluir` regrava `dataConclusao` com um timestamp NOVO a cada "
         "chamada -- efeito adicional real, não só inerte. Um hint único não descreveria os quatro ramos "
-        "honestamente -- um hint errado é pior que a omissão.",
+        "honestamente -- um hint errado é pior que a omissão. Desde 30/10/2026: `itens` adiciona vários na mesma "
+        "transação (tudo ou nada) e cada chamada grava antes e depois em `estrategia_historico`, na mesma transação.",
     ),
     "obter_objetivo_estrategico": ToolInventoryEntry(
         "estrategico", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,

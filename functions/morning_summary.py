@@ -1078,6 +1078,8 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
             "gerida_por_acoes": gerida_por_acoes,
             "objetivo": data.get("objetivoMacro") or "(sem título)",
             "status": data.get("status"),
+            "pausada": str(data.get("status") or "").lower() == "pausada",
+            "data_retomada": _data_valida(data.get("dataRetomada")) or None,
             "acoes_hoje": len(acoes),
             "titulos_hoje": [a["titulo"] for a in acoes][:AMOSTRA_FILA],
             "ultimo_movimento": ultimo or None,
@@ -1095,12 +1097,14 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
     metas.sort(key=lambda m: (-m["acoes_hoje"], -(m["dias_parada"] if m["dias_parada"] is not None else 999)))
 
     def _esta_parada(m: dict) -> bool:
+        if m["pausada"]:  # pausada de propósito até a data de retomada: não está "parada"
+            return False
         atrasada = m["dias_parada"] is None or m["dias_parada"] >= META_PARADA_DIAS
         # Meta gerida por ações só conta como parada se também não tem ação hoje;
         # meta de saúde depende só do próprio módulo ter registro recente.
         return atrasada and (not m["gerida_por_acoes"] or m["acoes_hoje"] == 0)
 
-    geridas_por_acoes = [m for m in metas if m["gerida_por_acoes"]]
+    geridas_por_acoes = [m for m in metas if m["gerida_por_acoes"] and not m["pausada"]]
     return {
         "metas": metas,
         "paradas": sorted([m for m in metas if _esta_parada(m)],

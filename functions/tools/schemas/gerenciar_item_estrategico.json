@@ -18,7 +18,7 @@
       },
       "descricao": {
         "type": "string",
-        "description": "Descrição do item (obrigatória em adicionar)"
+        "description": "Descrição do item (obrigatória em adicionar, a menos que venha itens)"
       },
       "item_id": {
         "type": "string",
@@ -33,6 +33,30 @@
         "description": "Só marco: valor esperado de cada indicador nessa data, {chave: número} na unidade do indicador (dinheiro em reais), ex.: {\"peso\": 91.7, \"cintura\": 108}. Em editar, mescla por chave (mandar só peso mantém a cintura); {} limpa todos.",
         "additionalProperties": {
           "type": "number"
+        }
+      },
+      "itens": {
+        "type": "array",
+        "description": "Só em adicionar: vários itens numa única transação, [{descricao, dataAlvo, esperado}]. Tudo ou nada.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "descricao": {
+              "type": "string"
+            },
+            "dataAlvo": {
+              "type": "string"
+            },
+            "esperado": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "descricao"
+          ]
         }
       }
     },

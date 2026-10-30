@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import F from './perfilEstrategia.fixture.json';
 import { avaliarMeta, esperadoEm, hojeBrasilia, idLegado, type MetaPerfil } from './perfilEstrategia';
+import { guardadoAcumulado } from './bolsoAquisicoes';
 
 /** A fixture é a MESMA de `functions/test_perfil_estrategia.py`: os dois lados têm de dar o mesmo número. */
 const metas = F.metas as unknown as Record<string, MetaPerfil>;
@@ -31,6 +32,13 @@ describe('perfil das metas — fixture compartilhada com o Python', () => {
 
     it('hoje inválido é recusado, como no Python', () => {
         for (const hoje of F.hoje_invalido) expect(() => avaliarMeta(metas.saude, { peso: 90 }, hoje as string)).toThrow();
+    });
+
+    it('guardado acumulado: a mesma regra do bolso, igual ao Python', () => {
+        for (const caso of F.guardado_acumulado.casos) {
+            expect(guardadoAcumulado(F.guardado_acumulado.contas as any[], caso.desde)).toBe(caso.centavos);
+        }
+        expect(guardadoAcumulado([], '2026-11-02')).toBe(0);
     });
 
     it('id de item legado é estável e igual ao do Python', () => {

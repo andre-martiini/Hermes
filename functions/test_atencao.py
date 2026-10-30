@@ -1440,3 +1440,23 @@ class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRetomadaDeMetaPausada(unittest.TestCase):
+    """A5 (30/10/2026): meta pausada avisa na fila quando a data de retomada chega."""
+
+    def test_avisa_so_quando_a_data_chega_e_uma_vez_por_data(self):
+        from atencao import itens_retomada_metas
+
+        objetivos = [
+            {"id": "mago", "objetivoMacro": "MAGO", "status": "pausada", "dataRetomada": "2027-01-30"},
+            {"id": "ativa", "objetivoMacro": "Saúde", "status": "ativo", "dataRetomada": "2027-01-30"},
+            {"id": "sem_data", "objetivoMacro": "X", "status": "pausada"},
+        ]
+        self.assertEqual(itens_retomada_metas(objetivos, date(2027, 1, 29)), [])
+        itens = itens_retomada_metas(objetivos, date(2027, 1, 30))
+        self.assertEqual([i["chave_dedupe"] for i in itens], ["meta_retomada:mago:2027-01-30"])
+        self.assertEqual((itens[0]["origem"], itens[0]["tipo"]), ("estrategia", "meta_retomada"))
+        # Depois da data continua avisando com a MESMA chave (o persistir é idempotente).
+        self.assertEqual(itens_retomada_metas(objetivos, date(2027, 2, 5))[0]["chave_dedupe"],
+                         "meta_retomada:mago:2027-01-30")

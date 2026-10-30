@@ -471,6 +471,17 @@ class TestEstrategia(unittest.TestCase):
         self.assertEqual([m["objetivo"] for m in est["paradas"]], ["Terminar o mestrado"])
         self.assertEqual(est["metas"][0]["dias_parada"], 50)
 
+    def test_meta_pausada_nao_entra_em_paradas_nem_na_contagem(self):
+        db = _FakeDb({"estrategia_pessoal": {
+            "mago": {"objetivoMacro": "MAGO", "pilar": "carreira", "status": "pausada", "dataRetomada": "2027-01-30"},
+            "m1": {"objetivoMacro": "Meta viva", "pilar": "carreira", "status": "ativo"},
+        }})
+        est = _coletar_estrategia(db, HOJE, {"m1": [{"titulo": "Ação de hoje"}]}, {"mago": "2026-07-01"})
+        self.assertEqual(est["paradas"], [])
+        self.assertEqual((est["servidas_hoje"], est["total_geridas_por_acoes"]), (1, 1))
+        mago = next(m for m in est["metas"] if m["id"] == "mago")
+        self.assertEqual((mago["pausada"], mago["data_retomada"]), (True, "2027-01-30"))
+
     def test_meta_servida_hoje_nao_entra_em_paradas(self):
         db = _FakeDb({"estrategia_pessoal": {
             "m1": {"objetivoMacro": "Meta viva", "pilar": "carreira", "status": "ativo"},

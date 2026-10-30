@@ -26,7 +26,8 @@
           "financeiro",
           "saude",
           "secretario_whatsapp",
-          "sessao"
+          "sessao",
+          "estrategia"
         ],
         "description": "Opcional. Filtra por canal de origem do item."
       },

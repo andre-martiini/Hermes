@@ -145,6 +145,24 @@
     }
   ],
   "hoje_invalido": ["", "15/12/2026", "2026-02-30", null],
+  "guardado_acumulado": {
+    "contas": [
+      { "category": "Poupança", "isPaid": true, "amount": 500, "month": 9, "year": 2026 },
+      { "category": "Poupança", "isPaid": true, "amount": 1000.10, "month": 10, "year": 2026 },
+      { "category": "Poupança", "isPaid": false, "amount": 2000, "month": 10, "year": 2026 },
+      { "category": "Poupança", "isPaid": true, "amount": "999.95", "month": 11, "year": 2026 },
+      { "category": "Poupança", "isPaid": true, "amount": 0.10, "month": 0, "year": 2027 },
+      { "category": "Lazer", "isPaid": true, "amount": 300, "month": 10, "year": 2026 },
+      { "category": "Poupança", "isPaid": true, "amount": 50, "month": 10, "year": "abc" }
+    ],
+    "casos": [
+      { "desde": "2026-11-02", "centavos": 200015 },
+      { "desde": "2026-10-01", "centavos": 250015 },
+      { "desde": "2027-01-15", "centavos": 10 },
+      { "desde": "2027-02-01", "centavos": 0 },
+      { "desde": "x", "centavos": null }
+    ]
+  },
   "hoje_brasilia": [
     { "utc": "2026-12-16T01:30:00Z", "hoje": "2026-12-15" },
     { "utc": "2026-12-16T03:00:00Z", "hoje": "2026-12-16" },

@@ -240,7 +240,8 @@ def objetivos_elegiveis(objetivos) -> list[dict]:
         gerida = bool(gravada) if gravada is not None else _pilar(obj.get("pilar")) != "saude"
         if not gerida:
             continue
-        if str(obj.get("status") or "").lower() in ("concluido", "concluído", "cancelado", "arquivado"):
+        # Pausada (até a data de retomada) também não recebe sugestão de elevação.
+        if str(obj.get("status") or "").lower() in ("concluido", "concluído", "cancelado", "arquivado", "pausada"):
             continue
         elegiveis.append(obj)
     return elegiveis

@@ -42,6 +42,15 @@ class TestFixtureCompartilhada(unittest.TestCase):
             with self.subTest(hoje), self.assertRaises(ValueError):
                 pe.avaliar_meta(F["metas"]["saude"], {"peso": 90}, hoje)
 
+    def test_guardado_acumulado_mesma_regra_do_bolso(self):
+        from bolso_aquisicoes import guardado_acumulado
+
+        g = F["guardado_acumulado"]
+        for caso in g["casos"]:
+            with self.subTest(caso["desde"]):
+                self.assertEqual(guardado_acumulado(g["contas"], caso["desde"]), caso["centavos"])
+        self.assertEqual(guardado_acumulado([], "2026-11-02"), 0)  # outubro sem poupança: zero, não "sem dado"
+
     def test_id_legado_estavel(self):
         for caso in F["id_legado"]:
             self.assertEqual(pe.id_legado(caso["tipo"], caso["indice"], caso["descricao"]), caso["id"])

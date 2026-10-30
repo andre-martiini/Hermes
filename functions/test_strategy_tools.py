@@ -269,3 +269,93 @@ class TestLeituraCompletaDoObjetivo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPausaPerfilEHistorico(unittest.TestCase):
+    """A5, B2 e B3: status pausada, campos do perfil pelo editar e o histórico de antes e depois."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.db.collection("estrategia_pessoal").document("mago").set(
+            {"userId": "uid-1", "objetivoMacro": "MAGO", "pilar": "carreira", "status": "ativo",
+             "tipoMeta": "relativa_qualitativa", "diretrizesDerivadas": ["d"], "marcos": []})
+
+    def _doc(self):
+        return self.db.collection("estrategia_pessoal").document("mago").get().to_dict()
+
+    def _historico(self):
+        return list(self.db.collection(st.COLECAO_HISTORICO)._docs.values())
+
+    def test_pausar_exige_data_de_retomada_e_sair_da_pausa_apaga_a_data(self):
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada")
+        self.assertEqual(r["reason"], "pausada_exige_dataRetomada")
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada", dataRetomada="2027-01-30")
+        self.assertEqual(r["status"], "updated")
+        self.assertEqual((self._doc()["status"], self._doc()["dataRetomada"]), ("pausada", "2027-01-30"))
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="ativo")
+        self.assertIs(self._doc()["dataRetomada"], firestore.DELETE_FIELD)  # o mock grava o sentinela
+
+    def test_data_de_retomada_invalida_ou_sem_pausa_e_recusada(self):
+        self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada",
+                                                        dataRetomada="30/01/2027")["reason"], "dataRetomada_invalida")
+        self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", dataRetomada="2027-01-30")["reason"],
+                         "dataRetomada_so_com_status_pausada")
+
+    def test_criar_ja_pausada_e_recusado(self):
+        r = st.criar_objetivo_estrategico(self.db, "uid-1", "Nova", status="pausada", diretrizes=["d"])
+        self.assertEqual(r["status"], "error")
+
+    def test_editar_aceita_ciclo_linha_base_e_indicadores_validados(self):
+        r = st.editar_objetivo_estrategico(
+            self.db, "uid-1", "mago",
+            ciclo={"inicio": "2026-11-02", "fim": "2027-01-30"},
+            linhaBase={"data": "2026-11-02", "valores": {"peso": "93.4"}},
+            indicadores=[{"chave": "peso", "rotulo": "Peso", "unidade": "kg", "sentido": "menor_melhor",
+                          "fonte": "peso", "inicial": 93.4, "alvoFinal": 88}])
+        self.assertEqual(sorted(r["campos_alterados"]), ["ciclo", "indicadores", "linhaBase"])
+        self.assertEqual(self._doc()["linhaBase"], {"data": "2026-11-02", "valores": {"peso": 93.4}})
+        for ruim in ({"ciclo": {"inicio": "2027-01-30", "fim": "2026-11-02"}},
+                     {"linhaBase": {"data": "x", "valores": {}}},
+                     {"indicadores": [{"chave": "peso", "sentido": "menor_melhor", "fonte": "balança"}]},
+                     {"indicadores": [{"chave": "p", "sentido": "menor_melhor", "fonte": "peso"}] * 2},
+                     {"indicadores": ["Peso"]}):
+            self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", **ruim)["status"], "error", ruim)
+
+    def test_editar_e_excluir_gravam_antes_e_depois(self):
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", objetivoMacro="MAGO (revisto)", origem="tela")
+        h = self._historico()[-1]
+        self.assertEqual((h["operacao"], h["origem"], h["objetivo_id"], h["userId"]), ("editar", "tela", "mago", "uid-1"))
+        self.assertEqual((h["antes"], h["depois"]), ({"objetivoMacro": "MAGO"}, {"objetivoMacro": "MAGO (revisto)"}))
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        h = self._historico()[-1]
+        self.assertEqual((h["operacao"], h["antes"]["objetivoMacro"], h["depois"]), ("excluir", "MAGO (revisto)", {}))
+        self.assertNotIn("userId", h["antes"])
+
+    def test_historico_na_transacao_vai_pela_transacao(self):
+        gravados = []
+
+        class _Tx:
+            def set(self, ref, dados):
+                gravados.append(dados)
+
+        st.registrar_historico(_Tx(), self.db, "uid-1", "mago", "marco:adicionar", {"marcos": []},
+                               {"marcos": [{"id": "m1"}]})
+        self.assertEqual(len(gravados), 1)
+        self.assertEqual(self._historico(), [])  # nada fora da transação
+        self.assertEqual((gravados[0]["operacao"], gravados[0]["depois"]), ("marco:adicionar", {"marcos": [{"id": "m1"}]}))
+
+    def test_adicionar_em_lote_e_tudo_ou_nada(self):
+        data = _objetivo_com_marcos()
+        lista, r = st.aplicar_item(data, "marco", "adicionar", itens=[
+            {"descricao": "Tabela de preços aprovada", "dataAlvo": "2026-11-30"},
+            {"descricao": "Contrato-modelo pronto", "dataAlvo": "2026-12-30"},
+            {"descricao": "1 clínica pagando", "dataAlvo": "2027-01-30"}])
+        self.assertEqual(len(r["item_ids"]), 3)
+        self.assertEqual([m["descricao"] for m in lista[-3:]],
+                         ["Tabela de preços aprovada", "Contrato-modelo pronto", "1 clínica pagando"])
+        self.assertEqual(lista[1]["esperado"], {"peso": 91.7, "cintura": 108})  # o que já existia fica
+        lista, r = st.aplicar_item(data, "marco", "adicionar", itens=[
+            {"descricao": "ok", "dataAlvo": "2026-11-30"}, {"descricao": "ruim", "dataAlvo": "30/12"}])
+        self.assertEqual((lista, r["reason"], r["item"]), (None, "dataAlvo_invalida", "ruim"))
+        self.assertEqual(st.aplicar_item(data, "marco", "editar", item_id="m1", itens=[{"descricao": "x"}])[1]["reason"],
+                         "itens_so_em_adicionar_e_nao_vazio")

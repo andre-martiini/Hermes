@@ -37,7 +37,7 @@ COLLECTION = "atencao"
 # ficou presa e esgotou as tentativas automáticas de reconciliação. Nenhuma
 # origem existente descreve isso (não é "repo" -- esse já denota eventos de
 # repositório de código, categoria de EventEnvelope, não o outbox em si).
-ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude", "secretario_whatsapp", "sistema")
+ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude", "secretario_whatsapp", "sistema", "estrategia")
 
 # Tipos de detectores
 TIPO_AGUARDANDO_TERCEIRO_VENCIDO = "aguardando_terceiro_vencido"
@@ -52,6 +52,7 @@ TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
 #: P05 sub-entrega 19/N (passo 10 do pacote) -- ver
 #: `event_outbox.varrer_outbox_travado_core`/`_diagnostico_para_item_atencao`.
 TIPO_OUTBOX_EVENTO_TRAVADO = "outbox_evento_travado"
+TIPO_META_RETOMADA = "meta_retomada"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"
@@ -595,6 +596,51 @@ def avaliar_rotinas_saude(
     return itens
 
 
+def itens_retomada_metas(objetivos: list[dict], hoje: date) -> list[dict]:
+    """Meta pausada cuja data de retomada chegou: um item na fila para o André decidir."""
+    itens = []
+    for obj in objetivos:
+        if str(obj.get("status") or "").lower() != "pausada":
+            continue
+        try:
+            retomada = datetime.strptime(str(obj.get("dataRetomada") or "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if retomada > hoje:
+            continue
+        titulo = obj.get("objetivoMacro") or "(sem título)"
+        itens.append({
+            "origem": "estrategia",
+            "tipo": TIPO_META_RETOMADA,
+            "prioridade": PRIORIDADE_MEDIA,
+            "titulo": f"Meta pausada chegou à data de retomada: {titulo}",
+            "resumo": (f"'{titulo}' estava pausada até {retomada.strftime('%d/%m/%Y')}. "
+                       "Retomar (status ativo), adiar a retomada ou concluir."),
+            "acao_id": None, "etapa_id": None, "pessoa": None,
+            "prazo": retomada.isoformat(),
+            "evidencia": {"objetivo_id": obj.get("id"), "dataRetomada": retomada.isoformat()},
+            "sugestao": "editar_objetivo_estrategico com status 'ativo', ou nova dataRetomada.",
+            "estado": ESTADO_ABERTO,
+            # Uma vez por data: adiar a retomada gera aviso novo na nova data.
+            "chave_dedupe": f"meta_retomada:{obj.get('id')}:{retomada.isoformat()}",
+        })
+    return itens
+
+
+def detectar_retomada_metas(db, hoje: date) -> list[dict]:
+    """Lê só as metas pausadas (não a coleção inteira) e grava o aviso das que chegaram à data."""
+    try:
+        objetivos = [{**(d.to_dict() or {}), "id": d.id}
+                     for d in db.collection("estrategia_pessoal").where("status", "==", "pausada").stream()]
+    except Exception as exc:
+        print(f"[AtencaoEstrategia] Falha ao ler metas pausadas: {exc}")
+        return []
+    itens = itens_retomada_metas(objetivos, hoje)
+    if itens:
+        _persistir_itens_atencao(db, itens)
+    return itens
+
+
 def detectar_atencao_saude(
     db, hoje: date | None = None, settings: dict | None = None
 ) -> list[dict]:
@@ -790,6 +836,7 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
         detectar_atencao_saude(db, hoje, settings=settings)
     except Exception as fs_err:
         print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
+    detectar_retomada_metas(db, hoje)
 
 
 def _respostas_recebidas_do_chat(db, chat_id: str) -> list:
