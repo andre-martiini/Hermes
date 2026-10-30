@@ -60,6 +60,13 @@ class TestAcordarPedido(unittest.TestCase):
         self.assertEqual(self.db.docs[self.caminho], {"run_id": "outro-conteudo"})
         self.assertEqual(self.db.docs["req-1"]["revisao"], 1)
 
+    def test_run_id_novo_ja_arquivado_recusa_sem_gravar(self):
+        self.db.docs[f"req-1/{repo.SUBCOLECAO_RUNS_ENCERRADOS}/run-2"] = {"run_id": "run-2"}
+        with self.assertRaises(ValueError):
+            acordar_pedido(self.db, "req-1", "ex-b", "run-2", agora=T0 + timedelta(hours=2))
+        self.assertNotIn(self.caminho, self.db.docs)
+        self.assertEqual(self.db.docs["req-1"]["revisao"], 1)
+
     def test_inexistente_e_agora_sem_fuso(self):
         with self.assertRaises(repo.PedidoNaoEncontrado):
             acordar_pedido(self.db, "nao", "ex-b", "run-2", agora=T0)

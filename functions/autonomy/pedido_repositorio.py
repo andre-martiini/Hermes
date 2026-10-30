@@ -210,6 +210,14 @@ def atualizar_pedido(
                 existente = ref_run.get(transaction=transaction)
                 if existente.exists and existente.to_dict() != doc_run:
                     raise ValueError(f"run_id '{antigo.run_id}' já arquivado com outro conteúdo.")
+            if run_encerrado is not None and novo.run is not None and (
+                atual.run is None or novo.run.run_id != atual.run.run_id
+            ):
+                # Run novo com id já arquivado travaria o próximo despertar.
+                if ref.collection(SUBCOLECAO_RUNS_ENCERRADOS).document(
+                    _validar_id_documento(novo.run.run_id, "run_id")
+                ).get(transaction=transaction).exists:
+                    raise ValueError(f"run_id '{novo.run.run_id}' já consta no arquivo de runs encerrados.")
             transaction.set(ref, {"pedido": doc, "revisao": revisao + 1})
             if ref_run is not None:
                 transaction.set(ref_run, doc_run)
