@@ -649,30 +649,8 @@ pacote_concluido: P07
 ---
 
 
+# (Em 2026-10-30 o bloco "P08 sub-entrega 12/N" foi movido para execucao-archive-p08sub12.md.)
 # (Em 2026-10-30 o bloco "P08 sub-entrega 11/N" foi movido para docs/autonomia/execucao-archive-p08sub11.md.)
-
----
-
-```yaml
-pacote: "P08 sub-entrega 12/N -- repositório Firestore do pedido durável (autonomy/pedido_repositorio.py, passo 4, persistência/CAS): criar_pedido (PedidoJaExiste se já existe), ler_pedido (None se ausente) e atualizar_pedido (read-modify-write em transação do Firestore com transformar pura; sem mudança não escreve; revisão incrementada). Documento autonomy_pedidos/{request_id} = {pedido, revisao}. Leitura estrita (PedidoCorrompido). Validação das regras do Firestore antes de gravar: request_id (., .., __x__, >1500 bytes, controle, surrogate), int64, chaves vazias/__x__/longas, UTF-8, 20 níveis de mapa. Nada chama o módulo em produção (shadow/off)."
-estado: validado
-inicio: "2026-10-29T19:48:00Z"
-fim: "2026-10-29T20:10:00Z"
-decisoes:
-  - id: p08-sub12-triagem
-    motivo: "PRs abertas: #561 (finanças, outra linha, muda cálculo de saldo) e #556 (excluir_entrada_diario, apaga dados, pede aval do André): nenhuma tocada. Nenhuma execução paralela (branches claude/* sem atividade há >60 min). Nenhuma PR da autonomia pendente."
-  - id: p08-sub12-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P08 sub 9 arquivado em execucao-archive-p08sub9.md."
-  - id: p08-sub12-escopo
-    motivo: "Fora de escopo, deliberado: limite de 1 MiB por documento e de tamanho de string; teste contra Firestore real/emulador (o duplo de teste usa o decorator real @firestore.transactional mas não simula conflito de contenção); chamadores (worker, Cloud Tasks, sweep persistindo) ficam para o wiring."
-testes:
-  resultados:
-    - "functions/ completo ANTES 4976 OK (diário, P08 sub 11; 4990 OK em main + 12 testes novos medidos antes da correção da rodada 1); DEPOIS 4991 OK (suíte completa também após a correção do Codex; 13 testes novos em test_autonomy_pedido_repositorio)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 2 achados reais de validação -- request_id reservado do Firestore passava; int fora de int64 e chaves vazias/__x__ eram gravados sem validação (erro opaco dentro da transação). Corrigidos e cobertos. Rodada 2 (focada na correção): 3 achados -- profundidade de mapa >20, surrogate solitário em ids/chaves/valores, chave >1500 bytes; corrigidos e cobertos por teste. Codex na PR #564: 1 achado P2 real -- array dentro de array passava na validação; corrigido e coberto por teste. Rodada 3 (focada na correção do Codex, agente sem contexto, somente leitura): não achei nada. Não verificado contra o servidor real do Firestore (regras citadas da documentação)."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, usar atualizar_pedido com decidir_continuacao + aplicar_decisao_continuacao, sweep persistindo, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
-```
 
 ---
 
@@ -724,4 +702,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 1 achado real -- starvation por limit sem ordenação/cursor, mais falta de sinal de saturação; corrigido (paginação por cursor + truncado) e coberto por teste. Rodada 2 (focada na correção): 1 achado -- truncado falso positivo quando o total é exatamente limite*max_paginas; aceito e documentado (só docstring), sem rodada adicional. Codex na PR #568: 2 achados P2 reais (cursor de continuação após passada truncada; validação de max_tentativas), corrigidos e cobertos por teste. Rodada 3 (focada na correção do Codex, agente sem contexto, somente leitura): não achei nada -- start_after({"__name__": id}) conferido contra o cliente firestore instalado. Paginação com mudança de status durante a passada, doc apagado, query contra o cliente firestore instalado e validação de parâmetros verificados sem bug. Não verificado contra Firestore real."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, persistência da fila de diagnóstico ao redor de varrer_candidatos e agendamento do sweep, usar atualizar_pedido com decidir_continuacao + aplicar_decisao_continuacao, acordar_espera_externa e reconciliar_resultado_desconhecido persistindo também o run antigo, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 15/N -- despertar persistido de espera externa (autonomy/acordar_persistido.py, passo 5, wiring de persistência): acordar_pedido(db, request_id, executor_id, run_id, agora, duracao_segundos, por_evento) liga acordar_espera_externa a atualizar_pedido, que ganhou o parâmetro opcional run_encerrado: o run antigo fechado por timeout é gravado em autonomy_pedidos/{id}/runs_encerrados/{run_id} na MESMA transação do pedido (só se o pedido mudou). run_id validado como id do Firestore antes da transação; leitura do arquivo antes de qualquer escrita; run_id já arquivado com conteúdo diferente é recusado (igual = idempotente). serializacao: run_para_dict extraído sem mudar o formato. Nada chama o módulo em produção (shadow/off)."
+estado: validado
+inicio: "2026-10-30T16:50:00Z"
+fim: "2026-10-30T17:15:00Z"
+decisoes:
+  - id: p08-sub15-triagem
+    motivo: "PRs abertas: #565 (email), #561 (finanças, muda saldo) e #556 (excluir_entrada_diario, apaga dados, pede aval do André): outra linha, nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela."
+  - id: p08-sub15-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 12 arquivado em execucao-archive-p08sub12.md."
+  - id: p08-sub15-escopo
+    motivo: "Fora de escopo: reconciliar_resultado_desconhecido persistido (mesmo molde, próxima fatia), FALHA_FINAL por reconciliação, worker HTTP, Cloud Tasks, agendamento."
+testes:
+  resultados:
+    - "functions/ completo ANTES 4999+ OK (diário, P08 sub 14: 5008 OK); DEPOIS 5106 OK (suíte completa, 262s; testes novos: 5 em test_autonomy_acordar_persistido + 4 em test_autonomy_pedido_repositorio; o restante vem de merges de outras linhas)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): 2 achados reais -- run_id novo sem validação de id do Firestore (pedido ficaria impossível de acordar de novo) e run_id reutilizado sobrescrevendo o arquivo; corrigidos e cobertos por teste (e a leitura do arquivo foi posta antes das escritas, exigência das transações do Firestore). Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
+pendencias:
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, reconciliar_resultado_desconhecido persistindo também o run antigo (usar run_encerrado), FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
