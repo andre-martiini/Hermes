@@ -2040,6 +2040,12 @@ def sync_pix_emails(service, sync_ref, logs):
                 new_ignorados_ids.append(msg_id)
                 continue
 
+            if conciliacao_pix.nao_e_comprovante(sender):
+                # Não arquiva: não é e-mail de banco, fica na caixa de entrada.
+                log_to_firestore(sync_ref, logs, f"[GMAIL-PIX] Ignorando e-mail que não é comprovante ({sender[:60]}; msg_id: {msg_id})")
+                new_ignorados_ids.append(msg_id)
+                continue
+
             content = f"{subject} {snippet}"
             value_match = re.search(r'R\$\s*([\d\.,]+)', content)
             pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
