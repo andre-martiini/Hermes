@@ -34,3 +34,22 @@ describe('marcos da tela de estratégia: abrir e salvar não apaga o perfil', ()
         expect(paraRascunho('marco', ['Chegar a 90 kg'])[0].id).toBe(legado.id);
     });
 });
+
+describe('histórico da tela: só o que mudou', () => {
+    it('guarda antes e depois só dos campos alterados', async () => {
+        const { diferencas } = await import('./itensEstrategia');
+        const r = diferencas({ objetivoMacro: 'A', status: 'ativo', pilar: 'saude' },
+            { objetivoMacro: 'B', status: 'ativo', dataRetomada: '2027-01-30' }, ['objetivoMacro', 'status', 'dataRetomada', 'pilar']);
+        expect(r).toEqual({ antes: { objetivoMacro: 'A', dataRetomada: null }, depois: { objetivoMacro: 'B', dataRetomada: '2027-01-30' }, mudou: true });
+        expect(diferencas({ status: 'ativo' }, { status: 'ativo' }, ['status']).mudou).toBe(false);
+    });
+});
+
+describe('gravar marco sem undefined', () => {
+    it('data alvo e esperado apagados no formulário saem da gravação, em vez de ir como undefined', () => {
+        const [gravado] = paraGravar('marco', [{ ...marco, dataAlvo: undefined, esperado: undefined }]);
+        expect('dataAlvo' in gravado).toBe(false);
+        expect('esperado' in gravado).toBe(false);
+        expect(Object.values(gravado).includes(undefined)).toBe(false);
+    });
+});

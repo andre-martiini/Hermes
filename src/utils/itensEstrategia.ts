@@ -47,7 +47,27 @@ export function paraGravar<T extends Item>(tipo: Tipo, itens?: T[]): T[] {
             } as T;
             if (gravado.concluido) gravado.dataConclusao = dataConclusao || new Date().toISOString();
             if (evidencia?.trim()) gravado.evidencia = evidencia.trim();
+            // O Firestore recusa `undefined` (ex.: data alvo apagada no formulário): a chave sai.
+            for (const chave of Object.keys(gravado) as Array<keyof T>) {
+                if (gravado[chave] === undefined) delete gravado[chave];
+            }
             return gravado;
         })
         .filter(item => item.descricao);
+}
+
+/**
+ * Só os campos que mudaram, antes e depois, para o histórico da estratégia
+ * (`estrategia_historico`, o mesmo que o MCP grava). Campo ausente vira null.
+ */
+export function diferencas(antes: Record<string, unknown>, depois: Record<string, unknown>, campos: string[]) {
+    const a: Record<string, unknown> = {};
+    const d: Record<string, unknown> = {};
+    for (const campo of campos) {
+        if (!(campo in depois)) continue;
+        if (JSON.stringify(antes[campo] ?? null) === JSON.stringify(depois[campo] ?? null)) continue;
+        a[campo] = antes[campo] ?? null;
+        d[campo] = depois[campo] ?? null;
+    }
+    return { antes: a, depois: d, mudou: Object.keys(d).length > 0 };
 }

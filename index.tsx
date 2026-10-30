@@ -5333,6 +5333,12 @@ const App: React.FC = () => {
                         showToast={showToast}
                         tarefas={tarefas}
                         onCreateIndicadorAction={handleCreateIndicadorAction}
+                        // Fontes automáticas do perfil das metas: já carregadas pelo app, sem leitura nova.
+                        medicoes={{
+                          peso: [...healthWeights].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]?.weight ?? null,
+                          cintura: [...healthWaist].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]?.cm ?? null,
+                        }}
+                        contasFixas={fixedBills}
                       />
                     </div>
                     {isStrategySplitCopilot && (

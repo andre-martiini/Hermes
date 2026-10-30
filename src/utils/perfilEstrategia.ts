@@ -230,3 +230,41 @@ export const avaliarMeta = (meta: MetaPerfil, atuais: Record<string, unknown>, h
         proximo_marco: proximo ? { data: isoDoDia(dia(proximo.dataAlvo) as number), descricao: proximo.descricao || '' } : null,
     };
 };
+
+export interface MedicoesAtuais {
+    peso?: number | null;
+    cintura?: number | null;
+}
+
+/**
+ * Valor atual de cada indicador e de onde ele vem, como `functions/morning_summary.py::_perfil_da_meta`:
+ * peso e cintura das medições, guardado da Poupança paga desde o início do ciclo, e o resto do
+ * `historicoMetrica` (entrada com `chave`, ou sem chave quando há um único indicador manual).
+ */
+export const atuaisDaMeta = (
+    meta: MetaPerfil & { historicoMetrica?: Array<{ data?: string; valor?: number; chave?: string }> },
+    medicoes: MedicoesAtuais,
+    guardadoDesde: (desde: string | undefined) => number | null,
+): { atuais: Record<string, number | null>; origens: Record<string, 'automatica' | 'manual'> } => {
+    const indicadores = (meta.indicadores ?? []).filter(i => i && i.chave);
+    const manuais = indicadores.filter(i => !['peso', 'cintura', 'guardado_acumulado'].includes(String(i.fonte)));
+    const atuais: Record<string, number | null> = {};
+    const origens: Record<string, 'automatica' | 'manual'> = {};
+    for (const ind of indicadores) {
+        if (ind.fonte === 'peso' || ind.fonte === 'cintura') {
+            atuais[ind.chave] = medicoes[ind.fonte] ?? null;
+            origens[ind.chave] = 'automatica';
+        } else if (ind.fonte === 'guardado_acumulado') {
+            const centavosGuardados = guardadoDesde(meta.ciclo?.inicio);
+            atuais[ind.chave] = centavosGuardados === null ? null : centavosGuardados / 100;
+            origens[ind.chave] = 'automatica';
+        } else {
+            const entradas = (meta.historicoMetrica ?? [])
+                .filter(h => h && (h.chave === ind.chave || (manuais.length === 1 && !h.chave)))
+                .sort((a, b) => String(a.data ?? '').localeCompare(String(b.data ?? '')));
+            atuais[ind.chave] = entradas.length ? (entradas[entradas.length - 1].valor ?? null) : null;
+            origens[ind.chave] = 'manual';
+        }
+    }
+    return { atuais, origens };
+};

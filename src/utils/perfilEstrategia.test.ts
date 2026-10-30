@@ -72,3 +72,22 @@ describe('perfil das metas — regras', () => {
         expect(esperadoEm(meta, meta.indicadores![0], '2026-11-02')).toBe(9340);
     });
 });
+
+describe('valor atual de cada indicador, como no resumo do servidor', () => {
+    it('peso da medição, guardado da poupança, manual do histórico', async () => {
+        const { atuaisDaMeta } = await import('./perfilEstrategia');
+        const meta = {
+            ciclo: { inicio: '2026-11-02', fim: '2027-01-30' },
+            indicadores: [
+                { chave: 'peso', fonte: 'peso' as const },
+                { chave: 'guardado', fonte: 'guardado_acumulado' as const },
+                { chave: 'renda_produto', fonte: 'manual' as const },
+            ],
+            historicoMetrica: [{ data: '2026-12-01', valor: 150 }, { data: '2026-11-15', valor: 90 }],
+        };
+        const r = atuaisDaMeta(meta, { peso: 90.5 }, desde => (desde === '2026-11-02' ? 100000 : null));
+        expect(r.atuais).toEqual({ peso: 90.5, guardado: 1000, renda_produto: 150 });
+        expect(r.origens).toEqual({ peso: 'automatica', guardado: 'automatica', renda_produto: 'manual' });
+        expect(atuaisDaMeta(meta, {}, () => null).atuais).toEqual({ peso: null, guardado: null, renda_produto: 150 });
+    });
+});

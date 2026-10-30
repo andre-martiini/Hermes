@@ -1444,6 +1444,26 @@ export interface ResumoMeta {
     unidade: string | null;
     marcos_abertos: number;
     marcos_total: number;
+    /** Perfil de 3 meses (functions/morning_summary.py::_perfil_da_meta); null sem perfil. */
+    perfil?: {
+        estado: 'adiantado' | 'no_perfil' | 'sem_dado' | 'atrasado' | null;
+        proximo_marco: { data: string; descricao: string } | null;
+        indicadores: Array<{
+            chave: string;
+            rotulo: string;
+            /** Dinheiro (`em_centavos`): atual e esperado em centavos inteiros. */
+            atual: number | null;
+            esperado_hoje: number | null;
+            proximo_marco: { data: string; valor: number } | null;
+            unidade: string;
+            em_centavos: boolean;
+            estado: 'adiantado' | 'no_perfil' | 'sem_dado' | 'atrasado' | null;
+            origem: 'automatica' | 'manual';
+        }>;
+        marcos_sem_numero: Array<{ id?: string; descricao: string; dataAlvo: string | null; concluido: boolean; estado: string }>;
+    } | null;
+    /** Meta de saúde em kg digitada à mão que diverge mais de 1 kg da última pesagem. */
+    aviso_metrica?: string | null;
 }
 
 export interface ResumoMatinal {
