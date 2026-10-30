@@ -117,11 +117,13 @@ Contas a pagar fixas/recorrentes e seus templates de rubrica. `fixed_bills`: `de
 ### `income_entries` / `income_rubrics`
 Receitas e seus templates de rubrica. `income_entries`: `description`, `amount`, `day`/`month`/`year`, `rubricId` → `income_rubrics`, `service_id` → `servicos`, `isReceived`. Sincronizado por `sync_pix_emails`.
 
+Renda de parcela de serviço (`service_id` + `parcela_id`): a tela cria uma por parcela (`src/utils/rendasDeServico.ts`, aplicado em `index.tsx`), com id fixo `svc_{service_id}_{parcela_id}` criado só se ainda não existir, e lê o mês pelo texto de `data_prevista` (nunca por `new Date`, que em Brasília desloca o 1º dia para o mês anterior). Renda excluída fica com `status: 'deleted'` e a sincronia não a recria. `retirada_por` diz quem a tirou: `'previsao'` (a parcela saiu da previsão; a renda volta com ela), `'duplicata'` (cópia extra, com `duplicata_de`; nunca volta) ou ausente (exclusão do usuário). Duplicatas por `service_id` + `parcela_id` + mês saem com a tool `deduplicar_rendas_servico` (simulação por padrão).
+
 ### `finance_settings` / `finance_goals`
 Configurações globais (orçamento mensal, reserva de emergência, categorias) e metas financeiras (`targetAmount`, `currentAmount`, `status`).
 
 ### `servicos`
-Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `tipo_contrato`, `valor_total`, `parcelas[]` (`ParcelaServico`), `categoria_financeira`, `base_id` → `knowledge_bases`. Referenciado por `income_entries.service_id`.
+Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `tipo_contrato`, `valor_total`, `parcelas[]` (`ParcelaServico`), `categoria_financeira`, `base_id` → `knowledge_bases`. Referenciado por `income_entries.service_id`. `parcelas[].status` é `pendente`, `pago` ou `sem_previsao`; esta e a parcela pendente sem `data_prevista` ficam fora da renda do mês e da projeção de `consultar_rendas_servico` (`functions/rendas_servico.py::fora_da_previsao`), sem apagar o contrato. `editar_parcela_servico` marca, limpa a data e reativa (status `pendente`).
 
 ## Saúde
 

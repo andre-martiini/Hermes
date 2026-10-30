@@ -530,6 +530,14 @@ export interface IncomeEntry {
     status?: 'active' | 'deleted';
     parcela_id?: string;
     service_id?: string;
+    /**
+     * Quem tirou a renda de serviço (`status: 'deleted'`). 'previsao': a parcela saiu da
+     * previsão e a renda volta com ela. 'duplicata': era cópia extra, nunca volta. Ausente:
+     * exclusão do usuário, que a sincronia respeita e não recria.
+     */
+    retirada_por?: 'previsao' | 'duplicata' | null;
+    /** Id da renda mantida, quando `retirada_por` é 'duplicata'. */
+    duplicata_de?: string;
 }
 
 export interface IncomeRubric {
@@ -1197,8 +1205,13 @@ export interface ParcelaServico {
     id: string;
     descricao: string;
     valor: number;
+    /** YYYY-MM-DD ou ISO com hora; vazio = sem data. */
     data_prevista: string;
-    status: 'pendente' | 'pago';
+    /**
+     * `sem_previsao`: continua no contrato, mas não gera renda do mês nem entra na projeção
+     * (functions/rendas_servico.py::fora_da_previsao). Pendente sem data vale o mesmo.
+     */
+    status: 'pendente' | 'pago' | 'sem_previsao';
 }
 
 // ─── Knowledge Graph ──────────────────────────────────────────────────────────

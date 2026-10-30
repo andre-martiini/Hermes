@@ -1,6 +1,6 @@
 {
   "name": "consultar_rendas_servico",
-  "description": "Contratos de serviço ativos (Sigex, PLS MEC, clínicas...): parcelas pagas e restantes, valor a receber, próxima parcela, parcelas atrasadas, quando cada um acaba e inconsistências do cadastro. Inclui a renda prevista dos próximos meses separando Ifes (última Renda Principal recebida, sem 13º) de serviços. Somente leitura",
+  "description": "Contratos de serviço ativos (Sigex, PLS MEC, clínicas...): parcelas pagas e restantes, valor a receber, próxima parcela, parcelas atrasadas, quando cada um acaba e inconsistências do cadastro. Inclui a renda prevista dos próximos meses separando Ifes (última Renda Principal recebida, sem 13º) de serviços. Parcelas sem_previsao (ou pendentes sem data) ficam fora das restantes e da projeção e aparecem em `sem_previsao`. Somente leitura",
   "parameters": {
     "type": "object",
     "properties": {

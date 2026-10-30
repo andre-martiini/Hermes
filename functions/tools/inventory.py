@@ -560,7 +560,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "devolve `alterado` e `rendas_atualizadas`; reler com consultar_rendas_servico",
         dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
-        nota="tools/financas_itens.py::editar_parcela_servico: regrava o array `parcelas` do serviço e a renda ligada.",
+        nota="tools/financas_itens.py::editar_parcela_servico: regrava o array `parcelas` do serviço e a renda ligada; "
+        "sem_previsao (ou pendente sem data) retira a renda do mês (status 'deleted' + retirada_por='previsao') e voltar a "
+        "pendente com data a devolve.",
+    ),
+    "deduplicar_rendas_servico": ToolInventoryEntry(
+        "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "simulação por padrão devolve `mudancas` (mantida e extras por parcela e competência); repetir depois de "
+        "aplicar devolve zero grupos",
+        dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
+        nota="tools/financas_itens.py::deduplicar_rendas_servico: só marca as extras como 'deleted' "
+        "(retirada_por='duplicata', duplicata_de) com simular=false; nada é apagado.",
     ),
     "calculadora": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,

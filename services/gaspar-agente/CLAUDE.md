@@ -91,6 +91,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Mês sempre como `competencia` "YYYY-MM", com o mês de 1 a 12 ("2026-11" = novembro). O campo `mes` não é aceito.
 - Para corrigir um lançamento, use `editar_item_financeiro_v2` com o id (de `consultar_financas_v2`). Passar o id ao `registrar_item_financeiro_v2` cria OUTRO. Se o registrar avisar `possivel_duplicata`, pergunte ao André se é para corrigir o existente.
 - Apagar (`excluir_item_financeiro_v2`) pede o sim dele. Parcela de serviço (paga, pendente, adiar): `editar_parcela_servico`, com os ids que `consultar_rendas_servico` devolve.
+- Renda de serviço excluída não volta sozinha, mas a parcela segue na projeção de `consultar_rendas_servico`. Para tirá-la do mês e da projeção sem apagar o contrato: `editar_parcela_servico` com `status: "sem_previsao"` (ou `limpar_data_prevista: true`); para trazer de volta, `status: "pendente"` com a data. Renda repetida (mesma parcela e mês): `deduplicar_rendas_servico` roda em simulação; mostre a lista ao André e só repita com `simular: false` depois do sim.
 
 ## Estratégia (metas)
 - Para ver uma meta inteira (marcos com id, `dataAlvo` e `esperado`, métrica com fonte), use `obter_objetivo_estrategico` ou `listar_objetivos_estrategicos`; os ids que elas devolvem são os que `gerenciar_item_estrategico` aceita. Mudar meta, marco ou status pede o sim do André.
