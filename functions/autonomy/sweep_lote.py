@@ -36,7 +36,7 @@ MAX_PAGINAS_PADRAO = 10
 class ResultadoLote:
     """`varridos`: (request_id, acao) dos pedidos gravados; `erros`:
     (request_id, "Tipo: mensagem"); `candidatos`: quantos a consulta trouxe;
-    `truncado`: True se o teto de páginas foi atingido com mais pedidos por ler
+    `truncado`: True se o teto de páginas foi atingido com a última página cheia (pode haver mais pedidos por ler; falso positivo quando o total é exatamente limite*max_paginas)
     (a próxima passada começa de novo do início: aumentar o teto ou a cadência)."""
 
     candidatos: int
