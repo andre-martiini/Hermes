@@ -36,6 +36,7 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
+import { gastoAvulsoCentavos, mesAtualBrt, resumoDoMes } from './src/utils/gastoAvulso';
 import { comDinheiro, comDinheiroNaLista } from './src/utils/dinheiroFirestore';
 import { planejarRendasDeServicos } from './src/utils/rendasDeServico';
 // Importações dos módulos extraídos pelo split.js
@@ -2183,16 +2184,15 @@ const App: React.FC = () => {
     const todayStr = formatDateLocalISO(new Date());
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
     if (appSettings.notifications.budgetRisk.enabled) {
-      const now = new Date();
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
-      const totalSpend = financeTransactions.filter(t => {
-        const d = new Date(t.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      }).reduce((acc, t) => acc + t.amount, 0);
+      // Mesma conta da notificação de Pix do Telegram (functions/gasto_avulso.py).
+      const [anoBrt, mesBrtAtual] = mesAtualBrt();
+      const currentMonthStr = `${anoBrt}-${String(mesBrtAtual).padStart(2, '0')}`;
+      const resumoMes = resumoDoMes(financeTransactions, financeSettings, anoBrt, mesBrtAtual);
+      const monthlyBudget = (resumoMes.orcamento ?? 0) / 100;
+      const totalSpend = resumoMes.gasto / 100;
       if (monthlyBudget > 0) {
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        const currentDay = now.getDate();
+        const daysInMonth = new Date(anoBrt, mesBrtAtual, 0).getDate();
+        const currentDay = new Date(Date.now() - 3 * 3600 * 1000).getUTCDate();
         const budgetRatio = totalSpend / monthlyBudget;
         const timeRatio = currentDay / daysInMonth;
         // Condition: Over budget velocity AND (New day OR spending increased since last notification)
@@ -6080,10 +6080,7 @@ const App: React.FC = () => {
                       setCurrentMonth(m);
                       setCurrentYear(y);
                     }}
-                    currentMonthTotal={financeTransactions.filter(t => {
-                      const d = new Date(t.date);
-                      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                    }).reduce((acc, curr) => acc + curr.amount, 0)}
+                    currentMonthTotal={gastoAvulsoCentavos(financeTransactions, currentYear, currentMonth + 1) / 100}
                     currentMonthIncome={incomeEntries.filter(e => {
                       return e.month === currentMonth && e.year === currentYear && e.isReceived;
                     }).reduce((acc, curr) => acc + curr.amount, 0)}
