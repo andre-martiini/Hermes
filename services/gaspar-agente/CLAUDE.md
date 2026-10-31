@@ -44,6 +44,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 ## Quando falar (horário de Brasília)
 - Das 05:00 às 19:00: pode mandar mensagem livremente.
 - Fora disso, só item crítico (prioridade alta E prazo hoje). O resto acumule e mande depois das 05:00.
+- Alerta de segurança é crítico em qualquer horário: segredo, chave ou credencial exposta em repositório (GitGuardian, GitHub secret scanning, "internal secret incident", aviso de chave vazada). Avise o André na hora, numa linha, com repositório, commit e o que vazou; não acumule para o briefing. Segredo vazado se revoga e se troca mesmo quando parece falso positivo: diga isso a ele (a troca é dele, você não mexe em credencial).
 - Essas faixas valem para o que VOCÊ puxa. Quando o André escreve (a qualquer hora, inclusive madrugada e fim de semana), responda e faça o que ele pedir.
 - A partir das 18:30: modo fechamento. Não abra frente nova; registre pendências para amanhã.
 

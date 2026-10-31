@@ -222,8 +222,8 @@ const PLANILHA = new Set(['.xlsx', '.xlsm', '.xls', '.ods', '.csv'])
 // rotas dos repositórios do André (e a listagem dele). Escrever continua pelo fluxo do Argos.
 const ROTA_GITHUB = /^(user\/repos|repos\/andre-martiini\/[\w.-]+(\/(contents|pulls|issues|commits|branches|readme|languages|releases|compare|git\/trees)(\/[^\s?]*)?)?)(\?[^\s]*)?$/
 function githubLer(caminho: string): string {
-  const rota = caminho.trim().replace(/^\/+/, '').replace(/^https:\/\/api\.github\.com\//, '')
-  if (!ROTA_GITHUB.test(rota) || rota.includes('..')) throw new Error('rota fora do permitido (só leitura dos repositórios andre-martiini)')
+  const rota = caminho.trim().replace(/^GET\s+/i, '').replace(/^https:\/\/api\.github\.com\//, '').replace(/^\/+/, '')
+  if (!ROTA_GITHUB.test(rota) || rota.includes('..')) throw new Error(`rota fora do permitido (só leitura dos repositórios andre-martiini): recebi ${JSON.stringify(rota.slice(0, 200))}`)
   // Arquivo (não pasta) vem em texto puro, em vez de JSON com base64.
   const arquivo = /\/contents\/[^?]*\.[\w]+(\?|$)/.test(rota) || /\/readme(\?|$)/.test(rota)
   const args = ['api', '-X', 'GET', ...(arquivo ? ['-H', 'Accept: application/vnd.github.raw'] : []), rota]
