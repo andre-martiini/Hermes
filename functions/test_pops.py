@@ -61,6 +61,21 @@ class TestPops(unittest.TestCase):
         self.assertIn("gatilho", pops.criar(self.db, {"titulo": "x", "instrucao_sistema": "y", "origem": "gatilhos"})["erro"])
         self.assertEqual(self.db.docs, {})
 
+    def test_1b_novo_entra_mesmo_com_cinco_antigos(self):
+        """`obter_estado_atual` corta em 5, ordenando por atualizado_em/updated_at."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        for i in range(5):
+            self.db.collection(pops.ATIVOS).document(f"antigo{i}").set(
+                {"titulo": f"t{i}", "instrucao_sistema": "x", "sempre_ativo": True,
+                 "updated_at": f"2026-10-1{i} 12:00:00+00:00"})
+        pop_id = self._criar()
+        main._POPS_DATA_CACHE = None
+        with mock.patch("morning_summary.build_morning_summary", return_value={}):
+            estado = hermes_tools.obter_estado_atual(SimpleNamespace(db=self.db), {})
+        self.assertIn(pop_id, [p["id"] for p in estado["pops_ativos"]])
+
     def test_tools_estao_no_despacho(self):
         for nome in ("criar_pop", "editar_pop", "desativar_pop", "listar_pops"):
             self.assertIn(nome, hermes_tools._HANDLERS)
