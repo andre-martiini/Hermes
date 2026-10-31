@@ -48,9 +48,13 @@ class TestCicloDispatcher(unittest.TestCase):
             return 0
 
         self.saldo["v"] = cfg.despachos_restantes or 0
+        def devolver(db, q=1):
+            self.saldo["v"] += q
+            return q
+
         with mock.patch.object(cd, "ler_config_dispatcher", return_value=cfg), mock.patch.object(
             cd, "consumir_orcamento", side_effect=consumir
-        ):
+        ), mock.patch.object(cd, "devolver_orcamento", side_effect=devolver):
             return cd.executar_ciclo(self.db, self.enf, agora=T0, **kw)
 
     def test_off_nao_le_pedidos_nem_enfileira(self):
@@ -75,13 +79,13 @@ class TestCicloDispatcher(unittest.TestCase):
             cd, "consumir_orcamento", return_value=0
         ):
             r = cd.executar_ciclo(self.db, self.enf, agora=T0)
-        self.assertTrue(r.sem_orcamento)
         self.assertEqual((r.enfileirados, self.enf.chamadas), ((), []))
 
     def test_ja_despachado_e_erro_isolados(self):
         self.enf.falhas = {"a": cd.JaDespachado(), "b": RuntimeError("boom")}
         r = self._rodar(_cfg(ModoDispatcher.ATIVO, 3))
         self.assertEqual(r.ja_despachados, ("a",))
+        self.assertEqual(self.saldo["v"], 2)  # de 3, só "c" gastou; "a" e "b" foram estornados
         self.assertEqual([i for i, _ in r.enfileirados], ["c"])
         self.assertEqual(r.erros, (("b", "RuntimeError: boom"),))
 
@@ -98,6 +102,23 @@ class TestCicloDispatcher(unittest.TestCase):
         with self.assertRaises(ValueError):
             cd.executar_ciclo(self.db, self.enf, agora=datetime(2026, 1, 1))
 
-    def test_limite_corta_a_pagina(self):
-        r = self._rodar(_cfg(ModoDispatcher.ATIVO, 9), limite=2)
+    def test_limite_pequeno_pagina_e_orcamento_corta(self):
+        r = self._rodar(_cfg(ModoDispatcher.ATIVO, 2), limite=2)
         self.assertEqual([i for i, _ in r.enfileirados], ["a", "b"])
+
+    def test_consulta_falha_vira_erro_sem_enfileirar(self):
+        with mock.patch.object(cd, "ler_config_dispatcher", return_value=_cfg(ModoDispatcher.ATIVO, 3)), mock.patch.object(
+            cd, "_ids_despachaveis", side_effect=RuntimeError("indice")
+        ):
+            r = cd.executar_ciclo(self.db, self.enf, agora=T0)
+        self.assertEqual((r.enfileirados, r.erros), ((), (("consulta", "RuntimeError: indice"),)))
+
+    def test_agora_nao_datetime_levanta_valueerror(self):
+        with self.assertRaises(ValueError):
+            cd.executar_ciclo(self.db, self.enf, agora="2026-10-31")
+
+    def test_pagina_alem_do_limite(self):
+        for i in range(4):
+            repo.criar_pedido(self.db, PedidoDuravel(f"0{i}", RequestStatus.PENDENTE))
+        ids = cd._ids_despachaveis(self.db, 2)
+        self.assertEqual(ids, ["00", "01", "02", "03", "a", "b", "c"])

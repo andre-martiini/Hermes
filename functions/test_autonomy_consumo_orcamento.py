@@ -110,3 +110,22 @@ class ConsumirOrcamentoTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DevolverOrcamentoTest(unittest.TestCase):
+    def test_estorna_apos_baixa(self):
+        db = _Db({"modo": "ativo", "despachos_restantes": 5})
+        self.assertEqual(cd.consumir_orcamento(db, 2), 2)
+        self.assertEqual(cd.devolver_orcamento(db, 2), 2)
+        self.assertEqual(db.dados["despachos_restantes"], 5)
+
+    def test_so_ativo_com_saldo_valido_estorna(self):
+        for d in ({"modo": "shadow", "despachos_restantes": 5}, {"modo": "ativo"}, {"modo": "ativo", "despachos_restantes": -1}, None):
+            db = _Db(d)
+            self.assertEqual(cd.devolver_orcamento(db), 0, d)
+
+    def test_quantidade_invalida_ou_sem_transacao_ou_erro(self):
+        for ruim in (0, -1, True, "1", 1.0):
+            self.assertEqual(cd.devolver_orcamento(_DbSemTx(), ruim), 0)
+        self.assertEqual(cd.devolver_orcamento(_DbSemTx()), 0)
+        self.assertEqual(cd.devolver_orcamento(_Db({"modo": "ativo", "despachos_restantes": 1}, erro=RuntimeError("x"))), 0)
