@@ -145,6 +145,13 @@ def excluir_item_financeiro_v2(ctx: ToolContext, args: dict):
     return financas_itens.excluir(ctx.db, args)
 
 
+def _pops(nome):
+    def handler(ctx: ToolContext, args: dict):
+        from tools import pops
+        return getattr(pops, nome)(ctx.db, args)
+    return handler
+
+
 def excluir_entrada_diario(ctx: ToolContext, args: dict):
     from tools import diario_acao
     return diario_acao.excluir_entrada(ctx.db, args.get("task_id") or ctx.task_id, args.get("data"))
@@ -3242,6 +3249,10 @@ _HANDLERS: dict = {
     "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
     "editar_parcela_servico": editar_parcela_servico,
     "excluir_entrada_diario": excluir_entrada_diario,
+    "criar_pop": _pops("criar"),
+    "editar_pop": _pops("editar"),
+    "desativar_pop": _pops("desativar"),
+    "listar_pops": _pops("listar"),
     "deduplicar_rendas_servico": deduplicar_rendas_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 

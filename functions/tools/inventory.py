@@ -563,6 +563,30 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="tools/diario_acao.py::excluir_entrada: ArrayRemove da entrada de `acompanhamento`, com cópia em "
         "tarefas/{id}/diario_removido; repetir devolve 'nenhuma entrada'.",
     ),
+    "criar_pop": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve o `id`; reler com listar_pops ou obter_estado_atual (pops_ativos)",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="tools/pops.py::criar: id novo a cada chamada; desfaz-se com desativar_pop.",
+    ),
+    "editar_pop": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `anterior`; o antes e o depois ficam em pops_historico",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="tools/pops.py::editar: repetir com o mesmo texto não muda o POP (só soma linha no histórico).",
+    ),
+    "desativar_pop": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `ativo`; reler com listar_pops",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="tools/pops.py::desativar: move o doc entre pops_diretrizes e pops_diretrizes_inativos; "
+        "repetir devolve 'sem_mudanca'. Nunca apaga.",
+    ),
+    "listar_pops": ToolInventoryEntry(
+        "memoria_e_procedimentos", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
+        "nenhum — chamador pode reler",
+        nota="tools/pops.py::listar: lê pops_diretrizes, pops_diretrizes_inativos e pops_historico.",
+    ),
     "editar_parcela_servico": ToolInventoryEntry(
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "devolve `alterado` e `rendas_atualizadas`; reler com consultar_rendas_servico",

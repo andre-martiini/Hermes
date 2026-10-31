@@ -47,6 +47,9 @@ class FakeDoc:
             raise KeyError(f"documento inexistente: {self.path}")
         self._db.docs[self.path].update(copy.deepcopy(dados))
 
+    def delete(self):
+        self._db.docs.pop(self.path, None)
+
     def collection(self, nome):
         return FakeColecao(self._db, f"{self.path}/{nome}")
 

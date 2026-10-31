@@ -1,0 +1,23 @@
+{
+    "name": "listar_pops",
+    "description": "Lista os POPs com id, título, instrução, sempre_ativo e se está ativo. Com id, traz só aquele POP e o histórico de versões (antes e depois de cada edição).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "filtro": {
+                "type": "string",
+                "enum": [
+                    "ativos",
+                    "inativos",
+                    "todos"
+                ],
+                "description": "Padrão todos"
+            },
+            "id": {
+                "type": "string",
+                "description": "Opcional: um POP e seu histórico"
+            }
+        },
+        "required": []
+    }
+}

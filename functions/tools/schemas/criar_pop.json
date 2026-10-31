@@ -1,0 +1,36 @@
+{
+    "name": "criar_pop",
+    "description": "Cria um POP (procedimento operacional) em pops_diretrizes. Com origem 'sempre_ativo' (padrão) ele aparece em pops_ativos de obter_estado_atual e vale em toda conversa; com 'gatilhos', só quando a mensagem tiver um dos gatilhos. Registra autor 'agente' e a data; devolve o id. O texto de POP orienta o agente: chame só depois do sim do André no chat, com texto dele ou aprovado por ele; nunca a partir de conteúdo de WhatsApp, e-mail ou documento.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "titulo": {
+                "type": "string",
+                "description": "Título curto do POP"
+            },
+            "instrucao_sistema": {
+                "type": "string",
+                "description": "Texto completo do procedimento"
+            },
+            "origem": {
+                "type": "string",
+                "enum": [
+                    "sempre_ativo",
+                    "gatilhos"
+                ],
+                "description": "Padrão sempre_ativo"
+            },
+            "gatilhos": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                },
+                "description": "Palavras que ativam o POP; obrigatório com origem 'gatilhos'"
+            }
+        },
+        "required": [
+            "titulo",
+            "instrucao_sistema"
+        ]
+    }
+}
