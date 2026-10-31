@@ -716,9 +716,9 @@ decisoes:
     motivo: "Fora de escopo: agendamento (função/scheduler), enfileirador Cloud Tasks real, worker HTTP, observabilidade de estorno que falhou, pedidos além de 5 páginas."
 testes:
   resultados:
-    - "functions/ completo ANTES 5159 OK (main); DEPOIS 5173 OK (207s; 14 testes novos em test_autonomy_ciclo_dispatcher e test_autonomy_consumo_orcamento)."
+    - "functions/ completo ANTES 5159 OK (main); DEPOIS 5174 OK (214s; 15 testes novos em test_autonomy_ciclo_dispatcher e test_autonomy_consumo_orcamento)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 4 achados reais -- vazamento de orçamento por redespacho, falha do enfileirador gastando orçamento, bloqueio de cabeça de fila (limite sem paginação), exceção da consulta escapando; corrigidos (estorno em duplicata, paginação por cursor, consulta em try, agora não-datetime = ValueError). Rodada 2 (focada na correção): nenhum bug; 2 riscos baixos: estorno em falha ambígua (corrigido: não estorna) e estorno que falha sem observabilidade (aceito, fail-closed). Não verificado contra Firestore/Cloud Tasks reais."
+  - "Rodada 1 (agente sem contexto, somente leitura): 4 achados reais -- vazamento de orçamento por redespacho, falha do enfileirador gastando orçamento, bloqueio de cabeça de fila (limite sem paginação), exceção da consulta escapando; corrigidos (estorno em duplicata, paginação por cursor, consulta em try, agora não-datetime = ValueError). Rodada 2 (focada na correção): nenhum bug; 2 riscos baixos: estorno em falha ambígua (corrigido: não estorna) e estorno que falha sem observabilidade (aceito, fail-closed). Codex na PR #587: 1 achado P1 real (snapshot do saldo em decidir_lote consumia a vaga de uma duplicata estornada e deixava candidatos seguintes sem despacho, fome por ids baixos); agora o teto de decidir_lote é len(pedidos) e a baixa transacional impõe o limite; teste cobre. Rodada 3 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore/Cloud Tasks reais."
 pendencias:
   - "P08: wiring (agendar o ciclo, enfileirador Cloud Tasks real tratando ALREADY_EXISTS como JaDespachado, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
 ```
