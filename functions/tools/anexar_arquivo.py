@@ -776,6 +776,8 @@ def preparar_upload(ctx, args: dict) -> dict:
             f"curl -X PUT -H 'Content-Type: {mime}' --data-binary @ARQUIVO "
             f"'{url_hermes if cabe_no_hermes else url_gcs}'  "
             f"Depois: upload_token='{token}' em anexar_arquivo ou editar_imagem. "
+            + ("Se o proxy recusar esse host (CONNECT 403), faca o mesmo PUT em "
+               "upload_url_alternativa." if cabe_no_hermes and url_gcs else "")
             + ("" if cabe_no_hermes else
                f"Arquivo acima de {MAX_BYTES_VIA_HERMES // 1024 // 1024} MB so sobe "
                "pela URL assinada direta, que exige egresso para storage.googleapis.com.")
