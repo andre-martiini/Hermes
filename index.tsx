@@ -16,6 +16,7 @@ import {
 import HealthView from './HealthView';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { UpdatePrompt } from './src/components/UpdatePrompt';
+import { SessaoUnicaAviso } from './src/components/SessaoUnicaAviso';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { useMeetingRecordingEngine, MeetingRecordingEngineContext } from './src/hooks/useMeetingRecordingEngine';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
@@ -7396,6 +7397,7 @@ if (container) {
         <App />
       </ErrorBoundary>
       <UpdatePrompt />
+      <SessaoUnicaAviso />
     </>
   );
 }

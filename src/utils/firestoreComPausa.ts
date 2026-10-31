@@ -9,9 +9,12 @@ import { GerenciadorOuvintes, ativarPausaOciosa } from './pausaOuvintes';
 
 export * from '@firebase/firestore';
 
-const gerenciador = new GerenciadorOuvintes();
+export const gerenciador = new GerenciadorOuvintes();
 if (typeof document !== 'undefined') ativarPausaOciosa(gerenciador, document);
 
 export function onSnapshot(...args: unknown[]): () => void {
     return gerenciador.registrar(() => (real.onSnapshot as (...a: unknown[]) => () => void)(...args));
 }
+
+/** Ouvinte que nunca é pausado: só para o documento de controle da sessão única. */
+export const onSnapshotSemPausa = real.onSnapshot;
