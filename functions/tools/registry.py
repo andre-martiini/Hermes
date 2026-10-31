@@ -2848,6 +2848,7 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                             "enum": [
                                 "acao", "whatsapp", "email", "agenda",
                                 "repo", "financeiro", "saude", "secretario_whatsapp",
+                                "sistema", "estrategia", "sessao",
                                 None,
                             ],
                         },
@@ -2859,7 +2860,8 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                                 "promessa_sem_retorno", "audio_relevante",
                                 "secretario_investigacao_concluida",
                                 "secretario_insistencia", "secretario_assunto_sensivel",
-                                "secretario_decisao_forcada",
+                                "secretario_decisao_forcada", "secretario_perguntou_se_robo",
+                                "outbox_evento_travado", "meta_retomada", "notificacao_sessao",
                                 None,
                             ],
                         },

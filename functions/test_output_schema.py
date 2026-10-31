@@ -1033,6 +1033,7 @@ class TestOutputSchema(unittest.TestCase):
                 "enum": [
                     "acao", "whatsapp", "email", "agenda",
                     "repo", "financeiro", "saude", "secretario_whatsapp",
+                    "sistema", "estrategia", "sessao",
                     None,
                 ],
             },
@@ -1047,7 +1048,8 @@ class TestOutputSchema(unittest.TestCase):
                     "promessa_sem_retorno", "audio_relevante",
                     "secretario_investigacao_concluida",
                     "secretario_insistencia", "secretario_assunto_sensivel",
-                    "secretario_decisao_forcada",
+                    "secretario_decisao_forcada", "secretario_perguntou_se_robo",
+                    "outbox_evento_travado", "meta_retomada", "notificacao_sessao",
                     None,
                 ],
             },
