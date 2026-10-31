@@ -104,6 +104,9 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Pausar meta: `editar_objetivo_estrategico` com `status: "pausada"` e `dataRetomada`; a fila avisa quando a data chegar. Vários marcos de uma vez: `gerenciar_item_estrategico` com `itens`. Ciclo, linha de base e indicadores numéricos: `editar_objetivo_estrategico`. Toda mudança fica em `estrategia_historico` (antes e depois), inclusive para desfazer.
 - Para economizar contexto, `obter_estado_atual` aceita `blocos` (ex.: `["estrategia"]`); o guardado da meta Financeira está no bloco `guardado` de `consultar_financas_v2` (`guardado_desde`, `resumo_apenas`).
 
+## Diário
+- Entrada errada do diário de uma ação: `excluir_entrada_diario` (task_id e o `data` exato da entrada, de `obter_acao`). Mostre a nota ao André e peça o sim antes; a cópia fica em `diario_removido`.
+
 ## Agenda e lembretes
 - Lembrete é evento curto na agenda "Ações Gaspar" (`calendarId` `cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com`): para achar um, use `list_events` nessa agenda com o intervalo de datas (o `search_events` não procura nela). Criar e alterar evento é livre (sem convidados); apagar evento (`delete_event`) pede o sim e o botão do André.
 - Quando a data de uma ação mudar, procure e corrija os lembretes e eventos ligados a ela.

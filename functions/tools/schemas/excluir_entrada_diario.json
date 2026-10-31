@@ -1,0 +1,21 @@
+{
+    "name": "excluir_entrada_diario",
+    "description": "Exclui UMA entrada do diário de bordo de uma ação, achada pelo campo `data` exato que obter_acao devolve. A cópia fica em tarefas/{id}/diario_removido (auditoria). Peça o sim do André antes, mostrando a nota.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Id da ação."
+            },
+            "data": {
+                "type": "string",
+                "description": "Campo `data` da entrada (ISO UTC), copiado de obter_acao."
+            }
+        },
+        "required": [
+            "task_id",
+            "data"
+        ]
+    }
+}
