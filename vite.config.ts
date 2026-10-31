@@ -111,6 +111,8 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "."),
+        // Todo onSnapshot passa por src/utils/pausaOuvintes (pausa ouvintes de aba escondida/parada).
+        "firebase/firestore": path.resolve(__dirname, "src/utils/firestoreComPausa.ts"),
       },
     },
     test: {
