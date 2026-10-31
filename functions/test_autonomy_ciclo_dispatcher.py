@@ -85,7 +85,7 @@ class TestCicloDispatcher(unittest.TestCase):
         self.enf.falhas = {"a": cd.JaDespachado(), "b": RuntimeError("boom")}
         r = self._rodar(_cfg(ModoDispatcher.ATIVO, 3))
         self.assertEqual(r.ja_despachados, ("a",))
-        self.assertEqual(self.saldo["v"], 2)  # de 3, só "c" gastou; "a" e "b" foram estornados
+        self.assertEqual(self.saldo["v"], 1)  # de 3: "a" estornado (duplicata); "b" (erro ambíguo) e "c" gastos gastou; "a" e "b" foram estornados
         self.assertEqual([i for i, _ in r.enfileirados], ["c"])
         self.assertEqual(r.erros, (("b", "RuntimeError: boom"),))
 

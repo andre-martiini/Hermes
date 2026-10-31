@@ -3,10 +3,10 @@
 Uma passada: lê a config (`ler_config_dispatcher`); em `off` não toca em pedidos. Senão lê UMA página
 de pedidos despacháveis (PENDENTE / RETENTATIVA_AGENDADA, em ordem de id), decide com `decidir_lote`
 e executa: em `shadow` só devolve o que SERIA enfileirado; em `ativo` baixa 1 do orçamento
-(`consumir_orcamento`, ANTES de enfileirar; estornado por `devolver_orcamento` se o despacho não ocorreu) e chama o `enfileirar(nome, payload)` injetado (o Cloud Tasks
+(`consumir_orcamento`, ANTES de enfileirar; estornado por `devolver_orcamento` só quando o enfileirador recusa por duplicata) e chama o `enfileirar(nome, payload)` injetado (o Cloud Tasks
 real fica para o wiring). Sem orçamento a passada para de enfileirar. `JaDespachado` (ALREADY_EXISTS) conta
 como já despachado. Qualquer outra falha do enfileirador
-vira item de `erros` sem derrubar os demais. Pedido ilegível vira erro, não interrompe. Nada chama este
+vira item de `erros` sem estorno (resultado ambíguo: o orçamento fica gasto, lado seguro) e sem derrubar os demais. Pedido ilegível vira erro, não interrompe. Nada chama este
 módulo em produção (shadow/off); agendar a passada fica para depois; lê até MAX_PAGINAS páginas de `limite`.
 """
 
@@ -117,8 +117,7 @@ def executar_ciclo(
             except JaDespachado:
                 devolver_orcamento(db, 1)  # nada novo foi despachado: não drena o saldo a cada passada
                 ja.append(p.request_id)
-            except Exception as exc:
-                devolver_orcamento(db, 1)
+            except Exception as exc:  # ambíguo (a tarefa pode ter sido criada): orçamento fica gasto
                 erros.append((p.request_id, f"{type(exc).__name__}: {exc}"))
             else:
                 feitos.append((p.request_id, d.nome_tarefa))
