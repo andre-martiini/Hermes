@@ -669,8 +669,8 @@ def receber_upload(ctx_db, uid_esperado, token: str, corpo: bytes) -> dict:
 
     _bucket().blob(reserva["caminho"]).upload_from_string(
         corpo, content_type=reserva.get("mime") or "application/octet-stream")
-    return {"status": 200, "ok": True, "bytes": len(corpo), "nome": reserva["nome"],
-            "proximo_passo": f"anexar_arquivo(task_id=..., upload_token='{token}')"}
+    return {"status": 200, "ok": True, "bytes": len(corpo), "sha256": obtido, "nome": reserva["nome"],
+            "proximo_passo": f"upload_token='{token}' em anexar_arquivo ou editar_imagem"}
 
 
 def _assinar_upload(caminho: str, mime: str) -> str:
@@ -733,7 +733,8 @@ def preparar_upload(ctx, args: dict) -> dict:
     if len(sha) != 64:
         raise ValueError("`sha256` e obrigatorio: hex digest de 64 caracteres do arquivo.")
     if tamanho > MAX_BYTES:
-        raise ValueError(f"Arquivo excede o teto de {MAX_BYTES // 1024 // 1024} MB.")
+        raise ValueError(f"Arquivo de {tamanho / 1024 / 1024:.1f} MB excede o teto de "
+                         f"{MAX_BYTES // 1024 // 1024} MB do envio.")
 
     token = f"upl-{secrets.token_urlsafe(16)}"
     caminho = f"uploads_mcp/{ctx.user_uid}/{token}/{nome}"
@@ -774,7 +775,7 @@ def preparar_upload(ctx, args: dict) -> dict:
         "instrucao": (
             f"curl -X PUT -H 'Content-Type: {mime}' --data-binary @ARQUIVO "
             f"'{url_hermes if cabe_no_hermes else url_gcs}'  "
-            f"Depois: anexar_arquivo(task_id=..., upload_token='{token}'). "
+            f"Depois: upload_token='{token}' em anexar_arquivo ou editar_imagem. "
             + ("" if cabe_no_hermes else
                f"Arquivo acima de {MAX_BYTES_VIA_HERMES // 1024 // 1024} MB so sobe "
                "pela URL assinada direta, que exige egresso para storage.googleapis.com.")

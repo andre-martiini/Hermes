@@ -56,6 +56,12 @@ Restrições: sem texto, sem pessoas, sem barcos, sem marca-d'água.
 - Várias referências: identifique cada uma pela ordem e papel — "Imagem 1: foto da equipe (sujeito). Imagem 2: logotipo (aplicar no canto superior direito, pequeno)". Diga como combinar e peça luz, escala, perspectiva e sombras coerentes.
 - **Uma mudança por rodada** e repita a lista do que deve ficar a cada nova edição — senão os detalhes derivam.
 - Personagem consistente em várias imagens: gere a primeira, depois use-a como referência com "não redesenhe o personagem" e repita a descrição dele.
+- **Origem de cada referência**, nesta ordem: `drive_file_id` (já está no Drive), `url` (pública), `gmail_message_id` (anexo de e-mail). Nunca base64 pela conversa.
+- **Referência local** (arquivo só na sua máquina ou no container da nuvem, como uma foto ou logo que o André mandou):
+  1. `stat -c %s ARQUIVO` e `sha256sum ARQUIVO`; chame `preparar_upload(nome, tamanho_bytes, sha256)`, um por arquivo.
+  2. `curl -sS -X PUT --data-binary @ARQUIVO '<upload_url>'`. A `upload_url` fica no próprio host do Gaspar (`gestao-hermes.firebaseapp.com/mcp/upload/...`) e passa por proxy de nuvem; responde 200 com `bytes` e `sha256` recebidos: confira que batem. Não use `upload_url_alternativa` (storage.googleapis.com): ela só serve fora de proxy, para arquivo acima de 30 MB.
+  3. Passe o token em `editar_imagem`: `imagens: [{"upload_token": "upl-..."}, ...]` (e `mascara: {"upload_token": ...}` se houver). O token vale 15 min e uma operação só: para outra edição, use o `drive_file_id` da imagem gerada ou prepare de novo.
+  - Erros: 400 "checksum nao confere" = o arquivo enviado não é o declarado (refaça o `sha256sum`); 404 "desconhecido ou ja consumido" = token errado ou já usado; acima de 50 MB o `preparar_upload` recusa (reduza a imagem antes).
 - Máscara: só se o André tiver um PNG com a área a mudar transparente; sem ela, a instrução de "mude apenas X" costuma bastar no `sunburst`.
 - Nunca envie foto ou documento com dados de terceiros (servidores, alunos) sem pedido explícito dele.
 

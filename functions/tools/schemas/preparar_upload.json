@@ -1,6 +1,6 @@
 {
   "name": "preparar_upload",
-  "description": "Devolve uma URL assinada para subir um arquivo local direto ao storage, sem passá-lo pela conversa. É o caminho correto para qualquer arquivo real: não gasta token, não tem teto de mensagem e o conteúdo não depende do modelo reproduzi-lo. Depois chame anexar_arquivo com o upload_token.",
+  "description": "Prepara o envio de um arquivo local sem passá-lo pela conversa. Faça PUT do arquivo em upload_url (curl -sS -X PUT --data-binary @ARQUIVO '<upload_url>'), que fica no mesmo host do Gaspar e por isso funciona até atrás de proxy com lista de hosts; responde 200 com bytes e sha256 recebidos. Use upload_url_alternativa (storage.googleapis.com) só se upload_url vier vazia, para arquivo acima de 30 MB. Depois use o upload_token em anexar_arquivo ou em editar_imagem (imagens[].upload_token, mascara.upload_token). O token vale 15 minutos e uma única operação.",
   "parameters": {
     "type": "object",
     "properties": {
