@@ -4,14 +4,17 @@ Lê UM documento (`configuracoes/autonomia_dispatcher`) com `modo` ("off" | "sha
 e `despachos_restantes` (inteiro >= 0) e devolve a entrada de `decidir_lote`. Fail-closed:
 documento ausente, ilegível, erro de leitura, modo desconhecido ou orçamento ausente/inválido
 vira `OFF` / sem orçamento (nada é enfileirado). O orçamento só vale em `ativo`; em `shadow`
-não é lido como permissão. Só LEITURA: consumir o orçamento (transação) e agendar o
-dispatcher ficam para sub-entrega seguinte; nada chama este módulo em produção.
+não é lido como permissão. `consumir_orcamento` baixa o saldo numa transação (tudo ou nada,
+só em `ativo`, nunca abaixo de zero); agendar o dispatcher fica para sub-entrega seguinte.
+Nada chama este módulo em produção.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
+from firebase_admin import firestore
 
 from autonomy.dispatcher import ModoDispatcher, modo_de_config
 
@@ -54,3 +57,37 @@ def ler_config_dispatcher(db: Any) -> ConfigDispatcher:
         return interpretar_config(snap.to_dict())
     except Exception:
         return _DESLIGADO
+
+
+def consumir_orcamento(db: Any, quantidade: int = 1) -> int:
+    """Baixa `quantidade` de `despachos_restantes` numa transação; devolve quanto foi concedido.
+
+    Tudo ou nada: concede `quantidade` ou 0 (nunca parcial). Concede 0, sem gravar, se o modo
+    não é `ativo`, o saldo é inválido/insuficiente, `quantidade` é inválida (bool, não int, < 1)
+    ou o backend não tem transação. Qualquer falha do Firestore também devolve 0 (fail-closed:
+    sem confirmação da baixa, nada é despachado). Chamar ANTES de enfileirar.
+    """
+    if type(quantidade) is not int or quantidade < 1:
+        return 0
+    try:
+        if not hasattr(db, "transaction"):
+            return 0
+        ref = db.collection(COLECAO_CONFIG).document(DOC_DISPATCHER)
+        tx = db.transaction()
+
+        @firestore.transactional
+        def _exec(transaction):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return 0
+            cfg = interpretar_config(snap.to_dict())
+            if cfg.modo is not ModoDispatcher.ATIVO or cfg.despachos_restantes is None:
+                return 0
+            if cfg.despachos_restantes < quantidade:
+                return 0
+            transaction.update(ref, {"despachos_restantes": cfg.despachos_restantes - quantidade})
+            return quantidade
+
+        return _exec(tx)
+    except Exception:
+        return 0
