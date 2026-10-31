@@ -39,7 +39,7 @@ def interpretar_config(dados: object) -> ConfigDispatcher:
     bruto = dados.get("despachos_restantes")
     saldo = bruto if type(bruto) is int and bruto >= 0 else None
     if modo is ModoDispatcher.ATIVO and saldo is None:
-        return ConfigDispatcher(modo, None, "orcamento_ausente_ou_invalido")
+        return ConfigDispatcher(ModoDispatcher.OFF, None, "orcamento_ausente_ou_invalido")
     if modo is ModoDispatcher.SHADOW:
         return ConfigDispatcher(modo, None, "sombra")
     return ConfigDispatcher(modo, saldo, "ok")

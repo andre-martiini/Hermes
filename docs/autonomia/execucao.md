@@ -716,7 +716,7 @@ testes:
   resultados:
     - "functions/ completo ANTES 5140 OK (main); DEPOIS 5147 OK (183s; 7 testes novos em test_autonomy_config_dispatcher)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observação para o wiring: proteger decidir_lote com try (item que não seja PedidoDuravel levanta TypeError). Não verificado contra Firestore real."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observação para o wiring: proteger decidir_lote com try (item que não seja PedidoDuravel levanta TypeError). Codex na PR #579: 1 achado P2 real (ATIVO com orçamento inválido devolvia modo ATIVO, contra o contrato fail-closed); agora devolve OFF; teste assertando o modo. Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
 pendencias:
   - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, consumo transacional do orçamento, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
 ```

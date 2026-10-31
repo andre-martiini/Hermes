@@ -53,6 +53,7 @@ class ConfigDispatcherTest(unittest.TestCase):
             d = {"modo": "ativo"} if bruto is None else {"modo": "ativo", "despachos_restantes": bruto}
             c = cd.interpretar_config(d)
             self.assertIsNone(c.despachos_restantes, bruto)
+            self.assertIs(c.modo, ModoDispatcher.OFF, bruto)
             self.assertEqual(c.motivo, "orcamento_ausente_ou_invalido")
 
     def test_ativo_orcamento_zero(self):
