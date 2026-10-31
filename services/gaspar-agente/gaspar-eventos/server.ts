@@ -137,15 +137,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     return { content: [{ type: 'text', text: JSON.stringify(cursor.grupos) }] }
   }
   if (req.params.name === 'github_ler')
-    return { content: [{ type: 'text', text: githubLer(String((req.params.arguments as any).caminho)) }] }
+    return { content: [{ type: 'text', text: githubLer(caminhoDe(req.params.arguments)) }] }
   if (req.params.name === 'abrir_imagem_drive')
-    return { content: [{ type: 'text', text: abrirImagemDrive(String((req.params.arguments as any).caminho)) }] }
+    return { content: [{ type: 'text', text: abrirImagemDrive(caminhoDe(req.params.arguments)) }] }
   if (req.params.name === 'ler_planilha') {
     const a = req.params.arguments as any
-    return { content: [{ type: 'text', text: lerPlanilha(String(a.caminho), a.aba ? String(a.aba) : undefined, Number(a.max_linhas) || 200) }] }
+    return { content: [{ type: 'text', text: lerPlanilha(caminhoDe(a), a.aba ? String(a.aba) : undefined, Number(a.max_linhas) || 200) }] }
   }
   if (req.params.name === 'transcrever_audio')
-    return { content: [{ type: 'text', text: await transcrever(String((req.params.arguments as any).caminho)) }] }
+    return { content: [{ type: 'text', text: await transcrever(caminhoDe(req.params.arguments)) }] }
   if (req.params.name === 'enviar_opcoes') {
     const a = req.params.arguments as any
     // O modelo as vezes chama com "pergunta" e manda opcoes como string JSON: aceita os dois em vez de enviar "undefined".
@@ -221,9 +221,17 @@ const PLANILHA = new Set(['.xlsx', '.xlsm', '.xls', '.ods', '.csv'])
 // GitHub, só leitura: usa o `gh` já autenticado neste notebook, sempre com GET, e só aceita
 // rotas dos repositórios do André (e a listagem dele). Escrever continua pelo fluxo do Argos.
 const ROTA_GITHUB = /^(user\/repos|repos\/andre-martiini\/[\w.-]+(\/(contents|pulls|issues|commits|branches|readme|languages|releases|compare|git\/trees)(\/[^\s?]*)?)?)(\?[^\s]*)?$/
+// O modelo às vezes chama com `path` em vez de `caminho` (31/10/2026: o github_ler recusou tudo porque
+// String(undefined) virava a rota "undefined"). Aceita os dois e diz claramente quando falta.
+function caminhoDe(args: any): string {
+  const valor = args?.caminho ?? args?.path
+  if (typeof valor !== 'string' || !valor.trim()) throw new Error('falta o parâmetro "caminho" (texto)')
+  return valor
+}
+
 function githubLer(caminho: string): string {
-  const rota = caminho.trim().replace(/^\/+/, '').replace(/^https:\/\/api\.github\.com\//, '')
-  if (!ROTA_GITHUB.test(rota) || rota.includes('..')) throw new Error('rota fora do permitido (só leitura dos repositórios andre-martiini)')
+  const rota = caminho.trim().replace(/^GET\s+/i, '').replace(/^https:\/\/api\.github\.com\//, '').replace(/^\/+/, '')
+  if (!ROTA_GITHUB.test(rota) || rota.includes('..')) throw new Error(`rota fora do permitido (só leitura dos repositórios andre-martiini): recebi ${JSON.stringify(rota.slice(0, 200))}`)
   // Arquivo (não pasta) vem em texto puro, em vez de JSON com base64.
   const arquivo = /\/contents\/[^?]*\.[\w]+(\?|$)/.test(rota) || /\/readme(\?|$)/.test(rota)
   const args = ['api', '-X', 'GET', ...(arquivo ? ['-H', 'Accept: application/vnd.github.raw'] : []), rota]
