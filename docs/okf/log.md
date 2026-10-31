@@ -8,6 +8,7 @@ timestamp: 2026-08-01T00:00:00Z
 
 # Log
 
+- **2026-10-31** — Gaspar sobe sozinho depois de reinício do Windows: `services/gaspar-agente/instalar-tarefas.ps1` (gatilho de logon na tarefa "iniciar", cria "vigia", opcional "travar tela"; simulação por padrão, `-Aplicar` aplica). Login automático do Windows fica por conta do André (README do agente).
 - **2026-10-30** — Estratégia com perfil de 3 meses, restante (A4–A8, B2–B6), no mesmo PR do núcleo: fonte `guardado_acumulado` (regra do bolso), status `pausada` com `dataRetomada` e aviso de retomada na fila, edição do perfil e marcos em lote, histórico `estrategia_historico` (MCP e tela), tela com perfil por indicador, perfil no `obter_estado_atual` com `blocos`, bloco `guardado` no `consultar_financas_v2`, aviso de meta de saúde sem fonte e check-in semanal no Telegram (`checkin_estrategia_semanal`). `schema-firestore.md` e `cloud-functions.md` atualizados.
 
 - **2026-10-30** — Estratégia com perfil de 3 meses, núcleo (PR 1 de 4): `estrategia_pessoal` ganha `ciclo`, `linhaBase`, `indicadores` e, nos marcos, `dataAlvo` e `esperado`; cálculo do esperado de hoje e do estado em módulo puro (`functions/perfil_estrategia.py` e `src/utils/perfilEstrategia.ts`, mesma fixture JSON); escrita de marco deixou de apagar campos que não conhece (no MCP e na tela); marco legado em texto ganhou id estável; tools `obter_objetivo_estrategico` e `listar_objetivos_estrategicos`. `schema-firestore.md` atualizado.
