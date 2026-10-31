@@ -89,6 +89,13 @@ def meses_entre(inicio: str, fim: str) -> list[str]:
     return meses
 
 
+def avulsas_do_mes(db, competencia: str) -> list[dict]:
+    """Transacoes avulsas do mes (finance_transactions nao tem month/year: vale o prefixo de `date`)."""
+    # So `>=` no servidor (indice de campo unico); o teto do mes sai no filtro abaixo.
+    docs = (s.to_dict() or {} for s in db.collection("finance_transactions").where("date", ">=", competencia).stream())
+    return [d for d in docs if str(d.get("date") or "")[:7] == competencia and d.get("status") != "deleted"]
+
+
 def montar_mes(db, competencia: str) -> dict:
     """Retrato do mes a partir dos dados de agora."""
     import fatura_cartao
@@ -111,6 +118,8 @@ def montar_mes(db, competencia: str) -> dict:
     contas_pagas = round(sum(_num(c.get("amount")) for c in contas if c.get("isPaid")), 2)
     aportes = round(sum(_num(c.get("amount")) for c in contas
                         if c.get("category") in CATEGORIAS_APORTE), 2)
+    avulsas = avulsas_do_mes(db, competencia)
+    avulsas_total = round(sum(_num(a.get("amount")) for a in avulsas), 2)
 
     fatura = fatura_cartao.consultar(db, competencia=competencia, limite=0)
     config = db.collection("finance_settings").document("config").get().to_dict() or {}
@@ -121,8 +130,9 @@ def montar_mes(db, competencia: str) -> dict:
         "periodo": comp.periodo(mes0, ano),
         "renda": {"total": renda_total, "recebida": renda_recebida, "por_fonte": por_fonte},
         "contas": {"total": contas_total, "pagas": contas_pagas, "quantidade": len(contas), "aportes": aportes},
-        "saldo": {"previsto": round(renda_total - contas_total, 2),
-                  "realizado": round(renda_recebida - contas_pagas, 2)},
+        "avulsas": {"total": avulsas_total, "quantidade": len(avulsas)},
+        "saldo": {"previsto": round(renda_total - contas_total - avulsas_total, 2),
+                  "realizado": round(renda_recebida - contas_pagas - avulsas_total, 2)},
         "cartao": {
             "total_gasto": fatura.get("total_gasto"),
             "total_encargos": fatura.get("total_encargos"),
