@@ -178,7 +178,7 @@ describe('firestore.rules — coleções já denegadas por completo (regressão)
 });
 
 describe('firestore.rules — exceção pontual em "system" para fluxos do frontend (achado do Codex na PR #190)', () => {
-  for (const docId of ['sync', 'copilot_soul']) {
+  for (const docId of ['sync', 'copilot_soul', 'sessao_ativa']) {
     it(`dono (internalUser) pode ler e escrever system/${docId} (index.tsx / KnowledgeView.tsx usam diretamente)`, async () => {
       const db = testEnv
         .authenticatedContext('dono-uid', {

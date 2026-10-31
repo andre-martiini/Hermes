@@ -9,33 +9,56 @@
 # Aqui: se o claude do agente está no ar mas o poller do Telegram (bot.pid) ou o canal de eventos não estão,
 # duas conferências seguidas (5 min) encerram a sessão (encerrar.ps1) e religam pela tarefa "Gaspar - iniciar".
 # No máximo 3 religadas por hora: se a causa for outra, não fica reiniciando em loop (cada subida gasta tokens).
-# Não trata o conector Sistema Hermes invalidado: isso pede login do dono, e reiniciar não resolve.
+# Também reinicia se o conector Sistema Hermes nunca conectou na sessão atual (só CONNECT_TIMEOUT no log dele, nenhuma
+# conexão): em 29/10 a função do Hermes demorou a acordar às 05:00 e o agente passou a manhã sem o Gaspar. O iniciar.ps1
+# aquece o servidor antes de subir, então a nova subida costuma conectar. NÃO trata o conector invalidado (o log fala em
+# "invalidated", sem timeout): isso pede login do dono, e reiniciar não resolve.
 #
 # -Simular: só mostra a decisão, sem gravar nem mexer em nada.   -Teste: confere a regra com casos fabricados.
 param([switch]$Simular, [switch]$Teste)
 
 # Devolve $null se o agente está saudável, ou o motivo em texto.
-function Get-MotivoDoenca($idadeMin, $pollerVivo, $eventosEsperado, $eventosVivo) {
+function Get-MotivoDoenca($idadeMin, $pollerVivo, $eventosEsperado, $eventosVivo, $hermesFalhou) {
   if ($idadeMin -lt 5) { return $null }   # ainda subindo os canais
   if (-not $pollerVivo) { return 'poller do Telegram (bot.pid) morto' }
   if ($eventosEsperado -and -not $eventosVivo) { return 'canal gaspar-eventos morto' }
+  if ($hermesFalhou) { return 'conector Sistema Hermes nao conectou' }
   return $null
+}
+
+# O log do conector na sessão atual só tem timeout de conexão e nenhuma conexão estabelecida? ("invalidated" não conta.)
+function Test-LogHermesFalhou($texto) {
+  return ($texto -match 'CONNECT_TIMEOUT') -and ($texto -notmatch 'Successfully connected|Connection established')
 }
 
 if ($Teste) {
   $casos = @(
-    @{ n = 'subindo: ainda nao exige nada'; a = @(2, $false, $true, $false); esperado = $null },
-    @{ n = 'saudavel com eventos'; a = @(30, $true, $true, $true); esperado = $null },
-    @{ n = 'saudavel sem chave (canal de eventos nao esperado)'; a = @(30, $true, $false, $false); esperado = $null },
-    @{ n = 'poller morto'; a = @(30, $false, $true, $true); esperado = 'poller' },
-    @{ n = 'canal de eventos morto'; a = @(30, $true, $true, $false); esperado = 'eventos' }
+    @{ n = 'subindo: ainda nao exige nada'; a = @(2, $false, $true, $false, $false); esperado = $null },
+    @{ n = 'saudavel com eventos'; a = @(30, $true, $true, $true, $false); esperado = $null },
+    @{ n = 'saudavel sem chave (canal de eventos nao esperado)'; a = @(30, $true, $false, $false, $false); esperado = $null },
+    @{ n = 'poller morto'; a = @(30, $false, $true, $true, $false); esperado = 'poller' },
+    @{ n = 'canal de eventos morto'; a = @(30, $true, $true, $false, $false); esperado = 'eventos' },
+    @{ n = 'conector Hermes nunca conectou'; a = @(30, $true, $true, $true, $true); esperado = 'Hermes' },
+    @{ n = 'conector Hermes sem conexao, mas a sessao ainda esta subindo'; a = @(2, $true, $true, $true, $true); esperado = $null }
   )
   $ruins = 0
   foreach ($c in $casos) {
-    $m = Get-MotivoDoenca $c.a[0] $c.a[1] $c.a[2] $c.a[3]
+    $m = Get-MotivoDoenca $c.a[0] $c.a[1] $c.a[2] $c.a[3] $c.a[4]
     $ok = if ($null -eq $c.esperado) { $null -eq $m } else { [bool]($m -match $c.esperado) }
     $marca = if ($ok) { 'ok    ' } else { 'FALHOU' }
     "$marca $($c.n)"
+    if (-not $ok) { $ruins++ }
+  }
+  $logs = @(
+    @{ n = 'log: so timeouts (29/10 05:00)'; t = 'Connection failed (CONNECT_TIMEOUT)... Transient CONNECT_TIMEOUT on initial connect'; esperado = $true },
+    @{ n = 'log: timeout e depois conectou (28/10 05:00)'; t = 'CONNECT_TIMEOUT ... Successfully connected (transport: claudeai-proxy)'; esperado = $false },
+    @{ n = 'log: login invalidado, sem timeout (reiniciar nao resolve)'; t = 'OAuth token has been invalidated. Re-authentication is required.'; esperado = $false },
+    @{ n = 'log: vazio'; t = ''; esperado = $false }
+  )
+  foreach ($l in $logs) {
+    $ok = ((Test-LogHermesFalhou $l.t) -eq $l.esperado)
+    $marca = if ($ok) { 'ok    ' } else { 'FALHOU' }
+    "$marca $($l.n)"
     if (-not $ok) { $ruins++ }
   }
   if ($ruins) { exit 1 }
@@ -75,11 +98,18 @@ try {
 $eventosEsperado = Test-Path $chave
 $eventosVivo = [bool](Get-CimInstance Win32_Process -Filter "Name='bun.exe' AND ParentProcessId=$($agente.ProcessId)" |
   Where-Object { $_.CommandLine -match 'gaspar-eventos' })
-$motivo = Get-MotivoDoenca $idade $pollerVivo $eventosEsperado $eventosVivo
+# O log do conector Sistema Hermes da sessão atual: o arquivo mais novo criado depois que o agente subiu.
+# A pasta é o caminho do agente com ":" e "\" trocados por "-" (o Claude Code nomeia assim; o Windows ignora maiúsculas).
+$pastaDoAgente = $PSScriptRoot -replace '[:\\]', '-'
+$logHermes = Join-Path $env:LOCALAPPDATA "claude-cli-nodejs\Cache\$pastaDoAgente\mcp-logs-claude-ai-Sistema-Hermes"
+$arqHermes = Get-ChildItem $logHermes -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.CreationTime -ge $agente.CreationDate.AddSeconds(-30) } | Sort-Object CreationTime | Select-Object -Last 1
+$hermesFalhou = [bool]($arqHermes -and (Test-LogHermesFalhou (Get-Content $arqHermes.FullName -Raw)))
+$motivo = Get-MotivoDoenca $idade $pollerVivo $eventosEsperado $eventosVivo $hermesFalhou
 
 if ($Simular) {
   $veredito = if ($motivo) { "DOENTE: $motivo" } else { 'saudavel' }
-  'idade={0}min poller={1} eventosEsperado={2} eventosVivo={3} -> {4}' -f [int]$idade, $pollerVivo, $eventosEsperado, $eventosVivo, $veredito
+  'idade={0}min poller={1} eventosEsperado={2} eventosVivo={3} hermesFalhou={4} -> {5}' -f [int]$idade, $pollerVivo, $eventosEsperado, $eventosVivo, $hermesFalhou, $veredito
   exit 0
 }
 

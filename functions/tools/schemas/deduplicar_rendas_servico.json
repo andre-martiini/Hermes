@@ -1,0 +1,14 @@
+{
+    "name": "deduplicar_rendas_servico",
+    "description": "Acha rendas de serviço ativas repetidas para a mesma parcela e competência (service_id + parcela_id + mês) e marca as extras como excluídas (recuperáveis pela tela). Mantém a já recebida; entre iguais, a mais antiga. Roda em simulação por padrão: lista o que mudaria sem gravar. Só grave (simular=false) depois de conferir a lista com o André.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "simular": {
+                "type": "boolean",
+                "description": "true (padrão): só lista os grupos duplicados e o que seria marcado. false: marca as extras como excluídas."
+            }
+        },
+        "required": []
+    }
+}

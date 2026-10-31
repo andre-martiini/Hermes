@@ -46,6 +46,8 @@ from gmail_bill_pdf import (
 )
 import fatura_cartao
 import conciliacao_pix
+import gasto_avulso
+import avisos_teto
 from bill_pdf_passwords import (
     find_password_config,
     list_password_configs,
@@ -1958,7 +1960,10 @@ def sync_pix_emails(service, sync_ref, logs):
                 'date': parse_iso_date(data.get('date')),
                 'pix_id': data.get('pix_id'),
                 'google_message_id': data.get('google_message_id'),
-                'status': data.get('status')
+                'status': data.get('status'),
+                'category': data.get('category'),
+                'conta': data.get('conta'),
+                'data_original': data.get('date')  # gasto_avulso lê o texto: "2026-11-01" é o dia 1º, não 31/10 21h
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
@@ -1993,19 +1998,11 @@ def sync_pix_emails(service, sync_ref, logs):
                                        'default': d.get('defaultAmount'),
                                        'pix_recebedor': d.get('pix_recebedor')})
 
-        # Orçamento do mês corrente e gasto acumulado, para exibir "Saldo disponível" nas notificações de Pix
-        now_utc = datetime.now(timezone.utc)
-        current_month_key = f"{now_utc.year}-{now_utc.month:02d}"
+        # Gasto avulso e saldo das notificações de Pix: mesma regra do "Alerta de Orçamento" do app (gasto_avulso).
+        hoje_brt = gasto_avulso.hoje_brt()
+        ano_brt, mes_brt = hoje_brt[:2]
         finance_settings_doc = db.collection('finance_settings').document('config').get()
         finance_settings_data = finance_settings_doc.to_dict() if finance_settings_doc.exists else {}
-        monthly_budget = (finance_settings_data.get('monthlyBudgets') or {}).get(
-            current_month_key, finance_settings_data.get('monthlyBudget', 0) or 0
-        )
-        current_month_spend = sum(
-            t['amount'] for t in existing_transactions
-            if t.get('status') != 'deleted' and t.get('date')
-            and t['date'].year == now_utc.year and t['date'].month == now_utc.month
-        )
 
         for msg in messages:
             msg_id = msg['id']
@@ -2043,6 +2040,12 @@ def sync_pix_emails(service, sync_ref, logs):
             if 'xpi.com.br' in sender.lower() or 'xp investimentos' in sender.lower() or 'xpinvestimentos' in sender.lower() or 'xp inc' in sender.lower() or 'xp ' in subject.lower():
                 log_to_firestore(sync_ref, logs, f"[GMAIL-PIX] Ignorando e-mail da XP no extrato da conta PicPay (msg_id: {msg_id})")
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-xp-ignorado")
+                new_ignorados_ids.append(msg_id)
+                continue
+
+            if conciliacao_pix.nao_e_comprovante(sender):
+                # Não arquiva: não é e-mail de banco, fica na caixa de entrada.
+                log_to_firestore(sync_ref, logs, f"[GMAIL-PIX] Ignorando e-mail que não é comprovante ({sender[:60]}; msg_id: {msg_id})")
                 new_ignorados_ids.append(msg_id)
                 continue
 
@@ -2214,18 +2217,26 @@ def sync_pix_emails(service, sync_ref, logs):
                         'sprint': sprint, 'category': 'Geral',
                         'google_message_id': msg_id, 'pix_id': pix_id
                     }
+                    conta = conciliacao_pix.conta_do_email(sender, content)
+                    if conta:
+                        new_record['conta'] = conta
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
                     inseridos_ou_alterados += 1
-                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id, 'status': None})
+                    existing_transactions.append({**new_record, 'doc_id': doc_ref.id, 'date': dt, 'status': None, 'data_original': iso_date})
 
-                    if dt.year == now_utc.year and dt.month == now_utc.month:
-                        current_month_spend += amount
-                    saldo_disponivel = monthly_budget - current_month_spend
-                    emit_notification_backend(
-                        "Gasto Realizado via Pix",
-                        f"Valor: R$ {amount:.2f}\nSaldo disponível: R$ {saldo_disponivel:.2f}",
-                        'expense', 'financeiro'
-                    )
+                    texto_pix = gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
+                        [dict(t, date=t['data_original']) for t in existing_transactions],
+                        finance_settings_data, ano_brt, mes_brt), hoje_brt)
+                    perguntou = False
+                    if conta == gasto_avulso.CONTA_DO_TETO and amount >= avisos_teto.PIX_GRANDE:
+                        # Pix grande pode ser transferência ou conta fixa: pergunta com botões, em vez
+                        # do espelhamento genérico, para não comer o teto por engano.
+                        perguntou = _send_telegram_message_raw_with_keyboard(
+                            db, _resolve_default_telegram_chat_id(db),
+                            f"Gasto Realizado via Pix\n\n{texto_pix}\n\nÉ gasto, transferência ou conta fixa?",
+                            avisos_teto.teclado_pix(doc_ref.id))
+                    emit_notification_backend("Gasto Realizado via Pix", texto_pix, 'expense', 'financeiro',
+                                              sent_to_telegram=bool(perguntou))
 
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
@@ -10280,7 +10291,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "data_especifica": data_especifica,
             }, _ctx())
 
-        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
+        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None, conta: str = None):
             """
             Registra uma nova entrada financeira (renda, obrigacao_fixa ou transacao_avulsa).
             Obrigatório apresentar rascunho (draft) ao usuário para confirmação antes de persistir.
@@ -10288,11 +10299,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - tipo: 'renda', 'obrigacao_fixa' ou 'transacao_avulsa'
             - valor: valor numérico
             - mes/ano: período de competência (opcional)
+            - conta: só para transacao_avulsa, 'picpay', 'xp', 'caixa' ou 'mista'; só 'picpay' entra no teto do mês.
             - categoria não deve ser inferida nem solicitada por enquanto; o sistema grava "Geral" internamente.
             """
             try:
                 from tools.telegram_extended import execute
-                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data}
+                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data, "conta": conta}
                 return execute("registrar_item_financeiro_v2", slots, db)
             except Exception as e:
                 return f"Erro ao registrar item financeiro: {e}"
@@ -14854,6 +14866,8 @@ from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajust
 
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
+from checkin_estrategia import checkin_estrategia_semanal
+from avisos_teto import avisos_teto_hora
 from health_calendar_sync import sincronizar_eventos_saude_agenda
 from health_weekly_report import gerar_relatorio_semanal_saude
 

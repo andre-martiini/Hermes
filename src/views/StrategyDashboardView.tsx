@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteField, doc, onSnapshot, query, serverTimestamp, Timestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
-import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta, Tarefa } from '../../types';
+import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta, FixedBill, Tarefa } from '../../types';
 import { normalizeSearchText } from '../utils/helpers';
+import { diferencas, paraGravar, paraRascunho } from '../utils/itensEstrategia';
+import { atuaisDaMeta, hojeBrasilia, type MedicoesAtuais } from '../utils/perfilEstrategia';
+import { guardadoAcumulado } from '../utils/bolsoAquisicoes';
+import PerfilDaMeta from '../components/estrategia/PerfilDaMeta';
 
 
 type StrategyIndicatorDraft = EstrategiaIndicadorSucesso;
@@ -30,7 +34,15 @@ interface StrategyDashboardViewProps {
   showToast?: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   tarefas?: Tarefa[];
   onCreateIndicadorAction?: (item: EstrategiaPessoal, indicator: EstrategiaIndicadorSucesso) => void;
+  /** Última pesagem e cintura: fonte automática dos indicadores `peso` e `cintura`. */
+  medicoes?: MedicoesAtuais;
+  /** Contas fixas: a Poupança paga alimenta o indicador `guardado_acumulado`. */
+  contasFixas?: FixedBill[];
 }
+
+/** O que o histórico registra de cada objetivo (`estrategia_historico`, o mesmo do MCP). */
+const CAMPOS_HISTORICO = ['objetivoMacro', 'pilar', 'tipoMeta', 'status', 'dataRetomada', 'metricaAlvo', 'historicoMetrica',
+  'indicadoresSucesso', 'marcos', 'diretrizesDerivadas'];
 
 
 const PILLARS: Array<{ id: EstrategiaPilar; label: string; accent: string }> = [
@@ -58,92 +70,17 @@ const parseMetricNumber = (value: number | string | undefined) => Number(String(
 const createIndicatorId = () => `indicador-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createMilestoneId = () => `marco-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createRecordId = () => `registro-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const getPersistedIndicatorId = (item: string | EstrategiaIndicadorSucesso, index: number) => {
-  if (typeof item !== 'string' && item.id) return item.id;
-  return `indicador-legado-${index}`;
-};
-const getPersistedMilestoneId = (item: string | EstrategiaMarco, index: number) => {
-  if (typeof item !== 'string' && item.id) return item.id;
-  return `marco-legado-${index}`;
-};
 
 
-const toIndicatorDrafts = (items?: Array<string | EstrategiaIndicadorSucesso>): StrategyIndicatorDraft[] => {
-  const converted = (items || []).map((item, index) => {
-    if (typeof item === 'string') {
-      return { id: getPersistedIndicatorId(item, index), descricao: item, concluido: false };
-    }
-    return {
-      id: getPersistedIndicatorId(item, index),
-      descricao: item.descricao || '',
-      concluido: Boolean(item.concluido),
-      dataConclusao: item.dataConclusao,
-      evidencia: item.evidencia || '',
-      registros: item.registros || [],
-    };
-  }).filter(item => item.descricao.trim() || item.evidencia?.trim());
-  return converted.length ? converted : [{ id: createIndicatorId(), descricao: '', concluido: false }];
-};
-
-
+// Preservam os campos que a tela não conhece (`dataAlvo`, `esperado`...): ver `itensEstrategia.ts`.
+const toIndicatorDrafts = (items?: Array<string | EstrategiaIndicadorSucesso>): StrategyIndicatorDraft[] =>
+  paraRascunho('indicador', items);
 const normalizeIndicators = (items?: StrategyIndicatorDraft[]): EstrategiaIndicadorSucesso[] =>
-  (items || [])
-    .map(item => {
-      const normalized: EstrategiaIndicadorSucesso = {
-        id: item.id || createIndicatorId(),
-        descricao: item.descricao.trim(),
-        concluido: Boolean(item.concluido),
-        registros: item.registros || [],
-      };
-      if (normalized.concluido) {
-        normalized.dataConclusao = item.dataConclusao || new Date().toISOString();
-      }
-      const evidencia = item.evidencia?.trim();
-      if (evidencia) {
-        normalized.evidencia = evidencia;
-      }
-      return normalized;
-    })
-    .filter(item => item.descricao);
-
-
-const toMilestoneDrafts = (items?: Array<string | EstrategiaMarco>): StrategyMilestoneDraft[] => {
-  const converted = (items || []).map((item, index) => {
-    if (typeof item === 'string') {
-      return { id: getPersistedMilestoneId(item, index), descricao: item, concluido: false };
-    }
-    return {
-      id: getPersistedMilestoneId(item, index),
-      descricao: item.descricao || '',
-      concluido: Boolean(item.concluido),
-      dataConclusao: item.dataConclusao,
-      evidencia: item.evidencia || '',
-      registros: item.registros || [],
-    };
-  }).filter(item => item.descricao.trim() || item.evidencia?.trim());
-  return converted.length ? converted : [{ id: createMilestoneId(), descricao: '', concluido: false }];
-};
-
-
+  paraGravar('indicador', items);
+const toMilestoneDrafts = (items?: Array<string | EstrategiaMarco>): StrategyMilestoneDraft[] =>
+  paraRascunho('marco', items);
 const normalizeMilestones = (items?: StrategyMilestoneDraft[]): EstrategiaMarco[] =>
-  (items || [])
-    .map(item => {
-      const normalized: EstrategiaMarco = {
-        id: item.id || createMilestoneId(),
-        descricao: item.descricao.trim(),
-        concluido: Boolean(item.concluido),
-        registros: item.registros || [],
-      };
-      if (normalized.concluido) {
-        normalized.dataConclusao = item.dataConclusao || new Date().toISOString();
-      }
-      const evidencia = item.evidencia?.trim();
-      if (evidencia) {
-        normalized.evidencia = evidencia;
-      }
-      return normalized;
-    })
-    .filter(item => item.descricao);
+  paraGravar('marco', items);
 
 
 const computeProgress = (item: EstrategiaPessoal) => {
@@ -171,6 +108,9 @@ const strategyToDraft = (item: EstrategiaPessoal): StrategyDraft => ({
   marcos: toMilestoneDrafts(item.marcos),
   diretrizesDerivadas: item.diretrizesDerivadas?.length ? item.diretrizesDerivadas : [''],
   status: item.status,
+  dataRetomada: item.dataRetomada,
+  // Só leitura no formulário: o esperado dos marcos é por indicador do perfil.
+  indicadores: item.indicadores,
 });
 
 
@@ -221,7 +161,12 @@ const getInputClass = (isDark: boolean) =>
     isDark ? 'border-slate-700 bg-slate-950 text-slate-100 focus:ring-[#7800ce]/35' : 'border-slate-200 bg-white text-slate-900 focus:border-[#9333ea] focus:ring-[#9333ea]/20'
   }`;
 
-export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ userId, isDark = false, showToast, tarefas = [], onCreateIndicadorAction }) => {
+export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ userId, isDark = false, showToast, tarefas = [], onCreateIndicadorAction, medicoes = {}, contasFixas = [] }) => {
+  const hoje = hojeBrasilia();
+  /** Atual e origem de cada indicador do perfil (peso/cintura, Poupança paga no ciclo, histórico). */
+  const atuaisDe = (item: EstrategiaPessoal) =>
+    atuaisDaMeta(item, medicoes, desde => (desde ? guardadoAcumulado(contasFixas as any[], desde) : null));
+  const dataBr = (iso?: string) => (iso ? iso.split('-').reverse().join('/') : '');
   const [items, setItems] = useState<EstrategiaPessoal[]>([]);
   const [intention, setIntention] = useState('');
   const [drafts, setDrafts] = useState<StrategyDraft[]>([]);
@@ -400,6 +345,27 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
   };
 
 
+  /**
+   * Grava a mudança do objetivo e, na mesma escrita (batch), o antes e o depois em
+   * `estrategia_historico`, como o MCP faz: dá para reverter sem depender do diário.
+   * `paraHistorico` substitui sentinelas do Firestore (deleteField) pelo valor legível.
+   */
+  const gravarComHistorico = async (id: string, mudanca: Record<string, unknown>, operacao: string,
+                                    paraHistorico: Record<string, unknown> = mudanca) => {
+    const antes = (items.find(i => i.id === id) || {}) as Record<string, unknown>;
+    const lote = writeBatch(db);
+    lote.update(doc(db, 'estrategia_pessoal', id), mudanca as any);
+    const diff = diferencas(antes, paraHistorico, CAMPOS_HISTORICO);
+    if (diff.mudou) {
+      lote.set(doc(collection(db, 'estrategia_historico')), {
+        objetivo_id: id, userId, origem: 'tela', operacao, antes: diff.antes, depois: diff.depois,
+        em: serverTimestamp(), em_iso: new Date().toISOString(),
+      });
+    }
+    await lote.commit();
+  };
+
+
   const persistDraft = async (draft: StrategyDraft, id?: string) => {
     const valorAtual = parseMetricNumber(draft.metricaAlvo?.valorAtual);
     const valorObjetivo = parseMetricNumber(draft.metricaAlvo?.valorObjetivo);
@@ -434,10 +400,18 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       : payloadBase;
     if (!payload.objetivoMacro) throw new Error('Informe um objetivo macro.');
     if (!payload.diretrizesDerivadas.length) throw new Error('Informe ao menos uma diretriz derivada.');
+    // Pausada exige a data de retomada; qualquer outro status apaga a data.
+    const pausada = draft.status === 'pausada';
+    if (pausada && !/^\d{4}-\d{2}-\d{2}$/.test(draft.dataRetomada || '')) {
+      throw new Error('Meta pausada precisa da data de retomada.');
+    }
+    if (pausada && (draft.dataRetomada as string) <= hoje) throw new Error('A data de retomada precisa ser futura.');
     if (id) {
-      await updateDoc(doc(db, 'estrategia_pessoal', id), payload as any);
+      const { timestamp, ...semTimestamp } = payload;
+      await gravarComHistorico(id, { ...payload, dataRetomada: pausada ? draft.dataRetomada : deleteField() }, 'editar',
+        { ...semTimestamp, dataRetomada: pausada ? draft.dataRetomada : null });
     } else {
-      await addDoc(collection(db, 'estrategia_pessoal'), payload);
+      await addDoc(collection(db, 'estrategia_pessoal'), pausada ? { ...payload, dataRetomada: draft.dataRetomada } : payload);
     }
   };
 
@@ -479,7 +453,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       nota: `Registro manual da métrica principal: ${value} ${currentMetric.unidade || ''}`.trim(),
     };
     try {
-      await updateDoc(doc(db, 'estrategia_pessoal', item.id), {
+      await gravarComHistorico(item.id, {
         metricaAlvo: {
           valorInicial,
           valorAtual: value,
@@ -488,7 +462,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           fonte: currentMetric.fonte || '',
         },
         historicoMetrica: [...(item.historicoMetrica || []), record],
-      } as any);
+      }, 'metrica:registrar');
       setMetricInputs(prev => ({ ...prev, [item.id!]: '' }));
       showToast?.('Métrica principal registrada.', 'success');
     } catch (error: any) {
@@ -517,9 +491,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       registros: [...(current.registros || []), record],
     };
     try {
-      await updateDoc(doc(db, 'estrategia_pessoal', item.id), {
-        indicadoresSucesso: normalizeIndicators(indicators),
-      });
+      await gravarComHistorico(item.id, { indicadoresSucesso: normalizeIndicators(indicators) }, 'indicador:registrar');
       setIndicatorNotes(prev => ({ ...prev, [noteKey]: '' }));
       showToast?.('Registro do marco salvo.', 'success');
     } catch (error: any) {
@@ -548,9 +520,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       registros: [...(current.registros || []), record],
     };
     try {
-      await updateDoc(doc(db, 'estrategia_pessoal', item.id), {
-        marcos: normalizeMilestones(milestones),
-      });
+      await gravarComHistorico(item.id, { marcos: normalizeMilestones(milestones) }, 'marco:concluir');
       setMilestoneNotes(prev => ({ ...prev, [noteKey]: '' }));
       showToast?.('Marco concluído.', 'success');
     } catch (error: any) {
@@ -563,7 +533,15 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     if (!deleteTarget?.id) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'estrategia_pessoal', deleteTarget.id));
+      // O objetivo inteiro vai para o histórico: excluir pela tela deixa de ser sem volta.
+      const { id: _id, userId: _dono, ...conteudo } = deleteTarget;
+      const lote = writeBatch(db);
+      lote.delete(doc(db, 'estrategia_pessoal', deleteTarget.id));
+      lote.set(doc(collection(db, 'estrategia_historico')), {
+        objetivo_id: deleteTarget.id, userId, origem: 'tela', operacao: 'excluir', antes: conteudo, depois: {},
+        em: serverTimestamp(), em_iso: new Date().toISOString(),
+      });
+      await lote.commit();
       if (selectedObjectiveId === deleteTarget.id) setSelectedObjectiveId(null);
       setDeleteTarget(null);
       showToast?.('Objetivo excluído.', 'success');
@@ -631,9 +609,17 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           <select className={`${inputClass} mt-1`} value={draft.status} onChange={e => onChange({ status: e.target.value as EstrategiaStatus })}>
             <option value="ativo">Ativo</option>
             <option value="revisar">Revisar</option>
+            <option value="pausada">Pausada</option>
             <option value="concluido">Concluído</option>
           </select>
         </label>
+        {draft.status === 'pausada' && (
+          <label className="text-[10px] font-bold uppercase tracking-wider">
+            Retomar em
+            <input type="date" required className={`${inputClass} mt-1`} value={draft.dataRetomada || ''}
+              onChange={e => onChange({ dataRetomada: e.target.value })} />
+          </label>
+        )}
       </div>
       <label className="mt-3 block text-[10px] font-bold uppercase tracking-wider">
         Objetivo macro
@@ -678,7 +664,29 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
             {(draft.marcos || []).map((value, valueIndex) => (
               <div key={value.id || `${index ?? 'manual'}-marco-${valueIndex}`} className="flex items-center gap-2">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400" title="Marco pontual">🚩</span>
-                <input className={`${inputClass} flex-1`} placeholder="Escreva o marco..." value={value.descricao} onChange={e => onMilestoneChange(valueIndex, { descricao: e.target.value })} />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <input className={inputClass} placeholder="Escreva o marco..." value={value.descricao} onChange={e => onMilestoneChange(valueIndex, { descricao: e.target.value })} />
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className={`text-[9px] font-bold uppercase tracking-wider ${mutedClass}`}>
+                      Data alvo
+                      <input type="date" className={`${inputClass} mt-1 w-40`} value={value.dataAlvo || ''}
+                        onChange={e => onMilestoneChange(valueIndex, { dataAlvo: e.target.value || undefined })} />
+                    </label>
+                    {(draft.indicadores || []).map(indicador => (
+                      <label key={indicador.chave} className={`text-[9px] font-bold uppercase tracking-wider ${mutedClass}`}>
+                        {indicador.rotulo || indicador.chave}{indicador.unidade ? ` (${indicador.unidade})` : ''}
+                        <input type="number" step="any" inputMode="decimal" className={`${inputClass} mt-1 w-28`}
+                          value={value.esperado?.[indicador.chave] ?? ''}
+                          onChange={e => {
+                            const esperado = { ...(value.esperado || {}) };
+                            if (e.target.value === '') delete esperado[indicador.chave];
+                            else esperado[indicador.chave] = Number(e.target.value);
+                            onMilestoneChange(valueIndex, { esperado: Object.keys(esperado).length ? esperado : undefined });
+                          }} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <button type="button" onClick={() => handleMilestoneRemove(valueIndex)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400" title="Remover marco">
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                 </button>
@@ -924,7 +932,9 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                       <div className="grid gap-3 md:grid-cols-3">
                         <div>
                           <p className={`text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>Status</p>
-                          <p className="mt-1 text-sm font-bold">{item.status}</p>
+                          <p className="mt-1 text-sm font-bold">
+                            {item.status}{item.status === 'pausada' && item.dataRetomada ? ` até ${dataBr(item.dataRetomada)}` : ''}
+                          </p>
                         </div>
                         <div>
                           <p className={`text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>Tipo</p>
@@ -936,6 +946,10 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                         </div>
                       </div>
                     </section>
+                    {(() => {
+                      const perfilAtual = atuaisDe(item);
+                      return <PerfilDaMeta meta={item} atuais={perfilAtual.atuais} origens={perfilAtual.origens} hoje={hoje} isDark={isDark} />;
+                    })()}
                     {progress !== null && (
                       <section className={`border p-4 ${softPanelClass}`}>
                         <div className="flex items-center justify-between gap-3">
@@ -1222,6 +1236,25 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
               const indicatorActionCount = indicators.reduce((sum, indicator) => sum + getIndicatorActions(item.id, indicator.id).length, 0);
               const completedIndicatorActionCount = indicators.reduce((sum, indicator) => sum + getIndicatorActions(item.id, indicator.id).filter(isTaskCompleted).length, 0);
               const completedMilestoneCount = milestones.filter(milestone => milestone.concluido).length;
+              if (item.status === 'pausada') {
+                // Pausada de propósito: recolhida, só com a data de retomada.
+                return (
+                  <article key={item.id} data-testid="meta-pausada"
+                    className={`flex items-center justify-between gap-3 border px-4 py-3 opacity-80 ${panelClass}`}>
+                    <div className="min-w-0">
+                      <span className={`inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>
+                        <span className={`h-2 w-2 rounded-full ${pillar.accent}`} />{pillar.label}
+                      </span>
+                      <h3 className="mt-1 truncate text-sm font-bold">{item.objetivoMacro}</h3>
+                    </div>
+                    <button type="button" onClick={() => item.id && setSelectedObjectiveId(item.id)}
+                      className={`shrink-0 border px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${softPanelClass}`}>
+                      Pausada{item.dataRetomada ? ` até ${dataBr(item.dataRetomada)}` : ''}
+                    </button>
+                  </article>
+                );
+              }
+              const perfilAtual = atuaisDe(item);
               return (
                 <article
                   key={item.id}
@@ -1245,7 +1278,10 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                     </div>
                     <span className={`border px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${softPanelClass}`}>{item.status}</span>
                   </div>
-                  {progress !== null && (
+                  <div className="mb-4">
+                    <PerfilDaMeta meta={item} atuais={perfilAtual.atuais} origens={perfilAtual.origens} hoje={hoje} isDark={isDark} compacto />
+                  </div>
+                  {progress !== null && !(item.indicadores || []).length && (
                     <div className={`mb-4 border p-3 ${softPanelClass}`}>
                       <p className={`mb-2 text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>Métrica principal</p>
                       <div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-wider">

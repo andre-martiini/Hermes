@@ -643,67 +643,80 @@ pacote_concluido: P07
 
 ---
 
+# (Em 2026-10-29 o bloco "P08 sub-entrega 7/N" foi movido para docs/autonomia/execucao-archive-p08sub7.md.)
+
+# (Em 2026-10-29 os blocos "P08 sub-entrega 8/N" e "9/N" foram movidos para docs/autonomia/execucao-archive-p08sub8.md e execucao-archive-p08sub9.md.)
+---
+
+
+# (Em 2026-10-30 o bloco "P08 sub-entrega 12/N" foi movido para execucao-archive-p08sub12.md.)
+# (Em 2026-10-30 o bloco "P08 sub-entrega 11/N" foi movido para docs/autonomia/execucao-archive-p08sub11.md.)
+
+---
+
 ```yaml
-pacote: "P08 sub-entrega 7/N -- aplicação da decisão de continuação (autonomy/runner_aplicacao.py, passos 4-7): função pura aplicar_decisao_continuacao(pedido, lease_token, generation, decisao, agora). Fencing + transição validada a partir de EM_ANDAMENTO. VERIFICANDO/AGUARDANDO_EXTERNO mantêm lease e run (espera guarda condição e horário); RETENTATIVA_AGENDADA fecha o run como falha, libera a lease (expira em agora) e grava contadores/proximo_tentativa_em; FALHA_FINAL sela o ledger via registrar_resultado_observado (sem ledger, só fecha o run). Contadores nunca regridem. PedidoDuravel ganha pausas e condicao_espera (default, compatível); registrar_progresso limpa condicao_espera/proximo_tentativa_em ao retomar. Sem I/O (shadow/off)."
+pacote: "P08 sub-entrega 16/N -- reconciliação persistida de resultado desconhecido (autonomy/reconciliar_persistido.py, passo 5, wiring de persistência): reconciliar_pedido(db, request_id, efeito_ocorreu, agora, executor_id, run_id, continuar_em, duracao_segundos) liga reconciliar_resultado_desconhecido a atualizar_pedido (run_encerrado), no molde de acordar_pedido: pedido e run antigo fechado por timeout (se ainda ativo) gravados na MESMA transação em runs_encerrados/{run_id}. run_id validado como id do Firestore antes da transação quando efeito_ocorreu=True. Reaproveita ResultadoDespertar; sem mudança em módulo existente. Nada chama o módulo em produção (shadow/off)."
 estado: validado
-inicio: "2026-10-28T13:54:00Z"
-fim: "2026-10-28T14:25:00Z"
+inicio: "2026-10-30T19:48:00Z"
+fim: "2026-10-30T20:20:00Z"
 decisoes:
-  - id: p08-sub7-triagem
-    motivo: "Única PR aberta (#547, melhorias) é de outra linha e estava ativa há 2 min: não tocada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub7-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 1 arquivado em execucao-archive-p08sub1.md."
+  - id: p08-sub16-triagem
+    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias/finanças/email/MCP): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela (última branch claude/ de autonomia há mais de 2h)."
+  - id: p08-sub16-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 13 arquivado em execucao-archive-p08sub13.md."
+  - id: p08-sub16-escopo
+    motivo: "Fora de escopo: FALHA_FINAL por reconciliação (exige fencing do ledger), worker HTTP, Cloud Tasks, agendamento."
 testes:
   resultados:
-    - "functions/ completo ANTES 4872 OK (diário, P08 sub 6); DEPOIS 4890 OK (+18 em test_autonomy_runner_aplicacao)."
+    - "functions/ completo ANTES 5107 OK (diário, P08 sub 15); DEPOIS 5122 OK (205s; 10 testes novos em test_autonomy_reconciliar_persistido; o restante vem de merges de outras linhas)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto): 4 achados (status como string crua contornava a máquina de estados; contadores podiam regredir; continuar_em não-datetime dava AttributeError; condicao_espera obsoleta após retomar) -> corrigidos e cobertos por teste; lease vencida em AGUARDANDO_EXTERNO sem saída no sweep é lacuna já documentada em autonomy.sweep, registrada em pendencias. Rodada 2: sem bug alcançável; 1 resíduo menor (proximo_tentativa_em após retomar) corrigido em uma linha."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Codex na PR #574: 1 achado P2 real que a rodada 1 não pegou -- o run já terminal deixado pelo sweep em pedido.run sumia ao ser substituído pelo run do verificador (efeito_ocorreu=True), pois a função pura devolve antigo=None; agora atual.run é arquivado quando o run novo o substitui; coberto por teste. Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
 pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, renovar lease ao acordar de AGUARDANDO_EXTERNO e tratar vencimento de lease em VERIFICANDO/AGUARDANDO_* no sweep, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
 ```
 
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 8/N -- sweep de espera/verificação vencida (autonomy/sweep.py, passo 5-6): nova varrer_espera_vencida: AGUARDANDO_EXTERNO (com lease vencida E horário de acordar alcançado/ausente) ou VERIFICANDO (lease vencida) -> RESULTADO_DESCONHECIDO (única saída do grafo sem lease; reconciliação via VERIFICANDO), sem reexecutar (retentar VERIFICANDO às cegas poderia duplicar efeitos), sem incrementar tentativas, condicao_espera preservada, run ativo fechado por timeout, diagnóstico devolvido. Lease vencida ANTES do horário de acordar é espera normal e levanta ValueError. Sem I/O (shadow/off)."
+pacote: "P08 sub-entrega 17/N -- configuração persistida do dispatcher (autonomy/config_dispatcher.py, passos 3 e 11, flag do modo e orçamento de despachos): ler_config_dispatcher(db) lê configuracoes/autonomia_dispatcher (modo off|shadow|ativo, despachos_restantes) e devolve ConfigDispatcher para decidir_lote. Fail-closed: documento ausente, erro de leitura, modo desconhecido ou orçamento ausente/inválido (bool, float, str, negativo) = OFF/sem orçamento; shadow nunca carrega orçamento. Só leitura; consumir orçamento e agendar ficam para depois. Nada chama o módulo em produção (shadow/off)."
 estado: validado
-inicio: "2026-10-28T16:47:00Z"
-fim: "2026-10-28T17:35:00Z"
+inicio: "2026-10-31T13:45:00Z"
+fim: "2026-10-31T14:05:00Z"
 decisoes:
-  - id: p08-sub8-triagem
-    motivo: "Única PR aberta (#547, melhorias, outra linha) estava trivial, sem conflito e com CI verde: mesclada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub8-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 5 arquivado em execucao-archive-p08sub5.md."
-  - id: p08-sub8-espera
-    motivo: "Escolha segura sem decisão de produto: espera externa que ninguém acordou vira RESULTADO_DESCONHECIDO (reconciliar), nunca retentativa automática. AGUARDANDO_APROVACAO segue fora de escopo (prazo de espera humana é decisão do André)."
+  - id: p08-sub17-triagem
+    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
+  - id: p08-sub17-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 14 arquivado em execucao-archive-p08sub14.md."
+  - id: p08-sub17-escopo
+    motivo: "Fora de escopo: transação de consumo do orçamento, agendamento do dispatcher, Cloud Tasks real, worker HTTP."
 testes:
   resultados:
-    - "functions/ completo ANTES 4890 OK (diário, P08 sub 7); DEPOIS 4902 OK (+8 em test_autonomy_sweep; o restante vem de merges de outras linhas)."
+    - "functions/ completo ANTES 5140 OK (main); DEPOIS 5147 OK (183s; 7 testes novos em test_autonomy_config_dispatcher)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achou nada. Codex na PR #550: 1 achado P1 real -- a 1a versão mandava VERIFICANDO vencido a RETENTATIVA_AGENDADA, o que reexecutaria o pedido e poderia duplicar efeito já feito; corrigido (VERIFICANDO vencido vai a RESULTADO_DESCONHECIDO, varrer_lease_vencida volta a recusá-lo) e coberto por teste. Rodada 2 (agente sem contexto, focada na correção): não achou nada (2 nits de documentação, 1 aplicado)."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observação para o wiring: proteger decidir_lote com try (item que não seja PedidoDuravel levanta TypeError). Codex na PR #579: 1 achado P2 real (ATIVO com orçamento inválido devolvia modo ATIVO, contra o contrato fail-closed); agora devolve OFF; teste assertando o modo. Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
 pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao e o sweep, renovar lease ao acordar de AGUARDANDO_EXTERNO, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, consumo transacional do orçamento, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
 ```
 
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 9/N -- acordar espera externa (autonomy/runner_aplicacao.py, passo 5): função pura acordar_espera_externa(pedido, executor_id, run_id, agora, duracao_segundos, por_evento). Retoma AGUARDANDO_EXTERNO num worker novo: exige lease anterior vencida (nunca toma reserva válida), emite lease nova com geração+1 (fencing: token antigo perde o direito), fecha o run antigo por timeout (devolvido ao chamador para persistir), abre run novo EM_ANDAMENTO com run_id inédito, preserva ledger/tentativas/pausas e limpa condicao_espera/proximo_tentativa_em. Antes de proximo_tentativa_em só com por_evento=True. Sem I/O (shadow/off)."
+pacote: "P08 sub-entrega 18/N -- consumo transacional do orçamento do dispatcher (autonomy/config_dispatcher.py, passo 11): consumir_orcamento(db, quantidade=1) baixa despachos_restantes de configuracoes/autonomia_dispatcher numa transação (@firestore.transactional, leitura e update na mesma transação), tudo ou nada, só em modo ativo, nunca abaixo de zero; devolve a quantidade concedida ou 0. Fail-closed: quantidade inválida (bool, não int, <1), backend sem transação, documento ausente/inválido, saldo insuficiente ou qualquer erro do Firestore = 0 sem conceder. Chamar ANTES de enfileirar. Nada chama o módulo em produção (shadow/off)."
 estado: validado
-inicio: "2026-10-28T19:48:00Z"
-fim: "2026-10-28T20:10:00Z"
+inicio: "2026-10-31T16:47:00Z"
+fim: "2026-10-31T17:15:00Z"
 decisoes:
-  - id: p08-sub9-triagem
-    motivo: "Única PR aberta (#552, correção de OAuth do MCP, outra linha, sensível à segurança, revisão em andamento): não tocada. Nenhuma PR da autonomia pendente."
-  - id: p08-sub9-arquivo
-    motivo: "execucao.md no limite de ~50KB: bloco P08 sub 6 arquivado em execucao-archive-p08sub6.md."
-  - id: p08-sub9-cas
-    motivo: "Exclusão mútua entre dois despertares (ou despertar x sweep) sobre o mesmo snapshot é do wiring (compare-and-swap em generation/status); documentado na docstring."
+  - id: p08-sub18-triagem
+    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
+  - id: p08-sub18-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 15 arquivado em execucao-archive-p08sub15.md."
+  - id: p08-sub18-escopo
+    motivo: "Fora de escopo: agendamento do dispatcher, Cloud Tasks real, worker HTTP, estorno de orçamento se o enfileiramento falhar depois da baixa (perde-se orçamento, lado seguro)."
 testes:
   resultados:
-    - "functions/ completo ANTES 4902 OK (diário, P08 sub 8); DEPOIS 4912 OK (+9 em test_autonomy_runner_aplicacao; o restante vem de merges de outras linhas)."
+    - "functions/ completo ANTES 5147 OK (diário, P08 sub 17); DEPOIS 5154 OK (247s; 7 testes novos em test_autonomy_consumo_orcamento)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): nenhum bug alcançável; 2 observações de baixo risco, ambas tratadas (run_id repetido agora recusado, com teste; CAS do wiring documentado). Codex na PR #553: 1 achado P2 real -- a checagem de run_id repetido não normalizava espaços como AgentRun faz (\" run-1 \" passava e colidia); corrigido (compara o id normalizado) e coberto por teste. Correção de uma linha, sem rodada adversarial adicional."
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observações aceitas: commit ambíguo (timeout após aplicar) perde orçamento, lado seguro; o duplo de transação dos testes acopla a atributos privados do google-cloud-firestore. Não verificado contra Firestore real."
 pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real tratando ALREADY_EXISTS, persistência/CAS chamando decidir_continuacao + aplicar_decisao_continuacao, o sweep e acordar_espera_externa persistindo também o run antigo fechado, RESULTADO_DESCONHECIDO sem saída no sweep (reconciliação), AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), cliente Claude real com ConfigModelos, cache de prompt, flag do modo e orçamento de despachos, IAM mínimo)."
+  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, agendamento do dispatcher chamando ler_config_dispatcher + consumir_orcamento + decidir_lote, IAM mínimo)."
 ```

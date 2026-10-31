@@ -1,6 +1,6 @@
 {
     "name": "editar_parcela_servico",
-    "description": "Ajusta uma parcela de renda de serviço (ids em consultar_rendas_servico): marca como paga ou pendente (não recebida), adia a data prevista ou corrige o valor. Atualiza também a renda do mês ligada à parcela.",
+    "description": "Ajusta uma parcela de renda de serviço (ids em consultar_rendas_servico): marca como paga ou pendente (não recebida), tira da previsão (sem_previsao), adia ou limpa a data prevista, ou corrige o valor. Atualiza também a renda do mês ligada à parcela. Parcela sem_previsao (ou pendente sem data) continua no contrato, mas não gera renda do mês nem entra na projeção; para reativar, status pendente (com data_prevista).",
     "parameters": {
         "type": "object",
         "properties": {
@@ -14,12 +14,18 @@
                 "type": "string",
                 "description": "Nova data prevista, YYYY-MM-DD (para adiar)."
             },
+            "limpar_data_prevista": {
+                "type": "boolean",
+                "description": "true apaga a data prevista (a parcela pendente sem data sai da renda do mês e da projeção). Não combine com data_prevista."
+            },
             "status": {
                 "type": "string",
                 "enum": [
                     "pago",
-                    "pendente"
-                ]
+                    "pendente",
+                    "sem_previsao"
+                ],
+                "description": "sem_previsao: fora da renda do mês e da projeção, sem apagar a parcela (não vale para parcela já paga). pendente: reativa."
             },
             "valor": {
                 "type": "number"

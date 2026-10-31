@@ -1,0 +1,18 @@
+{
+  "name": "listar_objetivos_estrategicos",
+  "description": "Lista os objetivos estratégicos do André. Com completo=true (padrão), cada um vem inteiro, como em obter_objetivo_estrategico, inclusive os marcos com id, dataAlvo e esperado; com completo=false, só id, título, pilar, status e contagem de marcos. Somente leitura.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "completo": {
+        "type": "boolean",
+        "description": "true (padrão): conteúdo inteiro de cada objetivo. false: resumo."
+      },
+      "status": {
+        "type": "string",
+        "description": "Filtra por status (ativo, concluido, revisar). Vazio: todos."
+      }
+    },
+    "required": []
+  }
+}

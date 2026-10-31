@@ -16,6 +16,7 @@ import {
 import HealthView from './HealthView';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { UpdatePrompt } from './src/components/UpdatePrompt';
+import { SessaoUnicaAviso } from './src/components/SessaoUnicaAviso';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { useMeetingRecordingEngine, MeetingRecordingEngineContext } from './src/hooks/useMeetingRecordingEngine';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
@@ -36,7 +37,9 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
+import { hojeBrt, resumoDoMes } from './src/utils/gastoAvulso';
 import { comDinheiro, comDinheiroNaLista } from './src/utils/dinheiroFirestore';
+import { planejarRendasDeServicos } from './src/utils/rendasDeServico';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -1005,6 +1008,10 @@ const App: React.FC = () => {
   // aparelho ja criou, e gerar a partir dele duplicava o mes inteiro.
   const [fixedBillsFromServer, setFixedBillsFromServer] = useState(false);
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
+  // Todas as rendas, inclusive as excluidas, e so depois da resposta do servidor (null ate la).
+  // A sincronia das parcelas precisa ver a exclusao para nao recriar a renda, e nao pode agir
+  // sobre cache: lista incompleta faria cada parcela parecer sem renda.
+  const [incomeEntriesTodas, setIncomeEntriesTodas] = useState<IncomeEntry[] | null>(null);
   const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -1281,11 +1288,13 @@ const App: React.FC = () => {
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
       setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as BillRubric)));
     }, handleSnapshotError('bill_rubrics'));
-    const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
-      setIncomeEntries(snapshot.docs
-        .map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as IncomeEntry))
-        .filter(e => e.status !== 'deleted')
-      );
+    // `includeMetadataChanges`: com cache persistente, se o servidor confirma a lista sem mudar
+    // nenhum documento o SDK nao manda segundo evento, e `fromCache: false` nunca chegaria.
+    const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), { includeMetadataChanges: true }, (snapshot) => {
+      const todas = snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as IncomeEntry));
+      // So re-renderiza o app quando um documento mudou; evento so de metadado traz os mesmos dados.
+      if (snapshot.docChanges().length > 0) setIncomeEntries(todas.filter(e => e.status !== 'deleted'));
+      if (!snapshot.metadata.fromCache) setIncomeEntriesTodas(todas);
     }, handleSnapshotError('income_entries'));
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
       setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as IncomeRubric)));
@@ -1549,76 +1558,32 @@ const App: React.FC = () => {
   }, [billRubrics, fixedBills, fixedBillsFromServer, currentMonth, currentYear]);
   // --- Service Installments Synchronization to Finance ---
   useEffect(() => {
-    if (!services) return;
+    if (!services || !incomeEntriesTodas) return;
     const syncServicesToIncome = async () => {
-      // 1. Parcelas that SHOULD exist (Active/Completed services)
-      const activeOrCompleted = services.filter(s => s.status === 'Ativo' || s.status === 'Concluído');
-      const expectedIncomes: Partial<IncomeEntry>[] = [];
-      activeOrCompleted.forEach(service => {
-        (service.parcelas || []).forEach(p => {
-          const date = new Date(p.data_prevista);
-          expectedIncomes.push({
-            parcela_id: p.id,
-            service_id: service.id,
-            description: `${service.titulo} - ${p.descricao}`,
-            amount: p.valor,
-            day: date.getDate(),
-            month: date.getMonth(), // Use 0-11 as per currentMonth state
-            year: date.getFullYear(),
-            category: service.categoria_financeira || 'Serviço Particular',
-            isReceived: p.status === 'pago',
-            status: 'active'
-          });
-        });
-      });
-      // 2. Diff and Update
+      // O que muda e decidido em `planejarRendasDeServicos` (testavel, sem Firestore).
+      const plano = planejarRendasDeServicos(services, incomeEntriesTodas);
+      // Criar: id fixo e so se ainda nao existir, numa transacao. Duas abas ou aparelhos
+      // sincronizando ao mesmo tempo (ou a mesma parcela duas vezes no contrato) caem no mesmo doc.
+      const criadas = await Promise.all(plano.criar.map(({ id, dados }) => runTransaction(db, async (tx): Promise<number> => {
+        const ref = doc(db, 'income_entries', id);
+        if ((await tx.get(ref)).exists()) return 0;
+        tx.set(ref, dados);
+        return 1;
+      })));
       const batch = writeBatch(db);
-      let changes = 0;
-      // Create or Update
-      for (const expected of expectedIncomes) {
-        const existing = incomeEntries.find(ie => ie.parcela_id === expected.parcela_id);
-        if (!existing) {
-          const newRef = doc(collection(db, 'income_entries'));
-          batch.set(newRef, {
-            ...expected,
-            data_criacao: new Date().toISOString()
-          });
-          changes++;
-        } else {
-          const hasChanged =
-            existing.amount !== expected.amount ||
-            existing.description !== expected.description ||
-            existing.day !== expected.day ||
-            existing.month !== expected.month ||
-            existing.year !== expected.year ||
-            existing.category !== expected.category ||
-            existing.isReceived !== expected.isReceived ||
-            existing.status !== 'active';
-          if (hasChanged) {
-            batch.update(doc(db, 'income_entries', existing.id), expected);
-            changes++;
-          }
-        }
-      }
-      // Delete (Software delete) if parcela is gone or service no longer eligible
-      const linkedIncomes = incomeEntries.filter(ie => ie.parcela_id && ie.service_id);
-      for (const linked of linkedIncomes) {
-        const stillExists = expectedIncomes.some(e => e.parcela_id === linked.parcela_id);
-        if (!stillExists && linked.status !== 'deleted') {
-          batch.update(doc(db, 'income_entries', linked.id), { status: 'deleted' });
-          changes++;
-        }
-      }
-      if (changes > 0) {
-        await batch.commit();
-        console.log(`[Finance Sync] ${changes} changes synchronized from services.`);
-      }
+      plano.atualizar.forEach(({ id, dados }) => batch.update(doc(db, 'income_entries', id), dados));
+      // Soft delete: parcela sumiu, contrato deixou de valer ou parcela saiu da previsao.
+      plano.retirar.forEach(id => batch.update(doc(db, 'income_entries', id), { status: 'deleted', retirada_por: 'previsao' }));
+      const changes = plano.atualizar.length + plano.retirar.length;
+      if (changes > 0) await batch.commit();
+      const total = changes + criadas.reduce((a, b) => a + b, 0);
+      if (total > 0) console.log(`[Finance Sync] ${total} changes synchronized from services.`);
     };
     const timer = setTimeout(() => {
-      syncServicesToIncome();
+      syncServicesToIncome().catch(err => console.error('[Finance Sync] erro ao sincronizar rendas de servicos:', err));
     }, 1000); // Debounce to avoid slamming Firestore
     return () => clearTimeout(timer);
-  }, [services, incomeEntries, db]);
+  }, [services, incomeEntriesTodas, db]);
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success', action?: { label: string | React.ReactNode, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
@@ -2220,16 +2185,14 @@ const App: React.FC = () => {
     const todayStr = formatDateLocalISO(new Date());
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
     if (appSettings.notifications.budgetRisk.enabled) {
-      const now = new Date();
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
-      const totalSpend = financeTransactions.filter(t => {
-        const d = new Date(t.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      }).reduce((acc, t) => acc + t.amount, 0);
+      // Mesma conta da notificação de Pix do Telegram (functions/gasto_avulso.py).
+      const [anoBrt, mesBrtAtual, currentDay] = hojeBrt();
+      const currentMonthStr = `${anoBrt}-${String(mesBrtAtual).padStart(2, '0')}`;
+      const resumoMes = resumoDoMes(financeTransactions, financeSettings, anoBrt, mesBrtAtual);
+      const monthlyBudget = (resumoMes.orcamento ?? 0) / 100;
+      const totalSpend = resumoMes.gasto / 100;
       if (monthlyBudget > 0) {
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        const currentDay = now.getDate();
+        const daysInMonth = new Date(anoBrt, mesBrtAtual, 0).getDate();
         const budgetRatio = totalSpend / monthlyBudget;
         const timeRatio = currentDay / daysInMonth;
         // Condition: Over budget velocity AND (New day OR spending increased since last notification)
@@ -2238,9 +2201,13 @@ const App: React.FC = () => {
         const hasSpendIncreased = totalSpend > lastNotifiedSpend;
         if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1 && hasSpendIncreased && isNewDay) {
           const saldoDisponivel = monthlyBudget - totalSpend;
+          const diasRestantes = daysInMonth - currentDay + 1;
+          const linhaSaldo = saldoDisponivel > 0
+            ? `Restam R$ ${saldoDisponivel.toFixed(2)} no teto (R$ ${(Math.floor((saldoDisponivel * 100) / diasRestantes) / 100).toFixed(2)} por dia até o fim do mês)`
+            : `Teto do mês estourado em R$ ${(-saldoDisponivel).toFixed(2)}`;
           emitNotification(
             "Alerta de Orçamento",
-            `Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.\nSaldo disponível atual R$ ${saldoDisponivel.toFixed(2)}`,
+            `Você já usou ${(budgetRatio * 100).toFixed(0)}% do teto do PicPay em ${(timeRatio * 100).toFixed(0)}% do mês.\n${linhaSaldo}`,
             'warning',
             'financeiro',
             `budget-${todayStr}`
@@ -5370,6 +5337,12 @@ const App: React.FC = () => {
                         showToast={showToast}
                         tarefas={tarefas}
                         onCreateIndicadorAction={handleCreateIndicadorAction}
+                        // Fontes automáticas do perfil das metas: já carregadas pelo app, sem leitura nova.
+                        medicoes={{
+                          peso: [...healthWeights].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]?.weight ?? null,
+                          cintura: [...healthWaist].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]?.cm ?? null,
+                        }}
+                        contasFixas={fixedBills}
                       />
                     </div>
                     {isStrategySplitCopilot && (
@@ -7424,6 +7397,7 @@ if (container) {
         <App />
       </ErrorBoundary>
       <UpdatePrompt />
+      <SessaoUnicaAviso />
     </>
   );
 }

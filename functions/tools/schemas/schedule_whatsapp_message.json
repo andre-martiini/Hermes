@@ -15,6 +15,10 @@
       "scheduled_time": {
         "type": "string",
         "description": "Data e hora no formato ISO 8601. Se for envio imediato, envie a hora atual."
+      },
+      "como_assistente": {
+        "type": "boolean",
+        "description": "NÃO USE. Reservado: true faz a mensagem sair com a identificação do Gaspar na primeira linha. Por decisão do André (29/10/2026), a mensagem enviada com o sim dele sai em primeira pessoa, como ele, sem identificação; só as mensagens totalmente autônomas (Modo Secretário e Modo Objetivo) se identificam, e o servidor faz isso sozinho nesses modos. Omitido ou false: a mensagem sai exatamente como veio."
       }
     },
     "required": ["contact_number", "message", "scheduled_time"]

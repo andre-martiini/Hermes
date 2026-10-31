@@ -1,12 +1,20 @@
 {
     "name": "consultar_financas_v2",
-    "description": "Consulta o balanço financeiro detalhado (rendas, obrigações, metas e transações) para um mês e ano específicos.",
+    "description": "Consulta o balanço financeiro detalhado (rendas, obrigações, metas e transações) para um mês e ano específicos. Traz também o bloco 'guardado' (Poupança paga no mês, reserva e bolso; acumulado desde uma data com guardado_desde). resumo_apenas=true omite a lista de contas e rendas.",
     "parameters": {
         "type": "object",
         "properties": {
             "competencia": {
                 "type": "string",
                 "description": "Mês de referência no formato YYYY-MM, com o mês de 1 a 12 (ex.: '2026-11' = novembro de 2026). Se omitido, usa o mês atual."
+            },
+            "guardado_desde": {
+                "type": "string",
+                "description": "Opcional: YYYY-MM-DD. Soma a Poupança paga do mês dessa data em diante (ex.: início do ciclo da meta Financeira, 2026-11-02)."
+            },
+            "resumo_apenas": {
+                "type": "boolean",
+                "description": "true: sem a lista inteira de contas e rendas (só totais, metas, reserva e guardado)."
             }
         }
     }

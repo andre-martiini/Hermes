@@ -29,6 +29,16 @@
                 "type": "string",
                 "description": "Data ISO (YYYY-MM-DD) para transações avulsas. Se não fornecido, usa hoje."
             },
+            "conta": {
+                "type": "string",
+                "description": "Só para transacao_avulsa: de qual conta saiu o dinheiro. Só 'picpay' entra no teto de gasto do mês; 'xp' e 'caixa' ficam fora; 'mista' é resumo de mais de uma conta. Pergunte ao André se não souber.",
+                "enum": [
+                    "picpay",
+                    "xp",
+                    "caixa",
+                    "mista"
+                ]
+            },
             "confirmar_duplicata": {
                 "type": "boolean",
                 "description": "Só use true depois de um aviso 'possivel_duplicata', quando o André quiser mesmo um segundo lançamento igual no mês."

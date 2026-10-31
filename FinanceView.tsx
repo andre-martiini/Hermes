@@ -1304,62 +1304,6 @@ const FinanceView = ({
                         </div>
                     </div>
 
-                    {/* TRÍPTICO DE SALDOS AUDITADOS (EXTRATO PICPAY) */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Card 1: Saldo Real da Conta (PicPay) */}
-                        <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent p-5 rounded-2xl border border-emerald-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                                    🏦 Saldo Real da Conta (PicPay)
-                                </span>
-                                <span className="text-[8px] font-sans font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded-full uppercase">
-                                    Auditado
-                                </span>
-                            </div>
-                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">
-                                R$ 294,61
-                            </div>
-                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-                                Saldo real em conta bancária PicPay
-                            </p>
-                        </div>
-
-                        {/* Card 2: Orçamento Somente para Pix */}
-                        <div className="bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent p-5 rounded-2xl border border-indigo-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
-                                    📱 Orçamento Somente Pix
-                                </span>
-                                <span className="text-[8px] font-sans font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full uppercase">
-                                    Pix
-                                </span>
-                            </div>
-                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight mt-1">
-                                R$ 277,25
-                            </div>
-                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-                                Teto disponível restrito a pagamentos Pix
-                            </p>
-                        </div>
-
-                        {/* Card 3: Orçamento Geral de Gastos */}
-                        <div className="bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-transparent p-5 rounded-2xl border border-purple-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
-                                    📊 Orçamento Geral (Todos os Gastos)
-                                </span>
-                                <span className="text-[8px] font-sans font-extrabold bg-purple-500/20 text-purple-600 dark:text-purple-300 px-2 py-0.5 rounded-full uppercase">
-                                    Geral
-                                </span>
-                            </div>
-                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-purple-600 dark:text-purple-400 tracking-tight mt-1">
-                                R$ 274,15
-                            </div>
-                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-                                Saldo disponível para todos os gastos
-                            </p>
-                        </div>
-                    </div>
                     {/* Budget Bar & Daily Consumption Section */}
                     <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden flex flex-col gap-6">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -1888,7 +1832,7 @@ const FinanceView = ({
                                     </button>
                                     <button
                                         onClick={() => {
-                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
+                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação', conta: 'picpay' });
                                             setIsAddingTransaction(true);
                                         }}
                                         className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
@@ -1934,6 +1878,25 @@ const FinanceView = ({
                                                 }}
                                             />
                                         </div>
+                                        <label className="flex flex-col gap-1 text-[10px] font-sans font-semibold uppercase tracking-wider text-slate-500">
+                                            Conta (só PicPay entra no teto do mês)
+                                            <select
+                                                className="bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold normal-case tracking-normal text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                                value={(editingTransaction || newTransaction).conta || ''}
+                                                onChange={e => {
+                                                    // Sem a chave quando "Não informada": o Firestore recusa campo undefined.
+                                                    const { conta: _anterior, ...resto } = editingTransaction || newTransaction;
+                                                    const proximo = e.target.value ? { ...resto, conta: e.target.value as FinanceTransaction['conta'] } : resto;
+                                                    editingTransaction ? setEditingTransaction(proximo as FinanceTransaction) : setNewTransaction(proximo);
+                                                }}
+                                            >
+                                                <option value="">Não informada</option>
+                                                <option value="picpay">PicPay</option>
+                                                <option value="xp">XP</option>
+                                                <option value="caixa">Caixa</option>
+                                                <option value="mista">Mais de uma conta</option>
+                                            </select>
+                                        </label>
                                         <div className="flex gap-2 pt-2">
                                             <button
                                                 onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}

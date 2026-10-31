@@ -1,13 +1,13 @@
 {
   "name": "criar_objetivo_whatsapp",
-  "description": "Modo Objetivo: o Gaspar conduz uma conversa no WhatsApp com UMA pessoa, em primeira pessoa e sem assinatura (como o próprio André), até cumprir um objetivo — por exemplo, marcar uma consulta com a clínica X. Manda a mensagem de abertura assim que o André confirmar (confirmação obrigatória: mostre a prévia com destinatário, objetivo, abertura e limites, e só confirme depois do 'sim'). Depois responde sozinho a cada mensagem do contato e só aciona o André pelo Telegram quando precisa de dado ou decisão que não tem, quando perguntam se é robô, quando trava, quando o prazo vence e quando conclui. Nunca sugere ligação, nunca paga, assina ou aceita termos, nunca passa dado fora de pode_informar. Grupos não são aceitos. Um objetivo por conversa.",
+  "description": "Modo Objetivo: o Gaspar conduz uma conversa no WhatsApp com UMA pessoa, identificado como assistente do André (toda mensagem sai com o prefixo \"*Gaspar Bot (assistente virtual do André):*\" e fala dele em terceira pessoa), até cumprir um objetivo — por exemplo, marcar uma consulta com a clínica X. Manda a mensagem de abertura assim que o André confirmar (confirmação obrigatória: mostre a prévia com destinatário, objetivo, abertura e limites, e só confirme depois do 'sim'). Depois responde sozinho a cada mensagem do contato e só aciona o André pelo Telegram quando precisa de dado ou decisão que não tem, quando trava, quando o prazo vence e quando conclui. Nunca sugere ligação, nunca paga, assina ou aceita termos, nunca passa dado fora de pode_informar. Grupos não são aceitos. Um objetivo por conversa.",
   "parameters": {
     "type": "object",
     "properties": {
       "contato": {"type": "string", "description": "Nome, telefone ou id do chat (@c.us/@lid) da pessoa"},
       "objetivo": {"type": "string", "description": "O que precisa ser conseguido na conversa, em uma ou duas frases"},
       "criterio_conclusao": {"type": "string", "description": "Quando o objetivo está cumprido, com os dados que precisam ficar combinados (ex.: 'consulta marcada com data, hora, local e convênio confirmados')"},
-      "mensagem_abertura": {"type": "string", "description": "Primeira mensagem exata, em primeira pessoa como o André, sem assinatura e sem sugerir ligação"},
+      "mensagem_abertura": {"type": "string", "description": "Primeira mensagem exata, escrita pelo assistente Gaspar (o André em terceira pessoa), sem o prefixo de identificação (o sistema o acrescenta; a prévia mostra o texto final) e sem sugerir ligação"},
       "pode_informar": {"type": "string", "description": "Dados que o Gaspar pode passar ao contato (ex.: nome completo, convênio Allcare, janelas de horário). O que não estiver aqui vai para o André"},
       "nunca_informar": {"type": "string", "description": "Dados que nunca podem sair, separados por vírgula ou linha (ex.: CPF, endereço, número da carteirinha)"},
       "limites_decisao": {"type": "string", "description": "O que o Gaspar pode decidir sozinho (ex.: 'aceitar horário terça ou quinta de manhã até 30/10'). Vazio: toda decisão vai para o André"},

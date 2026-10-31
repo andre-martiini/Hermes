@@ -1,6 +1,6 @@
 {
   "name": "gerenciar_item_estrategico",
-  "description": "Adiciona, edita, remove ou conclui um indicador ou marco de um objetivo estratégico",
+  "description": "Adiciona, edita, remove ou conclui um indicador ou marco de um objetivo estratégico. Os ids dos itens vêm de obter_objetivo_estrategico. Marco aceita dataAlvo e esperado; editar só muda o que for enviado e preserva os demais campos do marco.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -18,11 +18,46 @@
       },
       "descricao": {
         "type": "string",
-        "description": "Descrição do item"
+        "description": "Descrição do item (obrigatória em adicionar, a menos que venha itens)"
       },
       "item_id": {
         "type": "string",
-        "description": "ID do item, obrigatório para editar/remover/concluir"
+        "description": "ID do item, obrigatório para editar/remover/concluir (veja em obter_objetivo_estrategico)"
+      },
+      "dataAlvo": {
+        "type": "string",
+        "description": "Só marco: data em que deve estar cumprido, YYYY-MM-DD. Vazio remove a data."
+      },
+      "esperado": {
+        "type": "object",
+        "description": "Só marco: valor esperado de cada indicador nessa data, {chave: número} na unidade do indicador (dinheiro em reais), ex.: {\"peso\": 91.7, \"cintura\": 108}. Em editar, mescla por chave (mandar só peso mantém a cintura); {} limpa todos.",
+        "additionalProperties": {
+          "type": "number"
+        }
+      },
+      "itens": {
+        "type": "array",
+        "description": "Só em adicionar: vários itens numa única transação, [{descricao, dataAlvo, esperado}]. Tudo ou nada.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "descricao": {
+              "type": "string"
+            },
+            "dataAlvo": {
+              "type": "string"
+            },
+            "esperado": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "descricao"
+          ]
+        }
       }
     },
     "required": [

@@ -1682,13 +1682,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* Decidir: só existe com o briefing do dia. Sem briefing, a tela abre normal. */}
             {briefing ? (
-                <DecidirBloco
-                    linhas={decidir.linhas}
-                    pendentes={decidir.pendentes}
-                    onAlternar={alternarDecidir}
-                    rodape={temRodapeDeDecidir ? rodapeDeDecidir : undefined}
-                    isDark={isDark}
-                />
+                // Tudo decidido (sem pendência nem sugestão de elevação esperando): o bloco some.
+                decidir.pendentes === 0 && totalElevacoes === 0 ? null : (
+                    <DecidirBloco
+                        linhas={decidir.linhas}
+                        pendentes={decidir.pendentes}
+                        onAlternar={alternarDecidir}
+                        rodape={temRodapeDeDecidir ? rodapeDeDecidir : undefined}
+                        isDark={isDark}
+                    />
+                )
             ) : temRodapeDeDecidir && (
                 <section aria-label="Avisos do sistema" className={`rounded-2xl border px-[18px] py-3 ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#ececf1]'}`}>
                     {rodapeDeDecidir}

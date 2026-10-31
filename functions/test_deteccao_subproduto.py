@@ -208,6 +208,10 @@ class TestSaudeFicaDeFora(unittest.TestCase):
         objetivos = [{"id": "saude", "pilar": "saude", "status": "ativo"}]
         self.assertEqual(ds.objetivos_elegiveis(objetivos), [])
 
+    def test_objetivo_pausado_nao_recebe_elevacao(self):
+        objetivos = [{"id": "mago", "pilar": "carreira", "status": "pausada", "dataRetomada": "2027-01-30"}]
+        self.assertEqual(ds.objetivos_elegiveis(objetivos), [])
+
     def test_objetivo_concluido_nao_recebe_elevacao(self):
         objetivos = [{"id": "x", "pilar": "carreira", "status": "concluido"}]
         self.assertEqual(ds.objetivos_elegiveis(objetivos), [])

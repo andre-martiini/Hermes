@@ -1,6 +1,6 @@
 {
   "name": "obter_estado_atual",
-  "description": "Panorama do dia numa chamada só: ações de hoje, herdadas do dia anterior, críticas, agenda, janelas livres e pendências. Use no início de uma conversa para se situar. Vem resumido por padrão (até 2 etapas esperando terceiros por ação, textos longos cortados); abra uma ação com obter_acao ou peça detalhe='completo'",
+  "description": "Panorama do dia numa chamada só: ações de hoje, herdadas do dia anterior, críticas, agenda, janelas livres e pendências. Use no início de uma conversa para se situar. Vem resumido por padrão (até 2 etapas esperando terceiros por ação, textos longos cortados); abra uma ação com obter_acao ou peça detalhe='completo'. Para economizar, peça só o que precisa com blocos (ex.: ['estrategia','saude'])",
   "parameters": {
     "type": "object",
     "properties": {
@@ -15,6 +15,13 @@
           "completo"
         ],
         "description": "'auto' (padrão): resumido. 'completo': tudo, como a tela inicial do app (resposta grande)."
+      },
+      "blocos": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Opcional: só estes blocos da resposta (ex.: 'estrategia', 'saude', 'hoje', 'agenda', 'fila_atencao', 'pops_ativos', 'perfil_pessoal'), mais data e falhas. Vazio: tudo."
       }
     },
     "required": []

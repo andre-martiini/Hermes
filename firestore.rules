@@ -102,7 +102,7 @@ service cloud.firestore {
     // nenhum caminho aninhado sob "system" mesmo que algum vier a existir.
     match /system/{docId} {
       allow read, write: if internalUser()
-        && docId in ['sync', 'copilot_soul'];
+        && docId in ['sync', 'copilot_soul', 'sessao_ativa'];
     }
 
     // Regra principal deste arquivo. Cobre toda coleção não listada nas

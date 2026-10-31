@@ -62,10 +62,42 @@ class _MockCollection:
             self._id_counter += 1
         return _MockDocRef(self, doc_id)
 
+    def where(self, campo, op, valor):
+        assert op == "=="
+        filtrado = _MockCollection(self.name)
+        filtrado._docs = {k: v for k, v in self._docs.items() if v.get(campo) == valor}
+        return filtrado
+
+    def stream(self):
+        return [_MockDocSnap(k, v) for k, v in self._docs.items()]
+
+
+class _MockBatch:
+    """Lote que só aplica no commit: falhar antes do commit não grava nada."""
+
+    def __init__(self):
+        self.ops = []
+
+    def update(self, ref, dados):
+        self.ops.append(lambda: ref.update(dados))
+
+    def set(self, ref, dados):
+        self.ops.append(lambda: ref.set(dados))
+
+    def delete(self, ref):
+        self.ops.append(ref.delete)
+
+    def commit(self):
+        for op in self.ops:
+            op()
+
 
 class _MockDb:
     def __init__(self):
         self._cols: dict[str, _MockCollection] = {}
+
+    def batch(self):
+        return _MockBatch()
 
     def collection(self, name: str):
         if name not in self._cols:
@@ -145,5 +177,273 @@ class TestEditarObjetivoEstrategicoIdempotente(unittest.TestCase):
         self.assertEqual(doc["diretrizesDerivadas"], ["diretriz X", "diretriz Y"])
 
 
+def _objetivo_com_marcos():
+    return {
+        "userId": "uid-1", "objetivoMacro": "Saúde", "pilar": "saude", "status": "ativo",
+        "tipoMeta": "absoluta", "diretrizesDerivadas": ["d"],
+        "metricaAlvo": {"valorInicial": 93.4, "valorAtual": 93.4, "valorObjetivo": 88, "unidade": "kg", "fonte": "peso"},
+        "marcos": [
+            "Marco legado em texto",
+            {"id": "m1", "descricao": "91,7 kg", "concluido": False, "registros": [],
+             "dataAlvo": "2026-11-30", "esperado": {"peso": 91.7, "cintura": 108}, "campo_futuro": "não some"},
+        ],
+    }
+
+
+class TestItemPreservaCamposDoPerfil(unittest.TestCase):
+    """A2: recompor o marco só com os campos antigos apagava `dataAlvo` e `esperado`."""
+
+    def _m1(self, lista):
+        return next(m for m in lista if m["id"] == "m1")
+
+    def test_editar_concluir_e_adicionar_outro_nao_apagam_data_alvo_nem_esperado(self):
+        data = _objetivo_com_marcos()
+        for acao, extra in (("editar", {"descricao": "91,7 kg (revisto)"}), ("concluir", {})):
+            lista, r = st.aplicar_item(data, "marco", acao, item_id="m1", **extra)
+            m1 = self._m1(lista)
+            self.assertEqual((m1["dataAlvo"], m1["esperado"], m1["campo_futuro"]),
+                             ("2026-11-30", {"peso": 91.7, "cintura": 108}, "não some"), acao)
+        lista, _ = st.aplicar_item(data, "marco", "adicionar", descricao="Outro")
+        self.assertEqual(self._m1(lista)["esperado"], {"peso": 91.7, "cintura": 108})
+
+    def test_adicionar_e_editar_aceitam_data_alvo_e_esperado(self):
+        data = _objetivo_com_marcos()
+        lista, r = st.aplicar_item(data, "marco", "adicionar", descricao="89,9 kg", dataAlvo="2026-12-30",
+                                   esperado={"peso": "89.9", "cintura": 106})
+        novo = next(m for m in lista if m["id"] == r["item_id"])
+        self.assertEqual((novo["dataAlvo"], novo["esperado"]), ("2026-12-30", {"peso": 89.9, "cintura": 106.0}))
+
+        lista, _ = st.aplicar_item(data, "marco", "editar", item_id="m1", dataAlvo="2026-12-01")
+        self.assertEqual((self._m1(lista)["dataAlvo"], self._m1(lista)["descricao"]), ("2026-12-01", "91,7 kg"))
+        lista, _ = st.aplicar_item(data, "marco", "editar", item_id="m1", dataAlvo="", esperado={})
+        self.assertNotIn("dataAlvo", self._m1(lista))
+        self.assertNotIn("esperado", self._m1(lista))
+
+    def test_valores_invalidos_sao_recusados_sem_gravar(self):
+        data = _objetivo_com_marcos()
+        for extra, motivo in (({"dataAlvo": "30/11/2026"}, "dataAlvo_invalida"),
+                              ({"dataAlvo": "2026-02-30"}, "dataAlvo_invalida"),
+                              ({"esperado": {"peso": "abc"}}, "esperado_invalido"),
+                              ({"esperado": [91.7]}, "esperado_invalido"),
+                              ({}, "nada_para_editar")):
+            lista, r = st.aplicar_item(data, "marco", "editar", item_id="m1", **extra)
+            self.assertIsNone(lista)
+            self.assertEqual(r["reason"], motivo)
+        lista, r = st.aplicar_item(data, "indicador", "adicionar", descricao="x", dataAlvo="2026-11-30")
+        self.assertEqual((lista, r["reason"]), (None, "dataAlvo_e_esperado_so_em_marco"))
+
+    def test_editar_esperado_mescla_por_indicador(self):
+        lista, _ = st.aplicar_item(_objetivo_com_marcos(), "marco", "editar", item_id="m1", esperado={"peso": 91.5})
+        self.assertEqual(self._m1(lista)["esperado"], {"peso": 91.5, "cintura": 108})
+
+    def test_indicador_aceita_data_e_esperado_vazios_como_nao_enviados(self):
+        data = {**_objetivo_com_marcos(), "indicadoresSucesso": [{"id": "i1", "descricao": "a", "concluido": False}]}
+        lista, r = st.aplicar_item(data, "indicador", "editar", item_id="i1", descricao="b", dataAlvo="", esperado={})
+        self.assertEqual((lista[0]["descricao"], "dataAlvo" in lista[0]), ("b", False))
+
+    def test_id_legado_de_descricao_que_nao_e_texto_bate_com_a_tela(self):
+        # Só texto entra no hash; a tela (itensEstrategia.ts) faz o mesmo.
+        self.assertEqual(st.normalizar_item({"descricao": 1.0}, "marco", 0)["id"], st.id_legado("marco", 0, ""))
+
+    def test_marco_legado_tem_id_estavel_e_editavel(self):
+        data = _objetivo_com_marcos()
+        id_lido = st.normalizar_item(data["marcos"][0], "marco", 0)["id"]
+        self.assertEqual(id_lido, st.normalizar_item(data["marcos"][0], "marco", 0)["id"])
+        lista, r = st.aplicar_item(data, "marco", "editar", item_id=id_lido, dataAlvo="2026-11-30")
+        self.assertEqual((lista[0]["id"], lista[0]["dataAlvo"]), (id_lido, "2026-11-30"))
+        # Depois de gravado, o legado vira dict com o MESMO id, e a leitura seguinte o acha.
+        data["marcos"] = lista
+        lista, r = st.aplicar_item(data, "marco", "remover", item_id=id_lido)
+        self.assertEqual([m["id"] for m in lista], ["m1"])
+
+
+class TestLeituraCompletaDoObjetivo(unittest.TestCase):
+    """B1: o Claude precisa ver marcos com id, data alvo e esperado para conseguir editá-los."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        col = self.db.collection("estrategia_pessoal")
+        col.document("saude").set(_objetivo_com_marcos())
+        col.document("alheio").set({**_objetivo_com_marcos(), "userId": "outro"})
+        col.document("mago").set({"userId": "uid-1", "objetivoMacro": "MAGO", "pilar": "carreira",
+                                  "status": "revisar", "marcos": []})
+
+    def test_obter_devolve_tudo_com_ids_estaveis(self):
+        r1 = st.obter_objetivo_estrategico(self.db, "uid-1", "saude")
+        r2 = st.obter_objetivo_estrategico(self.db, "uid-1", "saude")
+        obj = r1["objetivo"]
+        self.assertEqual(obj["metricaAlvo"]["fonte"], "peso")
+        self.assertEqual(obj["marcos"][1]["esperado"], {"peso": 91.7, "cintura": 108})
+        self.assertEqual(obj["marcos"][0]["id"], r2["objetivo"]["marcos"][0]["id"])
+        self.assertNotIn("userId", obj)
+
+    def test_obter_e_listar_sao_fail_closed(self):
+        self.assertEqual(st.obter_objetivo_estrategico(self.db, "uid-1", "alheio")["status"], "error")
+        self.assertEqual(st.obter_objetivo_estrategico(self.db, None, "saude")["status"], "error")
+        self.assertEqual(st.listar_objetivos_estrategicos(self.db, None)["status"], "error")
+        ids = [o["id"] for o in st.listar_objetivos_estrategicos(self.db, "uid-1")["objetivos"]]
+        self.assertEqual(sorted(ids), ["mago", "saude"])
+
+    def test_listar_resumido_e_por_status(self):
+        r = st.listar_objetivos_estrategicos(self.db, "uid-1", completo="false", status="ativo")  # texto, como o MCP manda
+        self.assertEqual(r["objetivos"], [{"id": "saude", "objetivoMacro": "Saúde", "pilar": "saude",
+                                          "status": "ativo", "marcos": 2, "marcos_concluidos": 0}])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPausaPerfilEHistorico(unittest.TestCase):
+    """A5, B2 e B3: status pausada, campos do perfil pelo editar e o histórico de antes e depois."""
+
+    def setUp(self):
+        from unittest import mock
+
+        # Data fixa: "retomada no futuro" não pode depender do dia em que o teste roda.
+        patcher = mock.patch.object(st, "hoje_brasilia", return_value="2026-10-30")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.db = _MockDb()
+        self.db.collection("estrategia_pessoal").document("mago").set(
+            {"userId": "uid-1", "objetivoMacro": "MAGO", "pilar": "carreira", "status": "ativo",
+             "tipoMeta": "relativa_qualitativa", "diretrizesDerivadas": ["d"], "marcos": []})
+
+    def _doc(self):
+        return self.db.collection("estrategia_pessoal").document("mago").get().to_dict()
+
+    def _historico(self):
+        return list(self.db.collection(st.COLECAO_HISTORICO)._docs.values())
+
+    def test_pausar_exige_data_de_retomada_e_sair_da_pausa_apaga_a_data(self):
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada")
+        self.assertEqual(r["reason"], "pausada_exige_dataRetomada")
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada", dataRetomada="2027-01-30")
+        self.assertEqual(r["status"], "updated")
+        self.assertEqual((self._doc()["status"], self._doc()["dataRetomada"]), ("pausada", "2027-01-30"))
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="ativo")
+        self.assertIs(self._doc()["dataRetomada"], firestore.DELETE_FIELD)  # o mock grava o sentinela
+
+    def test_data_de_retomada_invalida_ou_sem_pausa_e_recusada(self):
+        self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada",
+                                                        dataRetomada="30/01/2027")["reason"], "dataRetomada_invalida")
+        self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", dataRetomada="2027-01-30")["reason"],
+                         "dataRetomada_so_com_status_pausada")
+
+    def test_criar_ja_pausada_e_recusado(self):
+        r = st.criar_objetivo_estrategico(self.db, "uid-1", "Nova", status="pausada", diretrizes=["d"])
+        self.assertEqual(r["status"], "error")
+
+    def test_editar_aceita_ciclo_linha_base_e_indicadores_validados(self):
+        r = st.editar_objetivo_estrategico(
+            self.db, "uid-1", "mago",
+            ciclo={"inicio": "2026-11-02", "fim": "2027-01-30"},
+            linhaBase={"data": "2026-11-02", "valores": {"peso": "93.4"}},
+            indicadores=[{"chave": "peso", "rotulo": "Peso", "unidade": "kg", "sentido": "menor_melhor",
+                          "fonte": "peso", "inicial": 93.4, "alvoFinal": 88}])
+        self.assertEqual(sorted(r["campos_alterados"]), ["ciclo", "indicadores", "linhaBase"])
+        self.assertEqual(self._doc()["linhaBase"], {"data": "2026-11-02", "valores": {"peso": 93.4}})
+        for ruim in ({"ciclo": {"inicio": "2027-01-30", "fim": "2026-11-02"}},
+                     {"linhaBase": {"data": "x", "valores": {}}},
+                     {"indicadores": [{"chave": "peso", "sentido": "menor_melhor", "fonte": "balança"}]},
+                     {"indicadores": [{"chave": "p", "sentido": "menor_melhor", "fonte": "peso"}] * 2},
+                     {"indicadores": ["Peso"]}):
+            self.assertEqual(st.editar_objetivo_estrategico(self.db, "uid-1", "mago", **ruim)["status"], "error", ruim)
+
+    def test_editar_e_excluir_gravam_antes_e_depois(self):
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", objetivoMacro="MAGO (revisto)", origem="tela")
+        h = self._historico()[-1]
+        self.assertEqual((h["operacao"], h["origem"], h["objetivo_id"], h["userId"]), ("editar", "tela", "mago", "uid-1"))
+        self.assertEqual((h["antes"], h["depois"]), ({"objetivoMacro": "MAGO"}, {"objetivoMacro": "MAGO (revisto)"}))
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        h = self._historico()[-1]
+        self.assertEqual((h["operacao"], h["antes"]["objetivoMacro"], h["depois"]), ("excluir", "MAGO (revisto)", {}))
+        self.assertNotIn("userId", h["antes"])
+
+    def test_historico_na_transacao_vai_pela_transacao(self):
+        gravados = []
+
+        class _Tx:
+            def set(self, ref, dados):
+                gravados.append(dados)
+
+        st.registrar_historico(_Tx(), self.db, "uid-1", "mago", "marco:adicionar", {"marcos": []},
+                               {"marcos": [{"id": "m1"}]})
+        self.assertEqual(len(gravados), 1)
+        self.assertEqual(self._historico(), [])  # nada fora da transação
+        self.assertEqual((gravados[0]["operacao"], gravados[0]["depois"]), ("marco:adicionar", {"marcos": [{"id": "m1"}]}))
+
+    def test_adicionar_em_lote_e_tudo_ou_nada(self):
+        data = _objetivo_com_marcos()
+        lista, r = st.aplicar_item(data, "marco", "adicionar", itens=[
+            {"descricao": "Tabela de preços aprovada", "dataAlvo": "2026-11-30"},
+            {"descricao": "Contrato-modelo pronto", "dataAlvo": "2026-12-30"},
+            {"descricao": "1 clínica pagando", "dataAlvo": "2027-01-30"}])
+        self.assertEqual(len(r["item_ids"]), 3)
+        self.assertEqual([m["descricao"] for m in lista[-3:]],
+                         ["Tabela de preços aprovada", "Contrato-modelo pronto", "1 clínica pagando"])
+        self.assertEqual(lista[1]["esperado"], {"peso": 91.7, "cintura": 108})  # o que já existia fica
+        lista, r = st.aplicar_item(data, "marco", "adicionar", itens=[
+            {"descricao": "ok", "dataAlvo": "2026-11-30"}, {"descricao": "ruim", "dataAlvo": "30/12"}])
+        self.assertEqual((lista, r["reason"], r["item"]), (None, "dataAlvo_invalida", "ruim"))
+        self.assertEqual(st.aplicar_item(data, "marco", "editar", item_id="m1", itens=[{"descricao": "x"}])[1]["reason"],
+                         "itens_so_em_adicionar_e_nao_vazio")
+
+
+class TestAvisoMetaDeSaudeSemFonte(unittest.TestCase):
+    """B6: meta numérica de saúde em kg ou cm criada sem fonte avisa no resultado."""
+
+    def test_avisa_sem_fonte_e_cala_com_fonte(self):
+        db = _MockDb()
+        base = dict(db=db, user_uid="uid-1", objetivoMacro="Peso", pilar="saude", tipoMeta="absoluta",
+                    diretrizes=["d"], metrica_valor_atual=93.4, metrica_valor_objetivo=88, metrica_unidade="kg")
+        self.assertIn("metrica_fonte='peso'", st.criar_objetivo_estrategico(**base)["aviso"])
+        self.assertNotIn("aviso", st.criar_objetivo_estrategico(**base, metrica_fonte="peso"))
+        self.assertIn("'cintura'", st.criar_objetivo_estrategico(**{**base, "metrica_unidade": "cm"})["aviso"])
+        self.assertNotIn("aviso", st.criar_objetivo_estrategico(**{**base, "pilar": "financas", "metrica_unidade": "kg"}))
+
+
+class TestCorrecoesDaSegundaRevisao(TestPausaPerfilEHistorico):
+    """2ª revisão: vazio não apaga, retomada no passado recusada, histórico com datas e atômico."""
+
+    def test_vazio_e_nao_enviado(self):
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", indicadores=[
+            {"chave": "peso", "sentido": "menor_melhor", "fonte": "peso"}])
+        r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", ciclo={}, linhaBase={}, indicadores=[],
+                                           objetivoMacro="MAGO 2")
+        self.assertEqual(r["campos_alterados"], ["objetivoMacro"])
+        self.assertEqual(len(self._doc()["indicadores"]), 1)  # `indicadores: []` não apagou
+        lista, r = st.aplicar_item(_objetivo_com_marcos(), "marco", "concluir", item_id="m1", itens=[])
+        self.assertTrue(lista[1]["concluido"])
+
+    def test_retomada_no_passado_ou_hoje_e_recusada(self):
+        for data in ("2026-10-29", "2026-10-30"):
+            r = st.editar_objetivo_estrategico(self.db, "uid-1", "mago", status="pausada", dataRetomada=data)
+            self.assertEqual(r["reason"], "dataRetomada_deve_ser_futura", data)
+
+    def test_historico_guarda_datas_como_texto(self):
+        from datetime import datetime, timezone
+
+        self.db.collection("estrategia_pessoal").document("mago").update(
+            {"timestamp": datetime(2026, 10, 30, 12, tzinfo=timezone.utc)})
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        self.assertEqual(self._historico()[-1]["antes"]["timestamp"], "2026-10-30T12:00:00+00:00")
+
+    def test_editar_e_excluir_vao_num_lote_unico(self):
+        lotes = []
+        original = self.db.batch
+
+        def _espiao():
+            lote = original()
+            lotes.append(lote)
+            return lote
+
+        self.db.batch = _espiao
+        st.editar_objetivo_estrategico(self.db, "uid-1", "mago", objetivoMacro="X")
+        st.excluir_objetivo_estrategico(self.db, "uid-1", "mago")
+        self.assertEqual([len(l.ops) for l in lotes], [2, 2])  # mudança + histórico, juntos
+
+    def test_aviso_de_saude_aceita_quilos(self):
+        r = st.criar_objetivo_estrategico(self.db, "uid-1", "Peso", pilar="saude", tipoMeta="absoluta",
+                                          diretrizes=["d"], metrica_valor_objetivo=88, metrica_unidade="quilos")
+        self.assertIn("'peso'", r["aviso"])

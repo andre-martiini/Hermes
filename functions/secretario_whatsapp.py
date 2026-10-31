@@ -41,22 +41,12 @@ from firebase_admin import firestore
 import atencao
 import outbox_aprovacao
 from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
+# O prefixo e as funções moraram aqui até 28/10/2026; agora são dos dois modos e ficam em
+# mensagens_gaspar. Reexportados porque os testes e o resto deste módulo os usam por aqui.
+from mensagens_gaspar import PREFIXO_IDENTIFICACAO, _RE_ASSINATURA_BOT, com_identificacao, sem_assinatura  # noqa: F401
 
 COLLECTION_CONVERSAS = "whatsapp_secretario_conversas"
 COLLECTION_PRIORITARIOS = "secretario_contatos_prioritarios"
-# Toda mensagem do secretário começa com este prefixo, que o código acrescenta (decisão do
-# dono, 28/10/2026: o secretário precisa se identificar como bot, não falar como o André).
-PREFIXO_IDENTIFICACAO = "*Gaspar Bot (assistente virtual do André):*"
-# Reconhece o prefixo e as assinaturas antigas ("**Gaspar Bot:**", antes "**Hermes Bot:**"),
-# inclusive com descrição entre parênteses: `eh_mensagem_do_bot` a usa no eco `from_me` e
-# `sem_assinatura` a remove se o modelo a escrever (o código põe o prefixo uma vez só).
-# "Gaspar" sem "Bot" só conta com os dois-pontos: Gaspar também é nome de gente, e uma
-# mensagem do André que comece com "Gaspar, ..." não pode ser lida como do bot.
-_RE_ASSINATURA_BOT = re.compile(
-    r"^\*{0,2}\s*(?:(?:Hermes|Gaspar) Bot(?:\s*\([^)\n]{0,60}\))?(?:\s*(?::|\*{1,2}\s*:))?"
-    r"|Gaspar\s*(?::|\*{1,2}\s*:))\*{0,2}\s*",
-    re.IGNORECASE,
-)
 DEFAULT_MAX_TROCAS = 2
 DEFAULT_MAX_TROCAS_PRIORITARIO = 6
 DEFAULT_JANELA_MIN = 10
@@ -90,16 +80,6 @@ _DIAS_DE_AGENDA = 14
 # ---------------------------------------------------------------------------
 # Lógica pura e formatação
 # ---------------------------------------------------------------------------
-
-def sem_assinatura(texto: str) -> str:
-    """Tira o prefixo de identificação e as assinaturas antigas ("**Gaspar Bot:**" e variações), se o modelo as escrever."""
-    return _RE_ASSINATURA_BOT.sub("", str(texto or "").strip()).strip()
-
-
-def com_identificacao(texto: str) -> str:
-    """O texto como vai ao contato: PREFIXO_IDENTIFICACAO, quebra de linha e a mensagem, uma vez só."""
-    return f"{PREFIXO_IDENTIFICACAO}\n{sem_assinatura(texto)}"
-
 
 # Respostas prontas, do assistente (o prefixo vem depois), para quando o modelo falha ou a conversa chega ao limite.
 _RESPOSTA_CONTINGENCIA_INICIO = "Oi! O André não pode responder agora. Me conta o que você precisa que eu deixo anotado para ele."
@@ -1857,7 +1837,7 @@ def processar_mensagem_secretario(
         from validacao_mensagem import problemas
 
         enviadas = [h.get("content") for h in historico if h.get("role") == "assistant"][-5:]
-        barrada = problemas(resposta_texto, ja_enviadas=enviadas, permite_identidade=True)
+        barrada = problemas(resposta_texto, ja_enviadas=enviadas)
         if barrada:
             print(f"[SecretarioWhatsApp] Resposta barrada antes do envio ({'; '.join(barrada)}); vai a resposta padrão.")
             resposta_texto = _RESPOSTA_CONTINGENCIA if historico else _RESPOSTA_CONTINGENCIA_INICIO

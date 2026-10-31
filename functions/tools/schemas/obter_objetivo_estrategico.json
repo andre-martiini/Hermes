@@ -1,0 +1,16 @@
+{
+  "name": "obter_objetivo_estrategico",
+  "description": "Lê um objetivo estratégico inteiro: objetivoMacro, pilar, status, tipoMeta, metricaAlvo com fonte, historicoMetrica, diretrizes, indicadoresSucesso, ciclo, linhaBase, indicadores e marcos com id, concluido, dataAlvo e esperado. Os ids dos marcos (inclusive os legados em texto) são estáveis e são os que gerenciar_item_estrategico aceita. Somente leitura.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {
+        "type": "string",
+        "description": "ID do objetivo estratégico"
+      }
+    },
+    "required": [
+      "objetivo_id"
+    ]
+  }
+}

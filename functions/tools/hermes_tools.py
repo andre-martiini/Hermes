@@ -155,6 +155,11 @@ def editar_parcela_servico(ctx: ToolContext, args: dict):
     return financas_itens.editar_parcela_servico(ctx.db, args)
 
 
+def deduplicar_rendas_servico(ctx: ToolContext, args: dict):
+    from tools import financas_itens
+    return financas_itens.deduplicar_rendas_servico(ctx.db, args)
+
+
 def _consultar_lista_compras(ctx: ToolContext, args: dict):
     """Contraparte de leitura de `mutar_lista_compras`, na mesma unica copia."""
     from tools import lista_compras
@@ -722,6 +727,7 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
         return _fn(
             query=str(args.get("query") or ""),
             max_results=min(int(args.get("max_results") or 5), 5),
+            max_chars_anexo=args.get("max_chars_anexo"),
         )
     except Exception as e:
         # P03 passo 2: cobre tambem o parsing de `max_results` acima, que
@@ -733,6 +739,11 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
         return f"ERRO|Erro: {e}"
 
 
+def _como_assistente(args: dict) -> bool:
+    """`como_assistente` (tolerante a "true" em texto): o agente residente pede o prefixo de identificação."""
+    return str(args.get("como_assistente")).strip().lower() in ("true", "1", "sim")
+
+
 def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
     from tools.schedule_whatsapp_message import schedule_whatsapp_message as _fn
 
@@ -742,6 +753,7 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
         message=args.get("message"),
         scheduled_time=args.get("scheduled_time"),
         idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
+        como_assistente=_como_assistente(args),
     )
 
 
@@ -1003,11 +1015,16 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
             return {"status": "destinatario_ambiguo" if resolved.get("ambiguo") else "destinatario_desconhecido",
                     "informado": resolved["informado"],
                     "sugestoes": resolved["sugestoes"]}
+        mensagem = str(args.get("message") or "")
+        if _como_assistente(args) and mensagem.strip():
+            from mensagens_gaspar import com_identificacao
+
+            mensagem = com_identificacao(mensagem)   # o André aprova o texto exato, com a identificação
         return {"status": "confirmation_required",
                 "destinatario": ("GRUPO: " if resolved["tipo"] == "grupo" else "") + resolved["nome"],
                 "destinatario_id": resolved["chat_id"],
                 "tipo_destinatario": resolved["tipo"],
-                "mensagem": str(args.get("message") or ""),
+                "mensagem": mensagem,
                 "agendado_para": str(args.get("scheduled_time") or "")}
     return None
 
@@ -2566,10 +2583,11 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         if perfil_pessoal:
             estado["perfil_pessoal"] = perfil_pessoal
         # `enum` de `detalhe` já é validado no preflight (schema de entrada).
-        if (args.get("detalhe") or "auto") == "completo":
-            return estado
-        from tools.estado_resumido import resumir_estado
-        return resumir_estado(estado)
+        from tools.estado_resumido import resumir_estado, so_blocos
+
+        if (args.get("detalhe") or "auto") != "completo":
+            estado = resumir_estado(estado)
+        return so_blocos(estado, args.get("blocos"))
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 
@@ -3224,6 +3242,7 @@ _HANDLERS: dict = {
     "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
     "editar_parcela_servico": editar_parcela_servico,
     "excluir_entrada_diario": excluir_entrada_diario,
+    "deduplicar_rendas_servico": deduplicar_rendas_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 
     # Delegadas a modulos dedicados
@@ -3277,6 +3296,8 @@ _HANDLERS: dict = {
     "editar_objetivo_estrategico": _strategy("editar_objetivo_estrategico"),
     "gerenciar_item_estrategico": _strategy("gerenciar_item_estrategico"),
     "excluir_objetivo_estrategico": _strategy("excluir_objetivo_estrategico"),
+    "obter_objetivo_estrategico": _strategy("obter_objetivo_estrategico"),
+    "listar_objetivos_estrategicos": _strategy("listar_objetivos_estrategicos"),
 
     # Extraidas das closures
     "pesquisar_internet": pesquisar_internet,

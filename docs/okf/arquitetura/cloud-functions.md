@@ -4,7 +4,7 @@ title: Mapa de Cloud Functions
 description: Cloud Functions exportadas pelo backend Python do Gaspar, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
-timestamp: 2026-08-22T00:00:00-03:00
+timestamp: 2026-10-30T00:00:00-03:00
 ---
 
 # Mapa de Cloud Functions
@@ -48,6 +48,7 @@ Ativação (Calendar/Drive): depois do deploy, gravar a URL pública de cada end
 | Função | Trigger | O que faz |
 |---|---|---|
 | `on_notificacao_created` | Firestore create (`notificacoes/{id}`) | Espelha notificação para o Telegram |
+| `checkin_estrategia_semanal` (`checkin_estrategia.py`) | Scheduler (de hora em hora, :05) | Check-in semanal da estratégia no Telegram: por meta, atual, esperado de hoje e estado (`perfil_estrategia`), e um ajuste sugerido quando há atraso (nunca ligação, call ou reunião). Só envia no dia e hora de `system/settings.estrategia.checkin` (padrão domingo 18h, a partir de 08/11/2026); `estrategia_checkins/{data}` impede repetição; nada sai com todas as metas pausadas |
 | `check_and_send_reminders` | Scheduler (1 min) | Dispara reminders de tarefas/saúde/financeiro; também despacha (`dispatch_pending_ai_notifications`) a fila `scheduled_notifications` gerada pelo planejador de IA |
 
 ### Conhecimento e RAG

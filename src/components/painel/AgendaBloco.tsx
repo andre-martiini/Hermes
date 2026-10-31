@@ -48,6 +48,31 @@ const CSS_ANIMACOES = `
 @media (prefers-reduced-motion: reduce){.painel-brilho-suave,.painel-pulso{animation:none}}
 `;
 
+/**
+ * Avisos de conflito que o André já leu e dispensou no X. Ficam só no aparelho e só no dia
+ * (a chave carrega a data de Brasília): amanhã o mesmo conflito, se existir, volta a aparecer.
+ * A chave é o texto do aviso (títulos e horários), não o id do evento: o id é a posição na
+ * lista (`agenda-0`) e mudaria de dono quando a agenda muda, escondendo um conflito novo.
+ */
+const hoje = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+const CHAVE_OCULTOS = 'painel-agenda-conflitos-ocultos';
+const chaveDoAviso = (texto: string) => `${hoje()}|${texto}`;
+const lerOcultos = (): string[] => {
+    try {
+        const lista = JSON.parse(localStorage.getItem(CHAVE_OCULTOS) || '[]');
+        return Array.isArray(lista) ? lista.filter((k: unknown) => typeof k === 'string' && k.startsWith(hoje())) : [];
+    } catch {
+        return [];
+    }
+};
+const guardarOcultos = (lista: string[]) => {
+    try {
+        localStorage.setItem(CHAVE_OCULTOS, JSON.stringify(lista));
+    } catch {
+        /* sem armazenamento: o aviso some só até recarregar */
+    }
+};
+
 /** Faixa (0 ou 1) de cada compromisso, para os que se sobrepõem não ficarem um sobre o outro. */
 const faixas = (eventos: EventoDoDia[]): Map<string, number> => {
     const fimPorFaixa = [-1, -1];
@@ -75,9 +100,19 @@ interface AgendaBlocoProps {
 
 const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], agoraMin, preparo, isDark = false }) => {
     const [aberta, setAberta] = useState(false);
+    const [ocultos, setOcultos] = useState<string[]>(lerOcultos);
     const reduzido = usePrefersReducedMotion();
     const destaque = useMemo(() => calcularDestaque(eventos, agoraMin), [eventos, agoraMin]);
     const conflitos = useMemo(() => detectarConflitos(eventos), [eventos]);
+    const pares = useMemo(
+        () => conflitos.pares.filter(par => !ocultos.includes(chaveDoAviso(textoDoConflito(par)))),
+        [conflitos, ocultos],
+    );
+    const ocultar = (par: (typeof conflitos.pares)[number]) => {
+        const novos = [...ocultos, chaveDoAviso(textoDoConflito(par))];
+        setOcultos(novos);
+        guardarOcultos(novos);
+    };
     const faixaDe = useMemo(() => faixas(eventos), [eventos]);
 
     const estilo = ESTILO_NIVEL[destaque.nivel];
@@ -124,7 +159,7 @@ const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], ago
                 </button>
             </div>
 
-            {conflitos.pares.length > 0 && (
+            {pares.length > 0 && (
                 <div
                     data-testid="aviso-conflito"
                     role="alert"
@@ -135,12 +170,25 @@ const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], ago
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-none mt-px">
                         <path d="M12 3 2 20h20L12 3z" /><path d="M12 10v4" /><path d="M12 17h.01" />
                     </svg>
-                    <div className="text-[13px] leading-snug font-semibold">
-                        {conflitos.pares.slice(0, MAX_CONFLITOS_NO_AVISO).map(par => (
-                            <p key={`${par.a.id}-${par.b.id}`} className="m-0">{textoDoConflito(par)}</p>
+                    <div className="flex-1 min-w-0 text-[13px] leading-snug font-semibold">
+                        {pares.slice(0, MAX_CONFLITOS_NO_AVISO).map(par => (
+                            <div key={`${par.a.id}-${par.b.id}`} data-testid="linha-conflito" className="flex items-start gap-2">
+                                <p className="m-0 flex-1 min-w-0">{textoDoConflito(par)}</p>
+                                <button
+                                    type="button"
+                                    onClick={() => ocultar(par)}
+                                    aria-label={`Ocultar aviso: ${textoDoConflito(par)}`}
+                                    title="Ocultar este aviso"
+                                    className="flex-none -mt-1.5 -mr-1.5 w-9 h-9 rounded-lg inline-flex items-center justify-center bg-transparent opacity-70 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce]"
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true">
+                                        <path d="M6 6l12 12M18 6 6 18" />
+                                    </svg>
+                                </button>
+                            </div>
                         ))}
-                        {conflitos.pares.length > MAX_CONFLITOS_NO_AVISO && (
-                            <p className="m-0">e mais {conflitos.pares.length - MAX_CONFLITOS_NO_AVISO}.</p>
+                        {pares.length > MAX_CONFLITOS_NO_AVISO && (
+                            <p className="m-0">e mais {pares.length - MAX_CONFLITOS_NO_AVISO}.</p>
                         )}
                     </div>
                 </div>
