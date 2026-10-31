@@ -78,8 +78,12 @@ if ($TravarTela) {
   } else {
     'travar tela: sera criada (90 s depois do logon)'
     if ($Aplicar) {
-      schtasks /Create /TN 'Gaspar - travar tela' /SC ONLOGON /DELAY 0001:30 /IT /TR 'rundll32.exe user32.dll,LockWorkStation' /F | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw 'schtasks /Create falhou para travar a tela' }
+      # schtasks /SC ONLOGON exige administrador; Register-ScheduledTask com o proprio usuario, nao
+      $gat = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+      $gat.Delay = 'PT1M30S'
+      $acao = New-ScheduledTaskAction -Execute 'rundll32.exe' -Argument 'user32.dll,LockWorkStation'
+      $prin = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+      Register-ScheduledTask -TaskName 'Gaspar - travar tela' -Trigger $gat -Action $acao -Principal $prin | Out-Null
       '  ok: tarefa criada'
     }
   }
