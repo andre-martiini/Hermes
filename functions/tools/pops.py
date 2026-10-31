@@ -78,6 +78,9 @@ def criar(db, args: dict) -> dict:
         # A tela faz `pop.gatilhos.join`: o campo precisa existir, mesmo vazio.
         "gatilhos": gatilhos, "sempre_ativo": origem == "sempre_ativo",
         "autor": AUTOR, "origem": AUTOR, "criado_em": _agora(), "versao": 1,
+        # `obter_estado_atual` mostra só os 5 sempre ativos mais recentes por
+        # `atualizado_em`/`updated_at`: sem o campo, o POP novo ficaria de fora.
+        "atualizado_em": _agora(),
     }
     db.collection(ATIVOS).document(pop_id).set(dados)
     _historico(db, pop_id, 1, "criar", None, dados)
@@ -98,7 +101,8 @@ def editar(db, args: dict) -> dict:
 
     antes = {c: dados.get(c) for c in mudancas}
     versao = int(dados.get("versao") or 1) + 1
-    ref.update({**mudancas, "versao": versao, "editado_em": _agora(), "editado_por": AUTOR})
+    ref.update({**mudancas, "versao": versao, "editado_em": _agora(), "atualizado_em": _agora(),
+                "editado_por": AUTOR})
     hid = _historico(db, pop_id, versao, "editar", antes, mudancas)
     _limpar_cache()
     return {"status": "editado", "id": pop_id, "ativo": ativo, "anterior": antes, "historico_id": hid,
@@ -119,7 +123,7 @@ def desativar(db, args: dict) -> dict:
         return {"status": "sem_mudanca", "id": pop_id, "ativo": ativo}
 
     dados = snap.to_dict() or {}
-    dados["reativado_em" if reativar else "desativado_em"] = _agora()
+    dados["reativado_em" if reativar else "desativado_em"] = dados["atualizado_em"] = _agora()
     dados["versao"] = int(dados.get("versao") or 1) + 1
     # Grava o destino antes de tirar da origem: uma falha no meio deixa o POP
     # nas duas coleções (repetir resolve), nunca em nenhuma.
