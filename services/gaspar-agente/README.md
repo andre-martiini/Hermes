@@ -100,7 +100,12 @@ schtasks /Create /TN "Gaspar - vigia" /SC MINUTE /MO 5 /IT /TR "conhost.exe --he
 ```
 O `conhost.exe --headless` evita a janela piscando a cada 5 min (o "iniciar" precisa da janela visível; o vigia não).
 O pulso só roda das 05:00 às 22:59 (`*/15 5-22 * * *`); de madrugada, só os eventos acordam o agente.
-Depois de um reinício do Windows (ex.: Windows Update de madrugada), o agente só volta quando o André fizer login, porque a tarefa é "interativa apenas".
+Depois de um reinício do Windows (ex.: Windows Update de madrugada), as tarefas são "interativas apenas": nada sobe antes do logon.
+
+**Subir sozinho depois de um reinício (desde 31/10/2026):** `instalar-tarefas.ps1`, rodado uma vez pelo André no PowerShell (sem administrador). Sem argumentos só mostra o plano; `-Aplicar` aplica; `-TravarTela` junto cria a tarefa "Gaspar - travar tela" (trava a tela 90 s depois do logon).
+- Acrescenta à tarefa "iniciar" um gatilho de logon com 30 s de atraso (a rede sobe). Continua sendo a mesma tarefa, então o `IgnoreNew` impede dois agentes. Guarda o XML antigo em `~/.claude-gaspar/tarefas-backup`, confere o resultado e restaura o backup se falhar. Recadastrar encerra o agente que estiver rodando; o script o liga de novo.
+- Cria a tarefa "Gaspar - vigia", se faltar. O worker do WhatsApp já tinha gatilho de logon.
+- Sem login automático, o reinício espera o André digitar a senha. Para subir sem ele: Sysinternals Autologon (ou `netplwiz`), que o André configura sozinho, porque guarda a senha no Windows. É uma troca de segurança: quem ligar o notebook entra na sessão. Com `-TravarTela` a tela volta travada logo depois do logon e o agente segue rodando por baixo; roubo do aparelho continua sendo o risco, então mantenha o disco com BitLocker.
 
 Energia (o André roda; no adaptador de tomada: não suspender, não hibernar, tampa fechada não faz nada):
 ```powershell
