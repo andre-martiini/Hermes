@@ -145,6 +145,11 @@ def excluir_item_financeiro_v2(ctx: ToolContext, args: dict):
     return financas_itens.excluir(ctx.db, args)
 
 
+def excluir_entrada_diario(ctx: ToolContext, args: dict):
+    from tools import diario_acao
+    return diario_acao.excluir_entrada(ctx.db, args.get("task_id") or ctx.task_id, args.get("data"))
+
+
 def editar_parcela_servico(ctx: ToolContext, args: dict):
     from tools import financas_itens
     return financas_itens.editar_parcela_servico(ctx.db, args)
@@ -722,6 +727,7 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
         return _fn(
             query=str(args.get("query") or ""),
             max_results=min(int(args.get("max_results") or 5), 5),
+            max_chars_anexo=args.get("max_chars_anexo"),
         )
     except Exception as e:
         # P03 passo 2: cobre tambem o parsing de `max_results` acima, que
@@ -3235,6 +3241,7 @@ _HANDLERS: dict = {
     "editar_item_financeiro_v2": editar_item_financeiro_v2,
     "excluir_item_financeiro_v2": excluir_item_financeiro_v2,
     "editar_parcela_servico": editar_parcela_servico,
+    "excluir_entrada_diario": excluir_entrada_diario,
     "deduplicar_rendas_servico": deduplicar_rendas_servico,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 

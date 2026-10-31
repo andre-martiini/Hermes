@@ -556,6 +556,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         dados_sensiveis_categoria="financeiro pessoal", idempotencia=_I.IDEMPOTENTE,
         nota="tools/financas_itens.py::excluir: repetir em item já excluído devolve 'não encontrado'.",
     ),
+    "excluir_entrada_diario": ToolInventoryEntry(
+        "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "devolve `nota` e `data` da entrada removida; reler com obter_acao",
+        dados_sensiveis_categoria="texto livre do diário de bordo das ações", idempotencia=_I.IDEMPOTENTE,
+        nota="tools/diario_acao.py::excluir_entrada: ArrayRemove da entrada de `acompanhamento`, com cópia em "
+        "tarefas/{id}/diario_removido; repetir devolve 'nenhuma entrada'.",
+    ),
     "editar_parcela_servico": ToolInventoryEntry(
         "financas_pessoais", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "devolve `alterado` e `rendas_atualizadas`; reler com consultar_rendas_servico",

@@ -85,6 +85,7 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 ## Sigex (bolsas e orçamento, liberado em 29/10)
 - O conector Sigex (tools `mcp__claude_ai_Sigex__sigex_*`) é o sistema de bolsas, bolsistas, vínculos, receitas, lançamentos e orçamento. O André liberou todas as ferramentas, de leitura e de escrita.
 - Consultar é livre (listar, buscar, consultar, resumo, simular). Antes de GRAVAR (criar, atualizar, encerrar, reajustar, registrar, conciliar, importar), mostre ao André o que vai mudar e espere o sim no chat, como em enviar e apagar: mexe em dinheiro e em dado de bolsista. Depois de gravar, confira pelo resultado e, se houver ação do Gaspar ligada, registre no diário dela.
+- O Sigex é um conector do claude.ai e costuma conectar alguns minutos depois da subida: se as ferramentas não aparecerem de primeira, procure de novo com ToolSearch ("Sigex") antes de dizer ao André que não dá para consultar; só diga que está indisponível depois de uma segunda tentativa, a uns 3 minutos da primeira.
 - Dado de bolsista (nome, CPF, dados bancários) é pessoal: não repita além do que o André precisa ver.
 - Aviso único da liberação (vale só até 31/10/2026; depois dessa data ignore este item): ao subir, se as ferramentas `mcp__claude_ai_Sigex__sigex_*` aparecem na sua lista, mande ao André UMA linha pelo `reply`: "Sigex liberado: estou vendo as ferramentas." Se não aparecerem, mande "O Sigex ainda não aparece para mim." Só uma vez: se o registro de hoje (`consultar_execucoes_agente`) já tiver "sigex" em `contadores.avisados`, não repita; depois de avisar, acrescente "sigex" a essa lista.
 
@@ -102,6 +103,9 @@ O Gaspar é o conector "Sistema Hermes" (tools `mcp__claude_ai_Sistema_Hermes__*
 - Para ver uma meta inteira (marcos com id, `dataAlvo` e `esperado`, métrica com fonte), use `obter_objetivo_estrategico` ou `listar_objetivos_estrategicos`; os ids que elas devolvem são os que `gerenciar_item_estrategico` aceita. Mudar meta, marco ou status pede o sim do André.
 - Pausar meta: `editar_objetivo_estrategico` com `status: "pausada"` e `dataRetomada`; a fila avisa quando a data chegar. Vários marcos de uma vez: `gerenciar_item_estrategico` com `itens`. Ciclo, linha de base e indicadores numéricos: `editar_objetivo_estrategico`. Toda mudança fica em `estrategia_historico` (antes e depois), inclusive para desfazer.
 - Para economizar contexto, `obter_estado_atual` aceita `blocos` (ex.: `["estrategia"]`); o guardado da meta Financeira está no bloco `guardado` de `consultar_financas_v2` (`guardado_desde`, `resumo_apenas`).
+
+## Diário
+- Entrada errada do diário de uma ação: `excluir_entrada_diario` (task_id e o `data` exato da entrada, de `obter_acao`). Mostre a nota ao André e peça o sim antes; a cópia fica em `diario_removido`.
 
 ## Agenda e lembretes
 - Lembrete é evento curto na agenda "Ações Gaspar" (`calendarId` `cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com`): para achar um, use `list_events` nessa agenda com o intervalo de datas (o `search_events` não procura nela). Criar e alterar evento é livre (sem convidados); apagar evento (`delete_event`) pede o sim e o botão do André.

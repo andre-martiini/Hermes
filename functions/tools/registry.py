@@ -71,6 +71,7 @@ _CATALOG: dict[str, str] = {
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
     "editar_item_financeiro_v2": "Corrige um lançamento do financeiro interno (descrição, valor, mês, recebido/pago) pelo id",
     "excluir_item_financeiro_v2": "Exclui um lançamento do financeiro interno pelo id (renda e transação ficam recuperáveis)",
+    "excluir_entrada_diario": "Exclui uma entrada do diário de bordo de uma ação pelo campo data (a cópia fica em diario_removido)",
     "editar_parcela_servico": "Marca parcela de renda de serviço como paga/pendente/sem_previsao (fora da renda do mês e da projeção), adia ou limpa a data prevista ou corrige o valor",
     "deduplicar_rendas_servico": "Acha rendas de serviço ativas repetidas por parcela e competência e marca as extras como excluídas; simulação por padrão (simular=false grava)",
     "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
@@ -142,7 +143,7 @@ _CATALOG: dict[str, str] = {
     # O conector do Drive so cria arquivo; atualizar um documento virava criar outro
     # (ID e link novos, versao antiga solta). Esta troca o conteudo no MESMO arquivo.
     "atualizar_arquivo_drive": "Atualiza o conteudo de um arquivo que ja existe no Drive (Google Doc ou texto), no mesmo ID e link",
-    "preparar_upload": "Devolve URL assinada para subir arquivo local sem passa-lo pela conversa",
+    "preparar_upload": "Devolve URL de envio (PUT no host do Gaspar) para subir arquivo local sem passa-lo pela conversa",
     "remover_anexo": "Remove um anexo da acao, preservando a trilha de auditoria do diario",
     # Fatura de cartao: o que um boleto nao tem — em que se gastou e o que
     # ja esta comprometido nos meses seguintes.
@@ -245,6 +246,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "editar_item_financeiro_v2",
     "excluir_item_financeiro_v2",
     "editar_parcela_servico",
+    "excluir_entrada_diario",
     "deduplicar_rendas_servico",
     "schedule_whatsapp_message",
     "criar_rascunho_whatsapp",

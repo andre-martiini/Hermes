@@ -41,6 +41,10 @@ class TestPromessaSemRetorno(unittest.TestCase):
     def test_frase_parecida_sem_compromisso_nao_casa(self):
         self.assertFalse(mensagem_e_promessa("estou vendo o jogo"))
 
+    def test_aceite_de_favor_continuo_nao_e_promessa(self):
+        self.assertFalse(mensagem_e_promessa("Mas pode deixar que eu guardo o carro sem problema!"))
+        self.assertTrue(mensagem_e_promessa("Pode deixar que eu vejo e te aviso"))
+
     def test_mensagem_curta_nao_cumpre(self):
         self.assertFalse(mensagem_cumpre_promessa("ok", tem_midia=False))
         self.assertFalse(mensagem_cumpre_promessa("beleza", tem_midia=False))

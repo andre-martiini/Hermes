@@ -176,12 +176,38 @@ class TestRotaDeUpload(unittest.TestCase):
         """O corpo atravessa Hosting e Cloud Function, que tem limite proprio."""
         self.assertLess(aa.MAX_BYTES_VIA_HERMES, aa.MAX_BYTES)
 
-    def test_checksum_conferido_no_recebimento(self):
-        """O endpoint refaz a conferencia; nao confia no que foi declarado."""
-        import inspect
-        fonte = inspect.getsource(aa.receber_upload)
-        self.assertIn("sha256", fonte)
-        self.assertIn("tamanho_bytes", fonte)
+    def _receber(self, corpo, token="upl-t", declarado=b"conteudo"):
+        """receber_upload com Firestore e bucket falsos; devolve (resultado, gravados)."""
+        from unittest import mock
+
+        reserva = {"uid": "u1", "nome": "f.png", "caminho": "uploads_mcp/u1/upl-t/f.png",
+                   "tamanho_bytes": len(declarado), "sha256": hashlib.sha256(declarado).hexdigest(),
+                   "mime": "image/png", "expira_em": "9999-01-01T00:00:00+00:00"}
+        snap = mock.Mock(exists=token == "upl-t", to_dict=lambda: dict(reserva))
+        db = mock.Mock()
+        db.collection.return_value.document.return_value.get.return_value = snap
+        gravados = []
+        bucket = mock.Mock()
+        bucket.blob.return_value.upload_from_string.side_effect = lambda c, **_: gravados.append(c)
+        with mock.patch.object(aa, "_bucket", return_value=bucket):
+            return aa.receber_upload(db, None, token, corpo), gravados
+
+    def test_recebe_e_devolve_tamanho_e_sha256(self):
+        r, gravados = self._receber(b"conteudo")
+        self.assertEqual(r["status"], 200)
+        self.assertEqual((r["bytes"], r["sha256"]), (8, hashlib.sha256(b"conteudo").hexdigest()))
+        self.assertEqual(gravados, [b"conteudo"])
+
+    def test_checksum_diferente_e_recusado_sem_gravar(self):
+        r, gravados = self._receber(b"CONTEUDO")
+        self.assertEqual(r["status"], 400)
+        self.assertIn("checksum", r["erro"])
+        self.assertEqual(gravados, [])
+
+    def test_token_desconhecido_e_recusado(self):
+        r, gravados = self._receber(b"conteudo", token="upl-outro")
+        self.assertEqual(r["status"], 404)
+        self.assertEqual(gravados, [])
 
 
 class TestMime(unittest.TestCase):

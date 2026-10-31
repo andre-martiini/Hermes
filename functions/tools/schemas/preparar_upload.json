@@ -1,6 +1,6 @@
 {
   "name": "preparar_upload",
-  "description": "Devolve uma URL assinada para subir um arquivo local direto ao storage, sem passá-lo pela conversa. É o caminho correto para qualquer arquivo real: não gasta token, não tem teto de mensagem e o conteúdo não depende do modelo reproduzi-lo. Depois chame anexar_arquivo com o upload_token.",
+  "description": "Prepara o envio de um arquivo local sem passá-lo pela conversa. Faça PUT do arquivo em upload_url (curl -sS -X PUT --data-binary @ARQUIVO '<upload_url>'), no host do Gaspar (gestao-hermes.firebaseapp.com); responde 200 com bytes e sha256 recebidos. Se o proxy do seu ambiente recusar esse host (curl: CONNECT tunnel failed, 403) ou se upload_url vier vazia (acima de 30 MB), faça o mesmo PUT em upload_url_alternativa (storage.googleapis.com, com -H 'Content-Type: <content_type>'): cada nuvem libera um dos dois hosts. Depois use o upload_token em anexar_arquivo ou em editar_imagem (imagens[].upload_token, mascara.upload_token). O token vale 15 minutos e uma única operação.",
   "parameters": {
     "type": "object",
     "properties": {
