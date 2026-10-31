@@ -47,6 +47,7 @@ from gmail_bill_pdf import (
 import fatura_cartao
 import conciliacao_pix
 import gasto_avulso
+import avisos_teto
 from bill_pdf_passwords import (
     find_password_config,
     list_password_configs,
@@ -2223,13 +2224,19 @@ def sync_pix_emails(service, sync_ref, logs):
                     inseridos_ou_alterados += 1
                     existing_transactions.append({**new_record, 'doc_id': doc_ref.id, 'date': dt, 'status': None, 'data_original': iso_date})
 
-                    emit_notification_backend(
-                        "Gasto Realizado via Pix",
-                        gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
-                            [dict(t, date=t['data_original']) for t in existing_transactions],
-                            finance_settings_data, ano_brt, mes_brt), hoje_brt),
-                        'expense', 'financeiro'
-                    )
+                    texto_pix = gasto_avulso.texto_notificacao_pix(amount, gasto_avulso.resumo_do_mes(
+                        [dict(t, date=t['data_original']) for t in existing_transactions],
+                        finance_settings_data, ano_brt, mes_brt), hoje_brt)
+                    perguntou = False
+                    if conta == gasto_avulso.CONTA_DO_TETO and amount >= avisos_teto.PIX_GRANDE:
+                        # Pix grande pode ser transferência ou conta fixa: pergunta com botões, em vez
+                        # do espelhamento genérico, para não comer o teto por engano.
+                        perguntou = _send_telegram_message_raw_with_keyboard(
+                            db, _resolve_default_telegram_chat_id(db),
+                            f"Gasto Realizado via Pix\n\n{texto_pix}\n\nÉ gasto, transferência ou conta fixa?",
+                            avisos_teto.teclado_pix(doc_ref.id))
+                    emit_notification_backend("Gasto Realizado via Pix", texto_pix, 'expense', 'financeiro',
+                                              sent_to_telegram=bool(perguntou))
 
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
@@ -14860,6 +14867,7 @@ from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajust
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
 from checkin_estrategia import checkin_estrategia_semanal
+from avisos_teto import avisos_teto_hora
 from health_calendar_sync import sincronizar_eventos_saude_agenda
 from health_weekly_report import gerar_relatorio_semanal_saude
 

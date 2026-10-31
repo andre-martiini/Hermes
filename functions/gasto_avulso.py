@@ -28,7 +28,7 @@ A regra, e o que ela NAO resolve:
 import calendar
 import re
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from bolso_aquisicoes import centavos, numero
 
@@ -54,37 +54,50 @@ def _normal(texto) -> str:
     return "".join(c for c in sem_acento if not unicodedata.combining(c)).strip(_ESPACO).lower()
 
 
-def mes_brt(data):
-    """(ano, mes 1-12) do lancamento no fuso de Brasilia, ou None se ilegivel."""
+def data_brt(data):
+    """Dia do lancamento no fuso de Brasilia (`date`), ou None se ilegivel."""
     if isinstance(data, datetime):
         dt = data if data.tzinfo else data.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(BRT)
-        return local.year, local.month
+        return dt.astimezone(BRT).date()
     m = _DATA.match(str(data or "").strip(_ESPACO))
     if not m:
         return None
     ano, mes, dia, hora, minuto, seg, fracao, fuso = m.groups()
     # ponytail: um Pix real as 21:00:00.000 de Brasilia tambem cairia aqui; com segundos e ms zerados, improvavel.
     meia_noite_utc = fuso == "Z" and (hora, minuto, seg or "00") == ("00", "00", "00") and not (fracao or ".0").strip(".0")
-    if hora is None or meia_noite_utc:
-        return int(ano), int(mes)
-    dt = datetime(int(ano), int(mes), int(dia), int(hora), int(minuto), int(seg or 0), tzinfo=timezone.utc)
+    try:
+        if hora is None or meia_noite_utc:
+            return date(int(ano), int(mes), int(dia))
+        dt = datetime(int(ano), int(mes), int(dia), int(hora), int(minuto), int(seg or 0), tzinfo=timezone.utc)
+    except ValueError:
+        return None
     if fuso and fuso != "Z":
         sinal = -1 if fuso[0] == "-" else 1
         hh, mm = int(fuso[1:3]), int(fuso[-2:])
         dt -= sinal * timedelta(hours=hh, minutes=mm)
-    local = dt.astimezone(BRT)
-    return local.year, local.month
+    return dt.astimezone(BRT).date()
+
+
+def mes_brt(data):
+    """(ano, mes 1-12) do lancamento no fuso de Brasilia, ou None se ilegivel."""
+    dia = data_brt(data)
+    return (dia.year, dia.month) if dia else None
 
 
 def gasto_avulso_centavos(transacoes, ano: int, mes: int) -> int:
+    return gasto_do_teto_centavos(transacoes, date(ano, mes, 1), date(ano, mes, calendar.monthrange(ano, mes)[1]))
+
+
+def gasto_do_teto_centavos(transacoes, de: date, ate: date) -> int:
+    """Gasto que conta no teto entre `de` e `ate` (inclusive, dias de Brasilia)."""
     total, vistos = 0, set()
     for t in transacoes:
         if t.get("status") == "deleted" or _normal(t.get("conta")) != CONTA_DO_TETO:
             continue
         if _normal(t.get("category")).startswith(FORA_DO_CONSUMO):
             continue
-        if mes_brt(t.get("date")) != (ano, mes):
+        dia = data_brt(t.get("date"))
+        if not dia or not de <= dia <= ate:
             continue
         chaves = {f"{k}:{v}" for k, v in (("g", t.get("google_message_id")), ("p", t.get("pix_id"))) if v not in (None, "")}
         if chaves & vistos:
