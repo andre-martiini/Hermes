@@ -2854,19 +2854,9 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                                 None,
                             ],
                         },
-                        "tipo": {
-                            "type": ["string", "null"],
-                            "enum": [
-                                "aguardando_terceiro_vencido", "conta_vencendo",
-                                "rotina_saude_ausente", "email_nao_entregue",
-                                "promessa_sem_retorno", "audio_relevante",
-                                "secretario_investigacao_concluida",
-                                "secretario_insistencia", "secretario_assunto_sensivel",
-                                "secretario_decisao_forcada", "secretario_perguntou_se_robo",
-                                "outbox_evento_travado", "meta_retomada", "notificacao_sessao",
-                                None,
-                            ],
-                        },
+                        # sem enum: o sistema grava tipos novos a cada recurso (renda_servico_acabando...)
+                        # e a lista ficava para trás, derrubando a tool inteira.
+                        "tipo": {"type": ["string", "null"]},
                         "prioridade": {
                             "type": ["string", "null"], "enum": ["alta", "media", "baixa", None],
                         },
