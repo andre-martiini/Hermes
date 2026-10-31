@@ -1033,25 +1033,12 @@ class TestOutputSchema(unittest.TestCase):
                 "enum": [
                     "acao", "whatsapp", "email", "agenda",
                     "repo", "financeiro", "saude", "secretario_whatsapp",
+                    "sistema", "estrategia", "sessao",
                     None,
                 ],
             },
         )
-        self.assertEqual(
-            item["properties"]["tipo"],
-            {
-                "type": ["string", "null"],
-                "enum": [
-                    "aguardando_terceiro_vencido", "conta_vencendo",
-                    "rotina_saude_ausente", "email_nao_entregue",
-                    "promessa_sem_retorno", "audio_relevante",
-                    "secretario_investigacao_concluida",
-                    "secretario_insistencia", "secretario_assunto_sensivel",
-                    "secretario_decisao_forcada",
-                    None,
-                ],
-            },
-        )
+        self.assertEqual(item["properties"]["tipo"], {"type": ["string", "null"]})
         self.assertEqual(
             item["properties"]["prioridade"],
             {"type": ["string", "null"], "enum": ["alta", "media", "baixa", None]},
