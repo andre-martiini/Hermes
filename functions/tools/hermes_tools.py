@@ -722,6 +722,7 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
         return _fn(
             query=str(args.get("query") or ""),
             max_results=min(int(args.get("max_results") or 5), 5),
+            max_chars_anexo=args.get("max_chars_anexo"),
         )
     except Exception as e:
         # P03 passo 2: cobre tambem o parsing de `max_results` acima, que

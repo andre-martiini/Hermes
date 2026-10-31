@@ -118,6 +118,14 @@ class TestHermesToolsStringsDeErro(unittest.TestCase):
         self.assertTrue(_erro_reconhecido(r))
         self.assertEqual(r, "ERRO|Erro: boom")
 
+    def test_limite_anexo_email(self):
+        from tools.buscar_e_analisar_email import limite_anexo
+        self.assertEqual(limite_anexo(None), 3000)
+        self.assertEqual(limite_anexo("x"), 3000)
+        self.assertEqual(limite_anexo(0), 3000)
+        self.assertEqual(limite_anexo(15000), 15000)
+        self.assertEqual(limite_anexo(10**6), 40000)
+
     def test_salvar_memoria_global_excecao(self):
         with patch("main._classify_memory_candidate", side_effect=RuntimeError("gemini fora do ar")):
             r = hermes_tools._salvar_memoria_global(

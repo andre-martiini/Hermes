@@ -6,7 +6,20 @@ import html2text
 from bs4 import BeautifulSoup
 from typing import Dict, Any
 
-def buscar_e_analisar_email(query: str, max_results: int = 5) -> str:
+LIMITE_ANEXO_PADRAO = 3000
+LIMITE_ANEXO_MAXIMO = 40000
+
+
+def limite_anexo(valor) -> int:
+    """Caracteres de PDF devolvidos por anexo: o padrão (3000) se vier vazio ou inválido, no máximo 40000."""
+    try:
+        n = int(valor)
+    except (TypeError, ValueError):
+        return LIMITE_ANEXO_PADRAO
+    return max(1, min(n, LIMITE_ANEXO_MAXIMO)) if n > 0 else LIMITE_ANEXO_PADRAO
+
+
+def buscar_e_analisar_email(query: str, max_results: int = 5, max_chars_anexo: int = LIMITE_ANEXO_PADRAO) -> str:
     """
     Busca e analisa e-mails no Gmail usando uma query estruturada.
     Retorna o texto higienizado e o conteúdo de anexos (PDF, CSV).
@@ -15,7 +28,9 @@ def buscar_e_analisar_email(query: str, max_results: int = 5) -> str:
     Args:
         query: Query de busca padrão do Gmail (ex: 'from:nome@empresa.com newer_than:2d').
         max_results: Número máximo de e-mails a processar (limite: 5).
+        max_chars_anexo: Caracteres devolvidos por PDF anexo (padrão 3000, máximo 40000). Suba quando o texto vier cortado.
     """
+    max_chars_anexo = limite_anexo(max_chars_anexo)
     try:
         from main import get_gmail_service, get_db
         service = get_gmail_service()
@@ -111,7 +126,7 @@ def buscar_e_analisar_email(query: str, max_results: int = 5) -> str:
                             import pdfplumber
                             with pdfplumber.open(temp_path) as pdf:
                                 extracted_text = ""
-                                for page in pdf.pages[:10]: # Limite 10 páginas
+                                for page in pdf.pages[:40 if max_chars_anexo > LIMITE_ANEXO_PADRAO else 10]: # Limite 10 páginas (40 se o chamador pediu mais texto)
                                     text = page.extract_text()
                                     if text: extracted_text += text + "\n"
                             msg_str += f"Conteúdo do PDF (Extração):\n{extracted_text[:3000]}\n"
