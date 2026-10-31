@@ -143,7 +143,7 @@ _CATALOG: dict[str, str] = {
     # O conector do Drive so cria arquivo; atualizar um documento virava criar outro
     # (ID e link novos, versao antiga solta). Esta troca o conteudo no MESMO arquivo.
     "atualizar_arquivo_drive": "Atualiza o conteudo de um arquivo que ja existe no Drive (Google Doc ou texto), no mesmo ID e link",
-    "preparar_upload": "Devolve URL assinada para subir arquivo local sem passa-lo pela conversa",
+    "preparar_upload": "Devolve URL de envio (PUT no host do Gaspar) para subir arquivo local sem passa-lo pela conversa",
     "remover_anexo": "Remove um anexo da acao, preservando a trilha de auditoria do diario",
     # Fatura de cartao: o que um boleto nao tem — em que se gastou e o que
     # ja esta comprometido nos meses seguintes.
