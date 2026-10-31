@@ -24,7 +24,14 @@ export class GerenciadorOuvintes {
     registrar(inscrever: () => Cancelar): Cancelar {
         const item: Item = { inscrever, cancela: null };
         this.itens.add(item);
-        if (!this.pausado) item.cancela = inscrever();
+        if (!this.pausado) {
+            try {
+                item.cancela = inscrever();
+            } catch (erro) {
+                this.itens.delete(item);
+                throw erro;
+            }
+        }
         return () => {
             this.itens.delete(item);
             item.cancela?.();
@@ -46,7 +53,13 @@ export class GerenciadorOuvintes {
         this.pausado = false;
         for (const item of [...this.itens]) {
             if (!this.itens.has(item) || item.cancela) continue;
-            item.cancela = item.inscrever();
+            try {
+                item.cancela = item.inscrever();
+            } catch (erro) {
+                // Um ouvinte inválido não pode impedir os outros de voltar.
+                this.itens.delete(item);
+                console.error('[ouvintes] falha ao reassinar:', erro);
+            }
         }
     }
 }

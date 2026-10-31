@@ -39,6 +39,22 @@ describe('GerenciadorOuvintes', () => {
         expect(b.inscrever).toHaveBeenCalledTimes(1);
     });
 
+    it('ouvinte que falha ao reassinar não impede os outros de voltar', () => {
+        const g = new GerenciadorOuvintes();
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        let vez = 0;
+        g.registrar(() => {
+            if (vez++ > 0) throw new Error('ref inválida');
+            return () => {};
+        });
+        const b = ouvinte();
+        g.registrar(b.inscrever);
+        g.pausar();
+        g.retomar();
+        expect(b.inscrever).toHaveBeenCalledTimes(2);
+        expect(() => g.registrar(() => { throw new Error('x'); })).toThrow('x');
+    });
+
     it('ouvinte registrado durante a pausa só assina ao retomar', () => {
         const g = new GerenciadorOuvintes();
         g.pausar();
