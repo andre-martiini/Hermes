@@ -18,7 +18,12 @@ interface Item {
 
 export class GerenciadorOuvintes {
     private itens = new Set<Item>();
-    pausado = false;
+    private motivos = new Set<string>();
+
+    /** Pausado por qualquer motivo (ociosidade, outra sessão ativa...). */
+    get pausado(): boolean {
+        return this.motivos.size > 0;
+    }
 
     /** Assina agora (ou ao retomar, se estiver pausado). Devolve o cancelamento definitivo. */
     registrar(inscrever: () => Cancelar): Cancelar {
@@ -39,18 +44,19 @@ export class GerenciadorOuvintes {
         };
     }
 
-    pausar(): void {
-        if (this.pausado) return;
-        this.pausado = true;
+    pausar(motivo = 'ocio'): void {
+        const jaPausado = this.pausado;
+        this.motivos.add(motivo);
+        if (jaPausado) return;
         for (const item of this.itens) {
             item.cancela?.();
             item.cancela = null;
         }
     }
 
-    retomar(): void {
-        if (!this.pausado) return;
-        this.pausado = false;
+    /** Só volta a assinar quando nenhum motivo de pausa restar. */
+    retomar(motivo = 'ocio'): void {
+        if (!this.motivos.delete(motivo) || this.pausado) return;
         for (const item of [...this.itens]) {
             if (!this.itens.has(item) || item.cancela) continue;
             try {
