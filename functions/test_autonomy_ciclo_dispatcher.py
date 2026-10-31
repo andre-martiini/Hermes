@@ -122,3 +122,11 @@ class TestCicloDispatcher(unittest.TestCase):
             repo.criar_pedido(self.db, PedidoDuravel(f"0{i}", RequestStatus.PENDENTE))
         ids = cd._ids_despachaveis(self.db, 2)
         self.assertEqual(ids, ["00", "01", "02", "03", "a", "b", "c"])
+
+    def test_duplicata_estornada_libera_vaga_para_o_proximo(self):
+        self.enf.falhas = {"a": cd.JaDespachado()}
+        r = self._rodar(_cfg(ModoDispatcher.ATIVO, 1))
+        self.assertEqual(r.ja_despachados, ("a",))
+        self.assertEqual([i for i, _ in r.enfileirados], ["b"])
+        self.assertEqual(self.saldo["v"], 0)
+        self.assertTrue(r.sem_orcamento)  # "c" ficou sem vaga

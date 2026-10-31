@@ -98,7 +98,10 @@ def executar_ciclo(
             continue
         if p is not None:
             pedidos.append(p)
-    decisoes = decidir_lote(pedidos, cfg.modo, agora_r, cfg.despachos_restantes)
+    # O limite do lote é imposto pela baixa transacional, não pelo snapshot da config: assim o
+    # estorno de uma duplicata libera a vaga para o próximo candidato (sem fome por ids baixos).
+    teto = len(pedidos) if cfg.modo is ModoDispatcher.ATIVO else None
+    decisoes = decidir_lote(pedidos, cfg.modo, agora_r, teto)
     sombra: list[tuple[str, str]] = []
     feitos: list[tuple[str, str]] = []
     ja: list[str] = []
