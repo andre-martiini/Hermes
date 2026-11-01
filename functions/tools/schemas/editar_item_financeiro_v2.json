@@ -1,6 +1,6 @@
 {
     "name": "editar_item_financeiro_v2",
-    "description": "Corrige um lançamento já existente do financeiro interno, pelo id que consultar_financas_v2 devolve: descrição, valor, mês (competencia) e recebido/pago. Só os campos enviados mudam. Devolve o antes e o depois.",
+    "description": "Corrige um lançamento já existente do financeiro interno, pelo id que consultar_financas_v2 devolve: descrição, valor, mês (competencia), dia do vencimento/recebimento e recebido/pago. Só os campos enviados mudam. Devolve o antes e o depois.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -30,6 +30,10 @@
             "quitado": {
                 "type": "boolean",
                 "description": "Renda recebida / conta paga (true) ou não (false)."
+            },
+            "dia": {
+                "type": "integer",
+                "description": "Novo dia do mês (1 a 31) em que a renda é esperada ou a conta fixa vence. Não vale para transacao_avulsa, que tem data completa."
             }
         },
         "required": [

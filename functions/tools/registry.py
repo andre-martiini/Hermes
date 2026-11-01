@@ -69,7 +69,7 @@ _CATALOG: dict[str, str] = {
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
     "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
-    "editar_item_financeiro_v2": "Corrige um lançamento do financeiro interno (descrição, valor, mês, recebido/pago) pelo id",
+    "editar_item_financeiro_v2": "Corrige um lançamento do financeiro interno (descrição, valor, mês, dia, recebido/pago) pelo id",
     "excluir_item_financeiro_v2": "Exclui um lançamento do financeiro interno pelo id (renda e transação ficam recuperáveis)",
     "criar_pop": "Cria um POP (procedimento) sempre ativo ou por gatilhos; so com o sim do usuario no chat",
     "editar_pop": "Altera titulo e/ou instrucao de um POP pelo id; a versao anterior fica em pops_historico",

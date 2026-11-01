@@ -18,6 +18,10 @@ from rendas_servico import STATUS_SEM_PREVISAO
 COLECAO = {"renda": "income_entries", "obrigacao_fixa": "fixed_bills",
            "transacao_avulsa": "finance_transactions"}
 _QUITADO = {"renda": "isReceived", "obrigacao_fixa": "isPaid"}
+# Dia do mes em que a renda e esperada ou a conta fixa vence (ex.: pedido do
+# Andre em 01/11/2026 para mudar o dia da Natacao). transacao_avulsa tem data
+# completa, nao dia fixo -- fica de fora, como competencia.
+_DIA = {"renda": "day", "obrigacao_fixa": "dueDay"}
 # Marca em `income_entries.retirada_por` de quem tirou a renda (status 'deleted'): a
 # previsao (parcela fora dela) pode ser desfeita pela previsao; a duplicata, nunca.
 RETIRADA_PREVISAO = "previsao"
@@ -79,8 +83,19 @@ def editar(db, args: dict) -> dict:
         if not campo:
             return {"erro": "transação avulsa não tem recebido/pago."}
         mudanca[campo] = bool(args["quitado"])
+    if args.get("dia") is not None:
+        campo = _DIA.get(tipo)
+        if not campo:
+            return {"erro": "transação avulsa não tem dia fixo; mude a data pela tela."}
+        try:
+            dia = int(args["dia"])
+        except (TypeError, ValueError):
+            return {"erro": "dia deve ser um número entre 1 e 31."}
+        if not 1 <= dia <= 31:
+            return {"erro": "dia deve ser um número entre 1 e 31."}
+        mudanca[campo] = dia
     if not mudanca:
-        return {"erro": "Nada para mudar: informe descricao, valor, competencia ou quitado."}
+        return {"erro": "Nada para mudar: informe descricao, valor, competencia, quitado ou dia."}
     ref.update(mudanca)
     saida = {"status": "ok", "tipo": tipo, "id": ref.id,
              "alterado": {k: [atual.get(k), v] for k, v in mudanca.items()}}
