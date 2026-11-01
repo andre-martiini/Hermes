@@ -29,6 +29,10 @@
         "type": "boolean",
         "description": "Padrão false. true (só com acao_id): cria outro grafo mesmo que a ação já tenha um. Sem isso, o Live Ideas devolve o que já existe (repetido=true)."
       },
+      "agrupar_concluidas": {
+        "type": "boolean",
+        "description": "Padrão false. true (só com acao_id): agrupa todas as etapas concluídas num único nó \"N etapas concluídas\". Para obter a versão agrupada de uma ação que já tem grafo, use refazer."
+      },
       "titulo": {
         "type": "string",
         "description": "Opcional: título do que será gerado."

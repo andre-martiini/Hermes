@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
 
@@ -28,6 +29,8 @@ DIARIO_MAX = 20  # entradas do diário que vão no grafo: o `obter_acao` mostra 
 _DATA_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
 # começo das notas que o `_anexar` escreve no diário ("<Rótulo> gerado no Live Ideas: ..."): não são conteúdo da ação
 _NOTA_DE_LINK = tuple(f"{r} gerado no Live Ideas:" for r in (*_ROTULO.values(), "Diagrama"))
+_NOTA_DE_ARQUIVO = "FILE::"  # arquivo anexado, guardado como "FILE::JSON::{...}": não é texto da ação
+_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 
 def _sem_vazios(dados: dict) -> dict:
@@ -60,9 +63,23 @@ def _criar_pedido(ctx, dados: dict) -> str:
     return ref.id
 
 
+def _dia_de_brasilia(data: str) -> str | None:
+    """AAAA-MM-DD, no horário de Brasília, da data do diário (o `obter_acao` a entrega em UTC); None se não houver data.
+    Sem hora e fuso não há o que converter: fica o dia como está escrito."""
+    try:
+        quando = datetime.fromisoformat(data)
+    except ValueError:  # entrada sem data chega como "None"
+        quando = None
+    if quando is not None and quando.tzinfo is not None:
+        return quando.astimezone(_BRASILIA).strftime("%Y-%m-%d")
+    achada = _DATA_ISO.match(data)
+    return achada[0] if achada else None
+
+
 def _acao_do_gaspar(ctx, acao_id: str) -> dict | None:
     """A ação no formato do campo `acao` do Live Ideas, ou None se não existir.
-    Lê pelo `obter_acao` (etapa inteira, sem corte; diário do mais antigo ao mais novo); as datas são as de lá, em UTC."""
+    Lê pelo `obter_acao` (etapa inteira, sem corte; diário do mais antigo ao mais novo); as datas do diário saem
+    em Brasília (as de lá vêm em UTC, e uma nota das 22h de domingo viraria segunda)."""
     from tools import hermes_tools  # aqui dentro: o hermes_tools é quem carrega este módulo
 
     a = hermes_tools.obter_acao(ctx, {"task_id": acao_id, "limite_diario": DIARIO_MAX})
@@ -71,9 +88,9 @@ def _acao_do_gaspar(ctx, acao_id: str) -> dict | None:
     diario = []
     for e in a["diario"]:
         nota = str(e.get("nota") or "").strip()
-        if nota and not nota.startswith(_NOTA_DE_LINK):  # o link de um grafo anterior não volta como nó do `refazer`
-            data = _DATA_ISO.match(e["data"])  # entrada sem data chega como "None"
-            diario.append({"texto": f"[{data[0]}] {nota}" if data else nota})
+        if nota and not nota.startswith((*_NOTA_DE_LINK, _NOTA_DE_ARQUIVO)):  # link de grafo anterior e anexo não viram nó
+            dia = _dia_de_brasilia(e["data"])
+            diario.append({"texto": f"[{dia}] {nota}" if dia else nota})
     return {"id": a["id"], "titulo": a.get("titulo") or "", "descricao": a["descricao"], "notas": a["notas"],
             "plano_acao": [{"texto": e["texto"], "estado": e["estado"]} for e in a["plano_acao"]],
             "diario": diario}
@@ -91,7 +108,9 @@ def _corpo_da_acao(ctx, args: dict, acao_id: str) -> tuple[dict | None, dict | N
     if acao is None:
         return None, {"erro": f"ação {acao_id!r} não encontrada no Gaspar"}
     refazer = _incluir_transcricao(args.get("refazer")) or None  # só vai quando verdadeiro (aceita "true" como lá)
-    return _sem_vazios({"tipo": "mapa", "acao": acao, "titulo": args.get("titulo"), "refazer": refazer}), None
+    agrupar = _incluir_transcricao(args.get("agrupar_concluidas")) or None  # idem
+    return _sem_vazios({"tipo": "mapa", "acao": acao, "titulo": args.get("titulo"), "refazer": refazer,
+                        "agrupar_concluidas": agrupar}), None
 
 
 def gerar(ctx, args: dict) -> dict:
@@ -103,6 +122,8 @@ def gerar(ctx, args: dict) -> dict:
             return erro
         task_id = acao_id  # o consultar anexa o link na própria ação
     else:
+        if _incluir_transcricao(args.get("agrupar_concluidas")):
+            return {"erro": "agrupar_concluidas só vale com acao_id"}
         if task_id and "/" in task_id:  # "/" mudaria o caminho no Firestore
             return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
         if task_id and not ctx.db.collection("tarefas").document(task_id).get().exists:

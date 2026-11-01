@@ -274,6 +274,53 @@ class GerarTest(Base):
                 if vai:
                     self.assertIs(corpo["refazer"], True)
 
+    def test_agrupar_concluidas_vai_no_corpo_so_quando_verdadeiro(self):
+        for valor, vai in ((True, True), ("true", True), (False, False), ("false", False), ("", False), (None, False)):
+            with self.subTest(agrupar_concluidas=valor):
+                self.chamadas.clear()
+                self._gerar(agrupar_concluidas=valor)
+                corpo = self.chamadas[0][1]
+                self.assertEqual("agrupar_concluidas" in corpo, vai)
+                if vai:
+                    self.assertIs(corpo["agrupar_concluidas"], True)
+        self.chamadas.clear()
+        self._gerar()
+        self.assertEqual(sorted(self.chamadas[0][1]), ["acao", "tipo"])  # ausente: corpo igual ao de antes
+
+    def test_agrupar_concluidas_sem_acao_id_e_recusado(self):
+        for valor in (True, "true"):
+            with self.subTest(agrupar_concluidas=valor):
+                r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "agrupar_concluidas": valor})
+                self.assertEqual(r, {"erro": "agrupar_concluidas só vale com acao_id"})
+        self.assertEqual((self.chamadas, self.db.pedidos()), ([], {}))
+        r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "agrupar_concluidas": False})  # falso não atrapalha
+        self.assertNotIn("erro", r)
+        self.assertEqual(self.chamadas, [("gerar", {"tipo": "mapa", "texto": "y" * 50})])
+
+    def test_arquivos_anexados_nao_entram_no_diario_do_grafo(self):
+        arquivo = "FILE::JSON::" + json.dumps({"n": "contrato.pdf", "v": "https://drive.google.com/x"})
+        self.db.docs[("tarefas", "a1")]["acompanhamento"] = [
+            {"data": "2026-10-30T12:00:00+00:00", "nota": "Liguei para o fornecedor."},
+            {"data": "2026-10-31T12:00:00+00:00", "nota": arquivo},
+            {"data": "2026-10-31T13:00:00+00:00", "nota": f"  {arquivo}"},
+            {"data": "2026-11-01T09:30:00+00:00", "nota": "Anexei o FILE::JSON da minuta."},  # só cita: fica
+        ]
+        self._gerar()
+        self.assertEqual([e["texto"] for e in self.chamadas[0][1]["acao"]["diario"]],
+                         ["[2026-10-30] Liguei para o fornecedor.", "[2026-11-01] Anexei o FILE::JSON da minuta."])
+
+    def test_data_do_diario_e_a_de_brasilia(self):
+        self.db.docs[("tarefas", "a1")]["acompanhamento"] = [
+            {"data": "2026-11-02T01:30:00+00:00", "nota": "Madrugada em UTC, ainda noite em Brasília."},
+            {"data": "2026-11-02T12:00:00+00:00", "nota": "Meio-dia."},
+            {"data": "2026-11-03", "nota": "Só a data."},  # sem hora não há o que converter
+            {"nota": "Sem data."},
+        ]
+        self._gerar()
+        self.assertEqual([e["texto"] for e in self.chamadas[0][1]["acao"]["diario"]],
+                         ["[2026-11-01] Madrugada em UTC, ainda noite em Brasília.", "[2026-11-02] Meio-dia.",
+                          "[2026-11-03] Só a data.", "Sem data."])
+
     def test_repetido_do_notebook_chega_ao_claude(self):
         self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN, "repetido": True})
         r = self._gerar()
