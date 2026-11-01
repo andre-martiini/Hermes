@@ -26,6 +26,8 @@ _NAO_ENCONTRADO = "pedido não encontrado"
 _ROTULO = {"processo": "Processo", "fluxo": "Fluxo", "mapa": "Mapa de ideias"}
 DIARIO_MAX = 20  # entradas do diário que vão no grafo: o `obter_acao` mostra 20 por padrão e o Live Ideas usa só as 5 últimas
 _DATA_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+# começo das notas que o `_anexar` escreve no diário ("<Rótulo> gerado no Live Ideas: ..."): não são conteúdo da ação
+_NOTA_DE_LINK = tuple(f"{r} gerado no Live Ideas:" for r in (*_ROTULO.values(), "Diagrama"))
 
 
 def _sem_vazios(dados: dict) -> dict:
@@ -69,7 +71,7 @@ def _acao_do_gaspar(ctx, acao_id: str) -> dict | None:
     diario = []
     for e in a["diario"]:
         nota = str(e.get("nota") or "").strip()
-        if nota:
+        if nota and not nota.startswith(_NOTA_DE_LINK):  # o link de um grafo anterior não volta como nó do `refazer`
             data = _DATA_ISO.match(e["data"])  # entrada sem data chega como "None"
             diario.append({"texto": f"[{data[0]}] {nota}" if data else nota})
     return {"id": a["id"], "titulo": a.get("titulo") or "", "descricao": a["descricao"], "notas": a["notas"],
@@ -110,6 +112,8 @@ def gerar(ctx, args: dict) -> dict:
     resp, erro = _enviar(ctx, "gerar", corpo)
     if erro:
         return erro
+    if resp.get("repetido"):
+        task_id = None  # o link já foi (ou será) anotado pelo pedido que gerou este grafo: outro `task_id` duplicaria a nota
     tipo = resp.get("tipo") or args.get("tipo")
     pedido_id = _criar_pedido(ctx, {"tipo": tipo, "reuniao": resp.get("reuniao"), "processo": resp.get("processo"),
                                     "geracao": resp.get("geracao"), "task_id": task_id})

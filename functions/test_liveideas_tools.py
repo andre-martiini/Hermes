@@ -280,6 +280,38 @@ class GerarTest(Base):
         self.assertIs(r["repetido"], True)
         self.assertIn("refazer", r["orientacao"])
 
+    def test_repetido_cria_o_pedido_sem_task_id_e_o_consultar_nao_anota_de_novo(self):
+        # o link já foi (ou será) anotado pelo pedido que gerou o grafo: um segundo pedido não anota outra vez
+        r = self._gerar()
+        self.assertEqual(self.db.pedidos()[r["pedido_id"]]["task_id"], "a1")  # o original leva o task_id
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN, "repetido": True})
+        r2 = self._gerar(task_id="t1")
+        pedido = self.db.pedidos()[r2["pedido_id"]]
+        self.assertNotIn("task_id", pedido)
+        self.assertEqual((pedido["tipo"], pedido["reuniao"], pedido["anexado"]), ("mapa", REUN, False))
+        self.assertIs(r2["repetido"], True)
+        self.respostas["consultar"] = (200, {"estado": "pronto", "custo": 0, "texto": "Resumo", "tipo": "mapa",
+                                             "link": f"https://liveideas.web.app/#/ler/r/{REUN}", "titulo": "Grafo"})
+        c = hermes_tools.execute("liveideas_consultar", {"pedido_id": r2["pedido_id"]}, self.ctx)
+        self.assertEqual(c["estado"], "pronto")
+        self.assertNotIn("anexo", c)
+        self.assertEqual([u for u in self.db.updates if u[0] == "tarefas"], [])  # nada no diário da ação
+
+    def test_notas_de_link_do_proprio_liveideas_nao_entram_no_grafo(self):
+        link = f"https://liveideas.web.app/#/ler/r/{REUN}"
+        self.db.docs[("tarefas", "a1")]["acompanhamento"] = [
+            {"data": "2026-10-30T12:00:00+00:00", "nota": "Liguei para o fornecedor."},
+            {"data": "2026-10-31T12:00:00+00:00", "nota": f"Mapa de ideias gerado no Live Ideas: Renovar contrato, {link}"},
+            {"data": "2026-10-31T12:05:00+00:00", "nota": f"Processo gerado no Live Ideas: Diárias, {LINK_P}"},
+            {"data": "2026-10-31T12:10:00+00:00", "nota": f"Fluxo gerado no Live Ideas: Reunião, {link}"},
+            {"data": "2026-10-31T12:15:00+00:00", "nota": f"  Diagrama gerado no Live Ideas: X, {link}"},
+            {"data": "2026-11-01T09:30:00+00:00", "nota": "Conferi o Mapa de ideias gerado no Live Ideas ontem."},  # só cita: fica
+        ]
+        self._gerar()
+        self.assertEqual([e["texto"] for e in self.chamadas[0][1]["acao"]["diario"]],
+                         ["[2026-10-30] Liguei para o fornecedor.",
+                          "[2026-11-01] Conferi o Mapa de ideias gerado no Live Ideas ontem."])
+
     def test_diario_vai_com_as_20_ultimas_entradas_em_ordem(self):
         self.db.docs[("tarefas", "a1")]["acompanhamento"] = [
             {"data": f"2026-10-{d:02d}T10:00:00+00:00", "nota": f"nota {d}"} for d in range(1, 26)]
