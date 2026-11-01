@@ -95,6 +95,9 @@ class _DbEscrita(_Db):
 
                     def update(self_inner, dados):
                         db.gravados[d].update(dados)
+
+                    def get(self_inner):
+                        return _Snap(db.gravados.get(d))
                 return _D()
         return _C()
 
@@ -132,6 +135,57 @@ class TestTool(unittest.TestCase):
         r = fal.executar_tool(db, "u", {"modelo": self.KLING, "entrada": {}, "segundos": 5},
                               http=self._http_ok, dormir=lambda s: None)
         self.assertEqual((r["status"], r["custo_estimado_usd"]), ("COMPLETED", 0.63))
+
+    def test_duracao_da_entrada_conta_no_custo(self):
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+        r = fal.executar_tool(db, "u", {"modelo": self.KLING, "entrada": {"duration": 60}, "segundos": 10},
+                              http=lambda *a, **k: self.fail("não pode enviar"))
+        self.assertEqual((r["status"], r["custo_estimado_usd"]), ("confirmation_required", 7.56))
+
+    def test_custo_real_pela_duracao_gerada(self):
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+
+        def http(metodo, url, api_key, corpo=None):
+            if metodo == "POST":
+                return {"request_id": "r1", "status_url": "s", "response_url": "r"}
+            return {"status": "COMPLETED"} if url == "s" else {"video": {"url": "https://v", "duration": 10}}
+        r = fal.executar_tool(db, "u", {"modelo": self.KLING, "entrada": {}, "segundos": 5}, http=http, dormir=lambda s: None)
+        self.assertEqual(r["custo_real_usd"], 1.26)
+        self.assertIn("alerta_custo", r)
+
+    def test_falha_passageira_nao_vira_falha_e_retoma_sem_cobrar(self):
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+        estado = {"consultas": 0}
+
+        def http(metodo, url, api_key, corpo=None):
+            if metodo == "POST":
+                return {"request_id": "r2", "status_url": "s", "response_url": "r"}
+            if url == "s":
+                estado["consultas"] += 1
+                if estado["consultas"] <= 2:
+                    raise fal.ErroFal("timeout")
+                return {"status": "COMPLETED"}
+            return {"images": [{"url": "https://i"}]}
+        r = fal.executar_tool(db, "u", {"modelo": "fal-ai/flux/schnell", "entrada": {}}, http=http, dormir=lambda s: None)
+        self.assertEqual(r["status"], "COMPLETED")
+
+        t = iter(range(0, 10_000, 100))
+        pendente = fal.executar_tool(db, "u", {"modelo": "fal-ai/flux/schnell", "entrada": {}},
+                                     http=lambda m, u, k, c=None: {"request_id": "r3", "status_url": "s3", "response_url": "r3"}
+                                     if m == "POST" else {"status": "IN_PROGRESS"},
+                                     dormir=lambda s: None, relogio=lambda: next(t))
+        self.assertIn("job_fal=r3", pendente["mensagem"])
+        posts = []
+
+        def http2(m, u, k, c=None):
+            posts.append(m)
+            return {"status": "COMPLETED"} if u == "s3" else {"images": [{"url": "https://ok"}]}
+        r = fal.executar_tool(db, "u", {"job_fal": "r3"}, http=http2, dormir=lambda s: None)
+        self.assertEqual((r["status"], r["urls"], "POST" in posts), ("COMPLETED", ["https://ok"], False))
+
+    def test_tabela_invalida_vira_erro(self):
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}, "config/precos_fal": {"fal-ai/novo": {"usd": 0.1}}})
+        self.assertIn("erro", fal.executar_tool(db, "u", {"modelo": "fal-ai/novo", "entrada": {}}))
 
     def test_entrada_invalida(self):
         self.assertIn("erro", fal.executar_tool(_DbEscrita({}), "u", {"modelo": "", "entrada": {}}))

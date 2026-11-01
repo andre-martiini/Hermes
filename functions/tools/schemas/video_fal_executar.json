@@ -1,6 +1,6 @@
 {
   "name": "video_fal_executar",
-  "description": "Roda um modelo pago do fal.ai de ponta a ponta (vídeo V2V, imagem, lip-sync, reframe, retake). Calcula o custo pela tabela de preços (config/precos_fal); até US$ 5 envia direto; acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd igual ao custo. Espera o modelo terminar (até 8 min), registra o job em videoJobs (status, custo, URLs) e devolve as URLs do resultado. Tool longa: devolve job_id; busque com consultar_job.",
+  "description": "Roda um modelo pago do fal.ai de ponta a ponta (vídeo V2V, imagem, lip-sync, reframe, retake). Calcula o custo pela tabela de preços (config/precos_fal); até US$ 5 envia direto; acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd igual ao custo. Espera o modelo terminar (até 8 min; se passar, chame de novo só com job_fal), registra o job em videoJobs (status, custo, URLs) e devolve as URLs do resultado. Tool longa: devolve job_id; busque com consultar_job.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -14,7 +14,7 @@
       },
       "segundos": {
         "type": "number",
-        "description": "Duração do vídeo a gerar, em segundos. Obrigatório para modelos cobrados por segundo."
+        "description": "Duração cobrável em segundos: a do vídeo de entrada (V2V) ou a pedida. O custo usa o maior entre isto e o campo de duração da entrada; o real é recalculado pela duração gerada quando o fal a informa."
       },
       "aprovado_ate_usd": {
         "type": "number",
@@ -23,8 +23,12 @@
       "task_id": {
         "type": "string",
         "description": "Ação do Gaspar ligada a este job (fica registrada em videoJobs)."
+      },
+      "job_fal": {
+        "type": "string",
+        "description": "Só para retomar: o job_fal de uma chamada que passou do tempo. Reconsulta aquele job sem enviar nem cobrar de novo (modelo e entrada são ignorados)."
       }
     },
-    "required": ["modelo", "entrada"]
+    "required": []
   }
 }

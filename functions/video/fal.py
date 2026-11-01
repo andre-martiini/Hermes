@@ -135,26 +135,47 @@ COLECAO_JOBS = "videoJobs"
 ESPERA_MAXIMA_S = 480  # o job MCP tem 540 s; sobra para gravar o resultado
 
 
+ERROS_SEGUIDOS_MAX = 5  # falha de rede passageira na consulta não é falha do job (o fal segue cobrando)
+# Campos de duração que os modelos do fal aceitam na entrada; o custo usa o MAIOR entre eles e `segundos`.
+CAMPOS_DURACAO = ("duration", "duration_seconds", "seconds")
+
+
+def _segundos_cobraveis(args: dict, entrada: dict) -> float:
+    declarados = [args.get("segundos")] + [entrada.get(c) for c in CAMPOS_DURACAO]
+    return max([float(str(v).rstrip("s")) for v in declarados if v not in (None, "")] or [0.0])
+
+
+def _duracao_resultado(resultado: dict) -> float | None:
+    """Duração do vídeo gerado, quando o fal a informa (video.duration / file_metadata)."""
+    for v in (resultado.get("video") or {}, *(resultado.get("videos") or [])):
+        if isinstance(v, dict):
+            d = v.get("duration") or (v.get("file_metadata") or {}).get("duration")
+            if d:
+                return float(d)
+    return None
+
+
 def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=None) -> dict:
     """Roda um modelo do fal de ponta a ponta: confere custo e teto, envia, espera e registra em videoJobs.
 
     Acima de TETO_CONFIRMACAO_USD não gasta nada: devolve `confirmation_required` com o custo, e a chamada
     seguinte precisa trazer `aprovado_ate_usd` ≥ custo estimado (aprovação explícita do André).
+    Com `job_fal` (de uma chamada que passou do tempo), só volta a consultar aquele job: não envia nem cobra.
     """
-    import time
-
-    dormir = dormir or time.sleep
-    relogio = relogio or time.monotonic
+    if args.get("job_fal"):
+        return _retomar(db, str(args["job_fal"]), http=http, dormir=dormir, relogio=relogio)
     modelo = str(args.get("modelo") or "").strip()
     entrada = args.get("entrada")
     if not modelo or not isinstance(entrada, dict):
         return {"erro": "Informe `modelo` (id do fal) e `entrada` (objeto com o input do modelo)."}
     try:
         tabela = precos(db)
-        custo = estimar_custo(modelo, segundos=float(args.get("segundos") or 0),
+        custo = estimar_custo(modelo, segundos=_segundos_cobraveis(args, entrada),
                               imagens=int(entrada.get("num_images") or 1), tabela=tabela)
     except ErroFal as e:
         return {"erro": str(e)}
+    except (ValueError, TypeError, KeyError) as e:
+        return {"erro": f"Entrada ou tabela de preços inválida para {modelo}: {e!r}"}
     aprovado = float(args.get("aprovado_ate_usd") or 0)
     if custo > TETO_CONFIRMACAO_USD and aprovado < custo:
         return {"status": "confirmation_required", "modelo": modelo, "custo_estimado_usd": custo,
@@ -170,29 +191,62 @@ def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=
     from google.cloud import firestore as gcf
 
     ref = db.collection(COLECAO_JOBS).document(job["request_id"])
-    base = {"uid": uid, "modelo": modelo, "nome_modelo": tabela[modelo].get("nome"), "entrada": entrada,
-            "custo_estimado_usd": custo, "status": "IN_QUEUE", "task_id": args.get("task_id"),
-            "criado_em": gcf.SERVER_TIMESTAMP, **job}
-    ref.set(base)
+    ref.set({"uid": uid, "modelo": modelo, "nome_modelo": tabela[modelo].get("nome"), "entrada": entrada,
+             "custo_estimado_usd": custo, "preco": tabela[modelo], "status": "IN_QUEUE", "task_id": args.get("task_id"),
+             "criado_em": gcf.SERVER_TIMESTAMP, **job})
+    return _acompanhar(ref, job, modelo, custo, tabela[modelo], api_key, http=http, dormir=dormir, relogio=relogio)
+
+
+def _retomar(db, request_id: str, **kw) -> dict:
+    snap = db.collection(COLECAO_JOBS).document(request_id).get()
+    if not snap.exists:
+        return {"erro": f"Job {request_id} não encontrado em {COLECAO_JOBS}."}
+    d = snap.to_dict()
+    job = {k: d.get(k) for k in ("request_id", "status_url", "response_url")}
+    try:
+        api_key = chave(db)
+    except ErroFal as e:
+        return {"erro": str(e)}
+    return _acompanhar(db.collection(COLECAO_JOBS).document(request_id), job, d["modelo"], d["custo_estimado_usd"],
+                       d.get("preco") or {}, api_key, **kw)
+
+
+def _acompanhar(ref, job, modelo, custo, preco, api_key, *, http=_http, dormir=None, relogio=None) -> dict:
+    import time
+
+    from google.cloud import firestore as gcf
+
+    dormir = dormir or time.sleep
+    relogio = relogio or time.monotonic
     inicio = relogio()
-    r = {"status": "IN_QUEUE"}
+    r, erros = {"status": "IN_QUEUE"}, 0
     while relogio() - inicio < ESPERA_MAXIMA_S:
         try:
-            r = consultar(job, api_key, http=http)
+            r, erros = consultar(job, api_key, http=http), 0
         except ErroFal as e:
-            r = {"status": "FAILED", "erro": str(e)}
+            erros += 1
+            if erros >= ERROS_SEGUIDOS_MAX:
+                r = {"status": "IN_PROGRESS", "aviso": f"consulta falhando ({e}); o job pode seguir no fal."}
+                break
         if r["status"] in ("COMPLETED", "FAILED"):
             break
         dormir(3)
-    urls = urls_do_resultado(r.get("resultado") or {})
-    # O fal cobra pelo que gerou; o "real" registrado é a tabela × o pedido até conferir o billing do fal.
-    fim = {"status": r["status"], "urls": urls, "erro": r.get("erro"),
-           "custo_real_usd": custo if r["status"] == "COMPLETED" else 0.0, "atualizado_em": gcf.SERVER_TIMESTAMP}
-    ref.update(fim)
-    saida = {"job_fal": job["request_id"], "modelo": modelo, "status": r["status"], "custo_estimado_usd": custo, "urls": urls}
+    resultado = r.get("resultado") or {}
+    urls = urls_do_resultado(resultado)
+    real = 0.0
+    if r["status"] == "COMPLETED":
+        dur = _duracao_resultado(resultado)
+        # Por segundo e com a duração gerada informada: vale o que saiu, não o declarado.
+        real = round(float(preco["usd"]) * dur, 2) if dur and preco.get("unidade") == "segundo" else custo
+    ref.update({"status": r["status"], "urls": urls, "erro": r.get("erro"), "custo_real_usd": real,
+                "atualizado_em": gcf.SERVER_TIMESTAMP})
+    saida = {"job_fal": job["request_id"], "modelo": modelo, "status": r["status"], "custo_estimado_usd": custo,
+             "custo_real_usd": real, "urls": urls}
+    if real > custo * 1.2:
+        saida["alerta_custo"] = f"O fal gerou mais do que o estimado: US$ {real:.2f} contra US$ {custo:.2f}."
     if r["status"] == "FAILED":
         return {"erro": f"O fal falhou: {r.get('erro')}", **saida}
     if r["status"] != "COMPLETED":
-        saida["mensagem"] = (f"Ainda rodando no fal após {ESPERA_MAXIMA_S // 60} min; o job ficou em "
-                             f"{COLECAO_JOBS}/{job['request_id']}.")
+        saida["mensagem"] = ((r.get("aviso") or f"Ainda rodando no fal após {ESPERA_MAXIMA_S // 60} min.")
+                             + f" Chame de novo com job_fal={job['request_id']} para buscar o resultado (não cobra de novo).")
     return saida

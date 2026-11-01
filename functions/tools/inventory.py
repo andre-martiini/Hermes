@@ -1548,16 +1548,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "video", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — só lê video_projetos/{id} e as subcoleções cenas/clipes",
     ),
-    # Fase 2: gastam centavos (TTS + imagem na Vertex), com teto por prévia checado antes.
+    # fal.ai: gasta dólares por job (teto de confirmação de US$ 5 em video/fal.py).
     "video_fal_executar": ToolInventoryEntry(
-        "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
+        "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
         "a resposta traz as URLs do resultado; o documento videoJobs/<job_fal> guarda status, custo e URLs",
         rede_servico="fal.ai (fila REST queue.fal.run)",
         dominio_rede=DominioRede.FECHADO,
         idempotencia=_I.NAO_IDEMPOTENTE,
         nota="Cada chamada envia um job pago novo ao fal (repetir gera e cobra de novo). Acima de US$ 5 "
-        "(video/fal.py TETO_CONFIRMACAO_USD) não envia nada sem aprovado_ate_usd >= custo estimado.",
+        "(video/fal.py TETO_CONFIRMACAO_USD) não envia nada sem aprovado_ate_usd >= custo estimado. "
+        "Com job_fal só reconsulta um job já pago (não cobra).",
     ),
+    # Fase 2: gastam centavos (TTS + imagem na Vertex), com teto por prévia checado antes.
     "video_gerar_previa": ToolInventoryEntry(
         "video", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "a própria resposta traz os links da folha de contato e do MP3; video_status relê o estado",
