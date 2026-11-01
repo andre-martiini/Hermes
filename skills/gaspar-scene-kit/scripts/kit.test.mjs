@@ -56,3 +56,31 @@ test("item entra quando a fala o cita", () => {
   assert.equal(deixa("Planejamento", leg), 0.25 + 0.56);
   assert.equal(deixa("Contrato", leg), null);
 });
+
+import { checkLegendas } from "./gates.mjs";
+
+test("check-legendas: motion exige a narração inteira; sobreposição exige revisar palavra incerta", () => {
+  const roteiro = { cenas: [{ tipo: "titulo", titulo: "x", narracao: "Tudo começa na demanda." }] };
+  const ok = { legendas: [[tok("Tudo", 0, 1), tok(" começa", 1, 2), tok(" na", 2, 3), tok(" demanda.", 3, 4)]] };
+  assert.deepEqual(checkLegendas(roteiro, ok), []);
+  const falta = { legendas: [[tok("Tudo", 0, 1), tok(" começa", 1, 2)]] };
+  assert.equal(checkLegendas(roteiro, falta)[0].regra, "legenda-cobertura");
+  const sobre = { gravacao: "v.mp4", cenas: [] };
+  const fala = { legendas: [tok("Ifes", 0, 1), tok(" ok", 1, 2)] };
+  fala.legendas[0].confidence = 0.2;
+  assert.equal(checkLegendas(sobre, fala)[0].regra, "legenda-nao-revisada");
+  fala.legendas[0].revisado = true;
+  assert.deepEqual(checkLegendas(sobre, fala), []);
+});
+
+import { achar } from "./montar.mjs";
+import { filtroAudio } from "./pos.mjs";
+
+test("correções do review: frase vazia, mix sem entradas, narração com quebra de linha", () => {
+  assert.equal(achar("", [tok("Oi", 0, 100)]), null);
+  assert.equal(achar("qualquer", []), null);
+  assert.match(filtroAudio({ voz: false, trilha: null, sfx: [], total: 5 }).filtro, /anullsrc/);
+  const roteiro = { cenas: [{ tipo: "titulo", titulo: "x", narracao: "Primeiro a demanda.\nDepois  o ETP." }] };
+  const voz = { legendas: [[tok("Primeiro", 0, 1), tok(" a", 1, 2), tok(" demanda.", 2, 3), tok(" Depois", 3, 4), tok(" o", 4, 5), tok(" ETP.", 5, 6)]] };
+  assert.deepEqual(checkLegendas(roteiro, voz), []);
+});

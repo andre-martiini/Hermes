@@ -93,6 +93,20 @@ Depois do render, o `pos.mjs` (chamado pelo montador) faz no FFmpeg:
   os botões ficam em `scripts/gerar_lut.py`. `"lut": false` ou `--sem-lut` desliga.
 - Transições são do kit (fade/wipe, no HyperFrames), não `xfade`. Requer FFmpeg completo (winget Gyan.FFmpeg).
 
+## Quality gates (Fase 6)
+
+O montador não entrega vídeo que não passe (`scripts/gates.mjs`; relatório em `SAIDA/<formato>/gates.json`):
+- **Antes do render (bloqueiam; `--forcar` só para depurar):** `lint-cena` (curva/cor/fonte fora do kit);
+  `check-legibilidade` (texto fora da safe area 9:16 — 15% em cima, 20% embaixo —, fonte < 48 px em
+  1080×1920, contraste < 4,5:1), medido no Chrome com cada cena assentada; `check-legendas` (motion: legenda
+  = narração palavra por palavra; sobreposição: palavra com confiança < 0,6 só passa marcada `"revisado": true`
+  em legendas.json ou com `"legendas_revisadas": true` no roteiro).
+- **Depois do render (falham o montar):** `check-duracao` (vídeo = áudio ± 100 ms; nenhuma cena abaixo do
+  tempo de leitura) e `check-audio` (−14 ± 1 LUFS, true peak ≤ −1,5 dBTP, nenhum silêncio > 1,5 s no meio).
+- **Prévia:** `previa-10/50/90.png` em `SAIDA/<formato>/` — anexe ao diário da ação antes da entrega.
+- **Entrega:** MP4 final no Drive ou anexado à ação (`preparar_upload` + `anexar_arquivo`), com link e custo
+  no diário. Nunca só o caminho local.
+
 ## Revisão
 
 Abra `SAIDA/<formato>/revisao/contact-sheet.jpg` e confira: nada cortado ou fora da safe area, número
