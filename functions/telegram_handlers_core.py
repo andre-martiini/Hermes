@@ -44,6 +44,7 @@ import telegram_callbacks_contatos
 import telegram_callbacks_objetivo
 import telegram_callbacks_resposta
 import avisos_teto
+import proposta_saldo_mensal
 import telegram_callbacks_custos
 import telegram_callbacks_perfil
 import telegram_callbacks_saude
@@ -173,6 +174,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
 
     for _mod in (
         avisos_teto,  # pixcls: (Pix grande: gasto, transferência ou conta fixa)
+        proposta_saldo_mensal,  # saldomes: (confirmar/ajustar o saldo disponível do mês)
         telegram_callbacks_custos,
         telegram_callbacks_perfil,
         telegram_callbacks_saude,

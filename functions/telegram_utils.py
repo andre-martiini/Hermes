@@ -1044,7 +1044,7 @@ def _get_session(db, chat_id: str) -> dict:
 # "✏️ Corrigir" do espelho do perfil). Só o mais recente vale: armar um limpa
 # os outros, senão o texto iria para o botão tocado antes.
 FREE_TEXT_CAPTURE_KEYS = ("pending_diary_edit", "pending_outbox_edit", "pending_perfil_ajuste",
-                          "pending_objetivo_resposta")
+                          "pending_objetivo_resposta", "pending_saldo_mes_ajuste")
 
 
 def _arm_free_text_capture(session: dict, key: str, value) -> None:

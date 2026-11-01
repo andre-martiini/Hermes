@@ -48,7 +48,8 @@ PERFIL_AJUSTE_VALIDADE_HORAS = 12
 # Capturas que só aceitam mensagem de texto digitada: áudio, foto, documento,
 # figurinha, legenda de mídia ou mensagem editada limpam o marcador e seguem o
 # fluxo normal (o outbox fica de fora: tem tratamento próprio de marcador obsoleto).
-_CAPTURAS_SO_TEXTO = ("pending_diary_edit", "pending_perfil_ajuste", "pending_objetivo_resposta")
+_CAPTURAS_SO_TEXTO = ("pending_diary_edit", "pending_perfil_ajuste", "pending_objetivo_resposta",
+                      "pending_saldo_mes_ajuste")
 
 
 def limpar_capturas_so_texto(session: dict) -> bool:
@@ -151,6 +152,22 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
             objetivo_reply = "⚠️ Não consegui repassar a resposta ao objetivo."
         _persist_turn_to_copilot(text, objetivo_reply)
         _send_telegram_session_message(db, token, chat_id, objetivo_reply, session=session)
+        return True
+
+    # --- Ajuste do saldo disponível do mês pendente (botão "✏️ Ajustar" da
+    # proposta mensal) — a próxima mensagem livre vira o valor digitado. ---
+    pending_saldo_mes = session.get("pending_saldo_mes_ajuste")
+    if pending_saldo_mes and text and not text.startswith("/"):
+        from proposta_saldo_mensal import aplicar_ajuste
+        session.pop("pending_saldo_mes_ajuste", None)
+        _save_session(db, chat_id, session)
+        try:
+            saldo_mes_reply = aplicar_ajuste(db, pending_saldo_mes, text)
+        except Exception as exc:
+            print(f"[PropostaSaldoMensal] Falha ao aplicar o ajuste: {exc}")
+            saldo_mes_reply = "⚠️ Não consegui registrar esse valor agora. Tente novamente mais tarde."
+        _persist_turn_to_copilot(text, saldo_mes_reply)
+        _send_telegram_session_message(db, token, chat_id, saldo_mes_reply, session=session)
         return True
 
     # --- Ajuste de rascunho de outbox WhatsApp pendente (botão "✏️ Editar") ---

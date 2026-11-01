@@ -136,6 +136,13 @@ def avisos_teto_hora(event: scheduler_fn.ScheduledEvent = None) -> None:
     if textos and chat_id:
         _send_telegram_message(_get_telegram_token(db), chat_id, "\n\n".join(textos))
 
+    try:
+        import proposta_saldo_mensal
+
+        proposta_saldo_mensal.verificar_e_propor(db, _get_telegram_token(db), chat_id, hoje)
+    except Exception as exc:
+        print(f"[PropostaSaldoMensal] Falha ao verificar/propor: {exc}")
+
 
 def teclado_pix(doc_id: str) -> list[list[dict]]:
     return [[{"text": "🛒 Gasto", "callback_data": f"{CALLBACK}{doc_id}:g"},
