@@ -10,6 +10,8 @@
     PY efeitos.py mao       video.mp4 elemento.mp4 SAIDA [--cor 255,140,40] [--escala 2.8]
                             [--gatilho visivel|acima] [--de 1.8 --ate 4.5] [--dedos-na-frente]
     PY efeitos.py transformar video.mp4 "prompt" SAIDA [--ref ref.png] [--modelo kling-pro] [--aprovado-ate X]
+    PY efeitos.py dublar    video.mp4 en SAIDA                       # voz do André em outro idioma + boca sincronizada
+    PY efeitos.py reframe   aula-16x9.mp4 reel.mp4                   # vertical seguindo o rosto, sem IA
 
 PY = venv da tutorial-sistema com mediapipe; os comandos que chamam o fal usam também a pasta functions do
 Hermes (credencial em GOOGLE_APPLICATION_CREDENTIALS). Áudio: sempre o original.
@@ -337,6 +339,151 @@ def gerar_elemento(descricao: str, pasta: Path, task_id: str | None) -> Path:
     return destino
 
 
+# ---------------------------------------------------------------- 3. dublagem com lip-sync só na boca
+
+def _chave_eleven() -> str:
+    from google.cloud import firestore
+
+    d = firestore.Client(project="gestao-hermes").collection("system").document("api_keys").get().to_dict() or {}
+    if not d.get("elevenlabs_api_key"):
+        raise SystemExit("Sem elevenlabs_api_key em system/api_keys.")
+    return d["elevenlabs_api_key"]
+
+
+def dublar_audio(video: Path, idioma: str, pasta: Path) -> Path:
+    """Dublagem do ElevenLabs com a voz do próprio André (clonagem automática do falante; autorizada por ele
+    em 01/11/2026). Devolve o áudio dublado (wav). Custa créditos do ElevenLabs."""
+    import time
+
+    import requests
+
+    destino = pasta / f"dub-{idioma}.wav"
+    if destino.exists():
+        return destino
+    url, cab = "https://api.elevenlabs.io/v1/dubbing", {"xi-api-key": _chave_eleven()}
+    with open(video, "rb") as f:
+        r = requests.post(url, headers=cab, files={"file": (video.name, f, "video/mp4")}, timeout=600,
+                          data={"source_lang": "pt", "target_lang": idioma, "num_speakers": "1", "watermark": "false",
+                                "name": f"gaspar-{pasta.name}-{idioma}"})
+    if not r.ok:
+        raise SystemExit(f"ElevenLabs recusou a dublagem ({r.status_code}): {r.text[:400]}")
+    dub_id = r.json()["dubbing_id"]
+    (pasta / f"dub-{idioma}.id").write_text(dub_id)
+    while True:
+        st = requests.get(f"{url}/{dub_id}", headers=cab, timeout=60).json()
+        if st.get("status") == "dubbed":
+            break
+        if st.get("status") == "failed":
+            raise SystemExit(f"ElevenLabs falhou: {st.get('error')}")
+        time.sleep(10)
+    media = pasta / f"dub-{idioma}.mp4"
+    media.write_bytes(requests.get(f"{url}/{dub_id}/audio/{idioma}", headers=cab, timeout=600).content)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(media), "-vn", "-ac", "1", "-ar", "48000",
+                    str(destino)], check=True)
+    return destino
+
+
+def mascara_boca(pontos, *, borda: int = 15) -> np.ndarray:
+    """Parte de baixo do rosto (do nariz ao queixo, dentro do oval): boca e mandíbula mexem juntas."""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    pts = np.array(pontos)
+    corte = pts[2][1]  # logo abaixo da ponta do nariz
+    oval = [tuple(p) for p in pts[OVAL] if p[1] >= corte]
+    oval = sorted(oval, key=lambda p: np.arctan2(p[1] - pts[13][1], p[0] - pts[13][0]))
+    m = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(m).polygon([(pts[234][0], corte), *oval, (pts[454][0], corte)], fill=255)
+    return np.asarray(m.filter(ImageFilter.GaussianBlur(borda)), np.float32)[..., None] / 255.0
+
+
+def devolver_exceto_boca(original: Path, sincronizado: Path, audio: Path, destino: Path, pasta: Path) -> Path:
+    """Quadro final = original em tudo, menos a parte de baixo do rosto, que vem do lip-sync."""
+    rs = rastrear(sincronizado, pasta / "sync")
+    orig = list(quadros(original))
+    grav = Gravador(destino, audio)
+    ultimo = None
+    for k, sq in enumerate(quadros(sincronizado)):
+        j = min(len(orig) - 1, k)  # o lip-sync preserva o tempo do vídeo de entrada
+        f = rs[k] if k < len(rs) else None
+        ultimo = (f or {}).get("rosto") or ultimo
+        if ultimo is None:
+            grav(orig[j])
+            continue
+        m = mascara_boca(ultimo)
+        o, g = orig[j].astype(np.float32) / 255.0, sq.astype(np.float32) / 255.0
+        grav(np.clip((casar_cor(g, o, m) * m + o * (1 - m)) * 255, 0, 255).astype(np.uint8))
+    grav.fechar()
+    return destino
+
+
+def dublar(video: Path, idioma: str, pasta: Path, *, task_id: str | None, aprovado: float) -> Path:
+    sys.path.insert(0, str(RAIZ / "functions"))
+    sys.path.insert(0, str(Path(__file__).parent))
+    import urllib.request
+
+    from v2v import publicar, rodar_fal
+
+    pasta.mkdir(parents=True, exist_ok=True)
+    audio = dublar_audio(video, idioma, pasta)
+    base = pasta / "base30.mp4"
+    if not base.exists():
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-an", "-vf",
+                        f"fps={FPS},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+                        "-c:v", "libx264", "-crf", "17", "-pix_fmt", "yuv420p", str(base)], check=True)
+    sinc = pasta / f"sync-{idioma}.mp4"
+    if not sinc.exists():
+        m4a = pasta / f"dub-{idioma}.m4a"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(audio), "-c:a", "aac", str(m4a)], check=True)
+        dur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+                                             "csv=p=0", str(base)]).decode())
+        r = rodar_fal("fal-ai/sync-lipsync/v2/pro",
+                      {"video_url": publicar(base, f"efeitos/{pasta.name}/base30.mp4"),
+                       "audio_url": publicar(m4a, f"efeitos/{pasta.name}/{m4a.name}"), "sync_mode": "cut_off"},
+                      segundos=dur, task_id=task_id, aprovado=aprovado, pendente=pasta / f"sync-{idioma}.job")
+        urllib.request.urlretrieve(r["urls"][0], sinc)
+        print(f"lip-sync: US$ {r['custo_real_usd']:.2f}")
+    return devolver_exceto_boca(base, sinc, audio, pasta / f"dublado-{idioma}.mp4", pasta)
+
+
+# ---------------------------------------------------------------- 4. reframe 16:9 → 9:16 seguindo o rosto
+
+def reframe(video: Path, destino: Path, *, suave: float = 0.06, folga: float = 0.04) -> Path:
+    """Corte vertical que acompanha o rosto (MediaPipe), sem gerar nada: os pixels são os originais.
+
+    suave: inércia da câmera virtual (menor = mais calma); folga: o rosto pode andar essa fração da largura
+    sem a câmera se mexer (evita "respirar" a cada movimento).
+    """
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions, vision
+
+    w0, h0 = (int(x) for x in subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0",
+         str(video)]).decode().strip().split(","))
+    if h0 >= w0:
+        raise SystemExit("O vídeo já é vertical.")
+    largura = int(h0 * 9 / 16) // 2 * 2
+    rostos = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(MODELOS_MP / "face_landmarker.task")),
+        running_mode=vision.RunningMode.VIDEO, num_faces=1))
+    grav = Gravador(destino, video)
+    cx = None
+    for k, q in enumerate(quadros(video, w0, h0)):
+        r = rostos.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(q)),
+                                    int(k * 1000 / FPS))
+        alvo = r.face_landmarks[0][1].x * w0 if r.face_landmarks else (cx or w0 / 2)
+        cx = alvo if cx is None else (cx + suave * (alvo - cx) if abs(alvo - cx) > folga * w0 else cx)
+        x0 = int(np.clip(cx - largura / 2, 0, w0 - largura))
+        grav(_redim_ret(q[:, x0:x0 + largura], W, H))
+    grav.fechar()
+    return destino
+
+
+def _redim_ret(img: np.ndarray, w: int, h: int) -> np.ndarray:
+    from PIL import Image
+
+    return np.array(Image.fromarray(np.ascontiguousarray(img)).resize((w, h), Image.LANCZOS))
+
+
 def main():
     cmd = sys.argv[1]
     opc = lambda nome, padrao=None: sys.argv[sys.argv.index(nome) + 1] if nome in sys.argv else padrao
@@ -355,6 +502,13 @@ def main():
     elif cmd == "transformar":
         print(transformar(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), ref=Path(opc("--ref")) if opc("--ref") else None,
                           modelo=opc("--modelo", "kling-pro"), aprovado=float(opc("--aprovado-ate", 0)), task_id=opc("--task")))
+
+
+    if cmd == "reframe":
+        print(reframe(Path(sys.argv[2]), Path(sys.argv[3])))
+    if cmd == "dublar":
+        print(dublar(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), task_id=opc("--task"),
+                     aprovado=float(opc("--aprovado-ate", 0))))
 
 
 if __name__ == "__main__":

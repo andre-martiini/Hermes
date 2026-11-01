@@ -32,6 +32,12 @@ modelos do MediaPipe em `~/.tutorial-sistema/modelos/` (hand_landmarker.task, fa
   roupa/estilo; o rosto original volta por cima (máscara oval recuada na testa para chapéu, alinhada ao nariz da
   cabeça gerada a cada quadro, cor casada na borda). Entrada de 3–10 s. O áudio é sempre o original.
 - **Grave para efeito:** fundo neutro, luz frontal, gesto claro e devagar, mão sem cobrir o rosto.
+- `efeitos.py reframe aula-16x9.mp4 reel.mp4` — vertical 9:16 que segue o rosto (câmera virtual calma, com
+  folga), sem gerar nada; grátis.
+- `efeitos.py dublar video.mp4 en SAIDA` — voz do André em outro idioma (dublagem do ElevenLabs com a voz dele,
+  autorizada em 01/11/2026) + lip-sync (Sync lipsync-2-pro no fal, ~US$ 0,08/s) aplicado **só na parte de baixo
+  do rosto** (nariz ao queixo); o resto do quadro volta do original. Exige plano Starter+ no ElevenLabs (o
+  gratuito só dubla com marca d'água e não permite uso comercial). Ainda sem teste de ponta a ponta.
 
 ## Recorte + fundo (troca de cenário)
 
