@@ -81,6 +81,28 @@ class TestEditarExcluir(unittest.TestCase):
         self.assertEqual(r["periodo"]["mes_nome"], "novembro")
         self.assertEqual(db.collection("income_entries").docs["dez"]["month"], 10)
 
+    def test_editar_dia_da_conta_fixa(self):
+        db = _db()
+        r = financas_itens.editar(db, {"tipo": "obrigacao_fixa", "id": "luz", "dia": 15})
+        self.assertEqual(r["alterado"]["dueDay"], [None, 15])
+        self.assertEqual(db.collection("fixed_bills").docs["luz"]["dueDay"], 15)
+
+    def test_editar_dia_da_renda(self):
+        db = _db()
+        r = financas_itens.editar(db, {"tipo": "renda", "id": "dez", "dia": 8})
+        self.assertEqual(r["alterado"]["day"], [None, 8])
+        self.assertEqual(db.collection("income_entries").docs["dez"]["day"], 8)
+
+    def test_editar_dia_fora_do_intervalo_ou_nao_numerico_da_erro(self):
+        self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": 0}))
+        self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": 32}))
+        self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": "quinze"}))
+
+    def test_editar_dia_de_transacao_avulsa_da_erro(self):
+        db = _Db({"finance_transactions": {"compra": {"description": "Compra", "amount": 10, "status": "active"}}})
+        r = financas_itens.editar(db, {"tipo": "transacao_avulsa", "id": "compra", "dia": 10})
+        self.assertIn("erro", r)
+
     def test_editar_sem_campo_e_tipo_invalido_dao_erro(self):
         self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "renda", "id": "nov"}))
         self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "x", "id": "nov", "valor": 1}))
