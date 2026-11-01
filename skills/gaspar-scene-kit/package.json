@@ -1,0 +1,12 @@
+{
+  "name": "gaspar-scene-kit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "dependencies": {
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.226"
+  }
+}

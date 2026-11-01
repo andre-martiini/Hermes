@@ -1,0 +1,71 @@
+/* Gaspar scene kit — tokens. Única fonte de cor, fonte, tamanho, raio e sombra das cenas.
+   O lint-cena recusa qualquer cor ou família de fonte que não esteja aqui. */
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/inter-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/inter-latin-ext-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  /* Paleta da casa: azul-marinho, âmbar e duas de apoio. */
+  --ground: #0f172a;
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #f59e0b;
+  --box: #1e293b;
+  --apoio-1: #38bdf8;
+  --apoio-2: #34d399;
+
+  /* No máximo 2 famílias e 3 tamanhos (×--escala no 16:9). */
+  --font-display: "Inter", sans-serif;
+  --font-mono: "Inter", sans-serif;
+  --tam-numero: calc(150px * var(--escala));
+  --tam-titulo: calc(76px * var(--escala));
+  --tam-texto: calc(48px * var(--escala));
+
+  --raio: 28px;
+  --sombra: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --escala: 1;
+  --largura-util: 900px;
+}
+
+/* Safe area 9:16: 15% em cima, 20% embaixo (a faixa da legenda). */
+html[data-formato="vertical"] .cena { padding: 15% 90px 20%; }
+html[data-formato="horizontal"] { --escala: 1.05; --largura-util: 1640px; }
+html[data-formato="horizontal"] .cena { padding: 110px 140px 250px; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { overflow: hidden; background: var(--ground); }
+#root { position: relative; width: 100%; height: 100%; font-family: var(--font-display); color: var(--ink); }
+
+.cena { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 48px; }
+.etiqueta { color: var(--accent); font-size: var(--tam-texto); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.titulo { font-size: var(--tam-titulo); font-weight: 750; line-height: 1.1; letter-spacing: -0.02em; text-wrap: balance; }
+.texto { font-size: var(--tam-texto); font-weight: 500; line-height: 1.3; }
+.apagado { color: var(--muted); }
+.numero { white-space: nowrap; font-size: min(var(--tam-numero), calc(var(--largura-util) / var(--chars, 1) / 0.62)); font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+.caixa { display: flex; align-items: center; gap: 36px; background: var(--box); border-radius: var(--raio); padding: 36px 44px; border: 4px solid transparent; box-shadow: var(--sombra); }
+.selo { width: 96px; height: 96px; border-radius: 50%; background: var(--accent); color: var(--ground); font-size: var(--tam-texto); font-weight: 800; display: grid; place-items: center; flex: none; }
+.cresce { flex: 1; }
+.destaque { color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }
+.etapas { display: flex; flex-direction: column; gap: 12px; }
+.conector { height: 28px; width: 6px; background: var(--muted); opacity: 0.5; margin-left: 74px; }
+/* 16:9: o fluxo corre na horizontal, senão 4+ etapas não cabem na altura. */
+html[data-formato="horizontal"] .etapas { flex-direction: row; align-items: stretch; }
+html[data-formato="horizontal"] .etapas .caixa { flex: 1; flex-direction: column; justify-content: center; text-align: center; gap: 20px; padding: 36px 20px; }
+html[data-formato="horizontal"] .etapas .conector { height: 6px; width: 32px; margin: 0; align-self: center; flex: none; }
+.lado { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.lado .caixa { flex-direction: column; align-items: flex-start; gap: 20px; }
+.quadro { border-radius: var(--raio); overflow: hidden; box-shadow: var(--sombra); background: var(--box); }
+.quadro img { display: block; width: 100%; height: auto; }
+.imagem-cheia { position: absolute; inset: 0; overflow: hidden; }
+.imagem-cheia img { width: 100%; height: 100%; object-fit: cover; }
+.legenda-tela { position: absolute; left: 90px; right: 90px; bottom: 22%; font-size: var(--tam-texto); font-weight: 600; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8); }
+.ativo { border-color: var(--accent); }
