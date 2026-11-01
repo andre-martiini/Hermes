@@ -208,6 +208,8 @@ _TOOLS_LONGAS: set[str] = {
     # Devolvem texto JSON no sucesso (o `resultado` de `consultar_job` é string).
     "video_gerar_previa",
     "video_ajustar",
+    # fal.ai: envia, espera o modelo (segundos a minutos) e registra em videoJobs.
+    "video_fal_executar",
     # Imagens (GPT Image): de dezenas de segundos a ~2 min em qualidade alta.
     # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
     "gerar_imagem",

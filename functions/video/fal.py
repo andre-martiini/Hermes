@@ -1,0 +1,198 @@
+"""fal.ai: conector único para geração por IA paga (vídeo V2V, imagem, lip-sync, reframe).
+
+`estimar_custo(modelo, segundos=..., imagens=...)` lê a tabela de preços e devolve US$; `executar` envia
+para a fila REST do fal e devolve o `request_id`; `consultar` diz se terminou e traz o resultado.
+
+Preços mudam todo mês: `PRECOS_FAL` é só o ponto de partida; `config/precos_fal` (Firestore) sobrescreve
+por modelo, sem deploy. Valores de 01/11/2026 (plano de vídeo nov/2026); conferir na página do modelo.
+
+Chave: campo `fal_key` de `system/api_keys` (o mesmo documento das demais chaves); env FAL_KEY como alternativa.
+"""
+from __future__ import annotations
+
+import copy
+import json
+import os
+import urllib.error
+import urllib.request
+
+FILA = "https://queue.fal.run"
+# Teto por job acima do qual a tool pede confirmação (decisão do André, 01/11/2026).
+TETO_CONFIRMACAO_USD = 5.0
+
+# unidade: "segundo" (vídeo gerado), "imagem" (por imagem) ou "job" (preço fixo).
+PRECOS_FAL: dict = {
+    "fal-ai/flux/schnell": {"unidade": "imagem", "usd": 0.003, "nome": "FLUX.1 schnell (imagem de teste)"},
+    "fal-ai/nano-banana": {"unidade": "imagem", "usd": 0.039, "nome": "Nano Banana (referência de cenário/figurino)"},
+    "fal-ai/wan-vace-apps/video-edit": {"unidade": "segundo", "usd": 0.05, "nome": "Wan VACE video-edit 480p (rascunho V2V)"},
+    "fal-ai/kling-video/o3/standard/video-edit": {"unidade": "segundo", "usd": 0.126, "nome": "Kling O3 Video Edit Std (V2V final)"},
+    "fal-ai/kling-video/o3/pro/video-edit": {"unidade": "segundo", "usd": 0.168, "nome": "Kling O3 Video Edit Pro"},
+    "fal-ai/luma-dream-machine/ray-3.2/modify": {"unidade": "segundo", "usd": 0.11, "nome": "Luma Ray 3.2 Modify (draft)"},
+    "fal-ai/luma-dream-machine/ray-3.2/reframe": {"unidade": "segundo", "usd": 0.12, "nome": "Luma Ray 3.2 Reframe 720p"},
+    "fal-ai/sync-lipsync/v2/pro": {"unidade": "segundo", "usd": 0.083, "nome": "Sync lipsync-2-pro"},
+    "fal-ai/ltx-2/retake": {"unidade": "segundo", "usd": 0.10, "nome": "LTX-2 Retake"},
+}
+
+
+class ErroFal(RuntimeError):
+    pass
+
+
+def precos(db=None) -> dict:
+    """`PRECOS_FAL` com `config/precos_fal` por cima (por modelo, campo a campo)."""
+    tabela = copy.deepcopy(PRECOS_FAL)
+    if db is not None:
+        snap = db.collection("config").document("precos_fal").get()
+        for modelo, valor in ((snap.to_dict() or {}) if snap.exists else {}).items():
+            if isinstance(valor, dict):
+                tabela.setdefault(modelo, {}).update(valor)
+    return tabela
+
+
+def estimar_custo(modelo: str, *, segundos: float = 0, imagens: int = 1, tabela: dict | None = None) -> float:
+    p = (tabela or PRECOS_FAL).get(modelo)
+    if not p:
+        raise ErroFal(f"Sem preço para o modelo {modelo!r}. Cadastre em config/precos_fal antes de usar.")
+    unidade, usd = p["unidade"], float(p["usd"])
+    if unidade == "segundo":
+        if segundos <= 0:
+            raise ErroFal(f"{modelo} cobra por segundo: informe a duração.")
+        return round(usd * segundos, 2)
+    if unidade == "imagem":
+        return round(usd * max(imagens, 1), 3)
+    return round(usd, 2)
+
+
+def chave(db=None) -> str:
+    valor = None
+    if db is not None:
+        snap = db.collection("system").document("api_keys").get()
+        valor = (snap.to_dict() or {}).get("fal_key") if snap.exists else None
+    valor = valor or os.environ.get("FAL_KEY")
+    if not valor:
+        raise ErroFal("Chave do fal não configurada (system/api_keys.fal_key).")
+    return valor
+
+
+def _http(metodo: str, url: str, api_key: str, corpo: dict | None = None, timeout: float = 60) -> dict:
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = urllib.request.Request(url, data=dados, method=metodo,
+                                 headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json",
+                                          "User-Agent": "gaspar-hermes/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode("utf-8", "replace")[:300]
+        if e.code in (401, 403):
+            # 403 também é conta sem saldo ("Exhausted balance"): o detalhe do fal diz qual dos dois.
+            raise ErroFal(f"fal recusou o acesso ({e.code}): {detalhe}") from e
+        raise ErroFal(f"fal respondeu {e.code}: {detalhe}") from e
+
+
+def executar(modelo: str, payload: dict, api_key: str, http=_http) -> dict:
+    """Envia para a fila. Devolve {request_id, status_url, response_url} (URLs vêm do fal: o modelo
+    pode ter subcaminho que não entra nelas)."""
+    r = http("POST", f"{FILA}/{modelo}", api_key, payload)
+    if not r.get("request_id"):
+        raise ErroFal(f"fal não devolveu request_id: {str(r)[:200]}")
+    return {k: r.get(k) for k in ("request_id", "status_url", "response_url")}
+
+
+def consultar(job: dict, api_key: str, http=_http) -> dict:
+    """{status: IN_QUEUE|IN_PROGRESS|COMPLETED|FAILED, resultado?, erro?}."""
+    st = http("GET", job["status_url"], api_key)
+    status = st.get("status")
+    if status != "COMPLETED":
+        return {"status": status or "IN_QUEUE"}
+    if st.get("error"):
+        return {"status": "FAILED", "erro": f"{st.get('error_type') or 'erro'}: {st['error']}"[:300]}
+    return {"status": "COMPLETED", "resultado": http("GET", job["response_url"], api_key)}
+
+
+def urls_do_resultado(resultado: dict) -> list[str]:
+    """URLs de mídia no resultado (images[], video, audio…), qualquer que seja o modelo."""
+    achadas: list[str] = []
+
+    def andar(v):
+        if isinstance(v, dict):
+            if isinstance(v.get("url"), str) and v["url"].startswith("http"):
+                achadas.append(v["url"])
+            for x in v.values():
+                if isinstance(x, (dict, list)):
+                    andar(x)
+        elif isinstance(v, list):
+            for x in v:
+                andar(x)
+
+    andar(resultado)
+    return achadas
+
+
+# ---------------------------------------------------------------- tool video_fal_executar
+
+COLECAO_JOBS = "videoJobs"
+ESPERA_MAXIMA_S = 480  # o job MCP tem 540 s; sobra para gravar o resultado
+
+
+def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=None) -> dict:
+    """Roda um modelo do fal de ponta a ponta: confere custo e teto, envia, espera e registra em videoJobs.
+
+    Acima de TETO_CONFIRMACAO_USD não gasta nada: devolve `confirmation_required` com o custo, e a chamada
+    seguinte precisa trazer `aprovado_ate_usd` ≥ custo estimado (aprovação explícita do André).
+    """
+    import time
+
+    dormir = dormir or time.sleep
+    relogio = relogio or time.monotonic
+    modelo = str(args.get("modelo") or "").strip()
+    entrada = args.get("entrada")
+    if not modelo or not isinstance(entrada, dict):
+        return {"erro": "Informe `modelo` (id do fal) e `entrada` (objeto com o input do modelo)."}
+    try:
+        tabela = precos(db)
+        custo = estimar_custo(modelo, segundos=float(args.get("segundos") or 0),
+                              imagens=int(entrada.get("num_images") or 1), tabela=tabela)
+    except ErroFal as e:
+        return {"erro": str(e)}
+    aprovado = float(args.get("aprovado_ate_usd") or 0)
+    if custo > TETO_CONFIRMACAO_USD and aprovado < custo:
+        return {"status": "confirmation_required", "modelo": modelo, "custo_estimado_usd": custo,
+                "teto_sem_confirmacao_usd": TETO_CONFIRMACAO_USD,
+                "mensagem": f"Custo estimado US$ {custo:.2f} passa do teto de US$ {TETO_CONFIRMACAO_USD:.2f}. "
+                            f"Mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd={custo}."}
+    try:
+        api_key = chave(db)
+        job = executar(modelo, entrada, api_key, http=http)
+    except ErroFal as e:
+        return {"erro": str(e)}
+
+    from google.cloud import firestore as gcf
+
+    ref = db.collection(COLECAO_JOBS).document(job["request_id"])
+    base = {"uid": uid, "modelo": modelo, "nome_modelo": tabela[modelo].get("nome"), "entrada": entrada,
+            "custo_estimado_usd": custo, "status": "IN_QUEUE", "task_id": args.get("task_id"),
+            "criado_em": gcf.SERVER_TIMESTAMP, **job}
+    ref.set(base)
+    inicio = relogio()
+    r = {"status": "IN_QUEUE"}
+    while relogio() - inicio < ESPERA_MAXIMA_S:
+        try:
+            r = consultar(job, api_key, http=http)
+        except ErroFal as e:
+            r = {"status": "FAILED", "erro": str(e)}
+        if r["status"] in ("COMPLETED", "FAILED"):
+            break
+        dormir(3)
+    urls = urls_do_resultado(r.get("resultado") or {})
+    # O fal cobra pelo que gerou; o "real" registrado é a tabela × o pedido até conferir o billing do fal.
+    fim = {"status": r["status"], "urls": urls, "erro": r.get("erro"),
+           "custo_real_usd": custo if r["status"] == "COMPLETED" else 0.0, "atualizado_em": gcf.SERVER_TIMESTAMP}
+    ref.update(fim)
+    saida = {"job_fal": job["request_id"], "modelo": modelo, "status": r["status"], "custo_estimado_usd": custo, "urls": urls}
+    if r["status"] == "FAILED":
+        return {"erro": f"O fal falhou: {r.get('erro')}", **saida}
+    if r["status"] != "COMPLETED":
+        saida["mensagem"] = (f"Ainda rodando no fal após {ESPERA_MAXIMA_S // 60} min; o job ficou em "
+                             f"{COLECAO_JOBS}/{job['request_id']}.")
+    return saida
