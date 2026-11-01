@@ -370,7 +370,11 @@ def _chave_eleven() -> str:
 
 def dublar_audio(video: Path, idioma: str, pasta: Path) -> Path:
     """Dublagem do ElevenLabs com a voz do próprio André (clonagem automática do falante; autorizada por ele
-    em 01/11/2026). Devolve o áudio dublado (wav). Custa créditos do ElevenLabs."""
+    em 01/11/2026). Devolve o áudio dublado (wav). Custa créditos do ElevenLabs.
+
+    A tradução é automática e pode traduzir nomes próprios (01/11/2026: "Reditec" virou "Tech Network" e "MAGO",
+    "The Great Wizard"). Corrigir o texto pela API (modo manual/estúdio) é só do plano Enterprise; no Starter,
+    confira a transcrição do dublado antes de entregar."""
     import time
 
     import requests
