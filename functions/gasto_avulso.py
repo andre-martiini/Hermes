@@ -88,9 +88,14 @@ def gasto_avulso_centavos(transacoes, ano: int, mes: int) -> int:
     return gasto_do_teto_centavos(transacoes, date(ano, mes, 1), date(ano, mes, calendar.monthrange(ano, mes)[1]))
 
 
-def gasto_do_teto_centavos(transacoes, de: date, ate: date) -> int:
-    """Gasto que conta no teto entre `de` e `ate` (inclusive, dias de Brasilia)."""
-    total, vistos = 0, set()
+def transacoes_do_teto(transacoes, de: date, ate: date) -> list[dict]:
+    """Lancamentos do PicPay que contam no teto entre `de` e `ate` (inclusive, Brasilia), sem duplicata.
+
+    Extraido de `gasto_do_teto_centavos` para uso por quem precisa dos
+    lancamentos em si, nao so da soma (ex.: `proposta_saldo_mensal.maior_outlier`).
+    """
+    vistos = set()
+    selecionados = []
     for t in transacoes:
         if t.get("status") == "deleted" or _normal(t.get("conta")) != CONTA_DO_TETO:
             continue
@@ -103,8 +108,13 @@ def gasto_do_teto_centavos(transacoes, de: date, ate: date) -> int:
         if chaves & vistos:
             continue
         vistos |= chaves
-        total += centavos(t.get("amount"))
-    return total
+        selecionados.append(t)
+    return selecionados
+
+
+def gasto_do_teto_centavos(transacoes, de: date, ate: date) -> int:
+    """Gasto que conta no teto entre `de` e `ate` (inclusive, dias de Brasilia)."""
+    return sum(centavos(t.get("amount")) for t in transacoes_do_teto(transacoes, de, ate))
 
 
 def orcamento_centavos(settings: dict, ano: int, mes: int):
