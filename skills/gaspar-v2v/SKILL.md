@@ -34,9 +34,10 @@ modelos do MediaPipe em `~/.tutorial-sistema/modelos/` (hand_landmarker.task, fa
 - **Grave para efeito:** fundo neutro, luz frontal, gesto claro e devagar, mão sem cobrir o rosto.
 - `efeitos.py reframe aula-16x9.mp4 reel.mp4` — vertical 9:16 que segue o rosto (câmera virtual calma, com
   folga), sem gerar nada; grátis.
-- `efeitos.py dublar video.mp4 en SAIDA` — voz do André em outro idioma (dublagem do ElevenLabs com a voz dele,
-  autorizada em 01/11/2026) + lip-sync (Sync lipsync-2-pro no fal, ~US$ 0,08/s) aplicado **só na parte de baixo
-  do rosto** (nariz ao queixo); o resto do quadro volta do original. Exige plano Starter+ no ElevenLabs (o
+- `efeitos.py dublar video.mp4 en SAIDA [--lipsync]` — voz do André em outro idioma (dublagem do ElevenLabs com a
+  voz dele, autorizada em 01/11/2026). **Padrão sem lip-sync** (vídeo original + áudio dublado; decisão do André:
+  o lip-sync é caro). Com `--lipsync` (momentos especiais): Sync lipsync-2-pro no fal, ~US$ 0,08/s, aplicado **só
+  na parte de baixo do rosto** (nariz ao queixo); o resto do quadro volta do original. Exige plano Starter+ no ElevenLabs (o
   gratuito e o pago por uso só dublam com marca d'água e sem clonagem). Testado em 01/11/2026: 22 s PT→EN, US$ 1,81 de lip-sync.
 
 ## Recorte + fundo (troca de cenário)

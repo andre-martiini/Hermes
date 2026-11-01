@@ -10,7 +10,7 @@
     PY efeitos.py mao       video.mp4 elemento.mp4 SAIDA [--cor 255,140,40] [--escala 2.8]
                             [--gatilho visivel|acima] [--de 1.8 --ate 4.5] [--dedos-na-frente]
     PY efeitos.py transformar video.mp4 "prompt" SAIDA [--ref ref.png] [--modelo kling-pro] [--aprovado-ate X]
-    PY efeitos.py dublar    video.mp4 en SAIDA                       # voz do André em outro idioma + boca sincronizada
+    PY efeitos.py dublar    video.mp4 en SAIDA [--lipsync]           # voz do André em outro idioma (boca sincronizada opcional)
     PY efeitos.py reframe   aula-16x9.mp4 reel.mp4                   # vertical seguindo o rosto, sem IA
 
 PY = venv da tutorial-sistema com mediapipe; os comandos que chamam o fal usam também a pasta functions do
@@ -416,7 +416,18 @@ def devolver_exceto_boca(original: Path, sincronizado: Path, audio: Path, destin
     return destino
 
 
-def dublar(video: Path, idioma: str, pasta: Path, *, task_id: str | None, aprovado: float) -> Path:
+def dublar(video: Path, idioma: str, pasta: Path, *, task_id: str | None, aprovado: float,
+           lipsync: bool = False) -> Path:
+    """Padrão: vídeo original + áudio dublado (só créditos do ElevenLabs). `lipsync=True`: a boca acompanha o
+    novo idioma (Sync no fal, ~US$ 0,08/s) — para momentos especiais, por ser caro."""
+    pasta.mkdir(parents=True, exist_ok=True)
+    if not lipsync:
+        audio = dublar_audio(video, idioma, pasta)
+        destino = pasta / f"dublado-{idioma}.mp4"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-i", str(audio), "-map", "0:v",
+                        "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+                        "-movflags", "+faststart", str(destino)], check=True)
+        return destino
     sys.path.insert(0, str(RAIZ / "functions"))
     sys.path.insert(0, str(Path(__file__).parent))
     import urllib.request
@@ -442,7 +453,7 @@ def dublar(video: Path, idioma: str, pasta: Path, *, task_id: str | None, aprova
                       segundos=dur, task_id=task_id, aprovado=aprovado, pendente=pasta / f"sync-{idioma}.job")
         urllib.request.urlretrieve(r["urls"][0], sinc)
         print(f"lip-sync: US$ {r['custo_real_usd']:.2f}")
-    return devolver_exceto_boca(base, sinc, audio, pasta / f"dublado-{idioma}.mp4", pasta)
+    return devolver_exceto_boca(base, sinc, audio, pasta / f"dublado-{idioma}-lipsync.mp4", pasta)
 
 
 # ---------------------------------------------------------------- 4. reframe 16:9 → 9:16 seguindo o rosto
@@ -508,7 +519,7 @@ def main():
         print(reframe(Path(sys.argv[2]), Path(sys.argv[3])))
     if cmd == "dublar":
         print(dublar(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), task_id=opc("--task"),
-                     aprovado=float(opc("--aprovado-ate", 0))))
+                     aprovado=float(opc("--aprovado-ate", 0)), lipsync="--lipsync" in sys.argv))
 
 
 if __name__ == "__main__":
