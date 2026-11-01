@@ -80,6 +80,21 @@ npm test                                               # testes do kit e do lint
 - Requisitos: a venv da tutorial-sistema (`preparar.py` → PY) com `faster-whisper` (`PY -m pip install
   faster-whisper==1.1.1`); modelo em `GASPAR_WHISPER_MODELO` (padrão `small`; `medium` é mais exato).
 
+## Estilo "apresentador + painel" (sobreposição)
+
+Técnicas do vídeo de referência do André (01/11/2026), todas compostas sobre a gravação (rosto intacto):
+- **Apresentador em cartão:** `"layout": "dividido"` em qualquer cena da sobreposição. A gravação encolhe
+  para um cartão arredondado na metade de baixo (focado no rosto; ajuste com `"foco": 0.34` = fração da
+  altura onde começa o recorte) e o painel da cena ocupa a parte de cima (`imagem` preenche o painel; listas,
+  números, fluxos cabem em tamanho compacto). Volta à tela cheia no fim da cena.
+- **Título atrás da pessoa:** `{"tipo": "titulo_atras", "etiqueta": "...", "titulo": "2.0"}`. O montador recorta a
+  pessoa (HyperFrames `remove-background`, ~8 min de CPU por 20 s, com cache) e põe o texto entre o fundo e
+  ela, numa linha só (encolhe para caber).
+- **Chamada final:** `{"tipo": "chamada", "titulo": "...", "botao": "Saiba mais"}` — desfoca e escurece a cena,
+  botão pulsando. Comece cedo o bastante para caber o tempo de leitura (o gate avisa antes do render).
+- Exemplo: `exemplos/estilo-apresentador.json` (título atrás → painel com ilustração → lista →
+  chamada).
+
 ## Som e cor (Fase 3)
 
 Depois do render, o `pos.mjs` (chamado pelo montador) faz no FFmpeg:

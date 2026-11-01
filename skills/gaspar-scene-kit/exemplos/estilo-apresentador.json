@@ -1,0 +1,14 @@
+{
+  "titulo": "Gaspar Video - estilo referencia (teste)",
+  "formato": "vertical",
+  "gravacao": "SUA-GRAVACAO.mp4",
+  "legenda_estilo": "palavra",
+  "legendas_revisadas": true,
+  "chaves": ["Claude", "André", "Gaspar"],
+  "cenas": [
+    {"tipo": "titulo_atras", "etiqueta": "Teste do", "titulo": "Vídeo 2.0", "inicio": 1.6, "duracao": 3.6},
+    {"tipo": "imagem", "layout": "dividido", "imagem": "SUA-ILUSTRACAO.png", "legenda_tela": "Novos recursos de vídeo", "quando": "novos recursos", "duracao": 3.4},
+    {"tipo": "topicos", "layout": "dividido", "titulo": "O que eu quero", "itens": ["Animações legais", "Interessantes", "Engajadoras"], "quando": "colocar animações", "duracao": 4.4},
+    {"tipo": "chamada", "titulo": "Curtiu o novo formato?", "botao": "Saiba mais", "inicio": 17.9, "duracao": 4.3}
+  ]
+}

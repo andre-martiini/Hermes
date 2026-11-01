@@ -45,6 +45,9 @@
     MaskReveal: { revela: "enter" },
     Wipe: { transicao: "enter" },
     Captions: { ativa: "emphasis", solta: "settle" },
+    TitleBehind: { entra: "enter", assenta: "settle" },
+    CallToAction: { desfoca: "enter", botao: "emphasis" },
+    Apresentador: { encolhe: "enter", volta: "settle" },
   };
 
   // Marcadores de SFX: {t, evento}. A Fase 3 mapeia evento → som (sfx-map).
@@ -165,6 +168,27 @@
       }
     },
 
+    TitleBehind(tl, sec, c) {
+      const g = sec.querySelector(".gigante");
+      tl.fromTo(g, { opacity: 0, y: 120, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: T.entrada * 1.4, ease: EASE.enter }, c.t0 + 0.1);
+      tl.to(g, { scale: 1.04, duration: Math.max(1, c.fim - c.t0 - 1), ease: EASE.settle }, c.t0 + 0.1 + T.entrada * 1.4);
+      entra(tl, $(sec, ".etiqueta"), c.t0 + 0.25, { dy: 30 });
+      marca(c.t0 + 0.1, "Title.enter", "enter", T.entrada * 1.4);
+    },
+
+    CallToAction(tl, sec, c) {
+      const fundo = ["#gravacao", "#pessoa"].map((s) => document.querySelector(s)).filter(Boolean);
+      if (fundo.length) {
+        tl.fromTo(fundo, { filter: "blur(0px)" }, { filter: "blur(16px)", duration: T.entrada * 1.5, ease: EASE.enter }, c.t0);
+      }
+      tl.fromTo(sec.querySelector(".veu"), { opacity: 0 }, { opacity: 1, duration: T.entrada * 1.5, ease: EASE.enter }, c.t0);
+      entra(tl, $(sec, ".titulo"), c.t0 + 0.3);
+      const b = sec.querySelector(".botao");
+      tl.fromTo(b, { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: T.entrada, ease: EASE.emphasis }, c.t0 + 0.5);
+      tl.to(b, { scale: 1.06, duration: 0.45, ease: EASE.emphasis, yoyo: true, repeat: Math.max(1, Math.floor((c.fim - c.t0 - 1.2) / 0.45)) }, c.t0 + 1.0);
+      marca(c.t0 + 0.5, "Compare.reveal", "emphasis");
+    },
+
     // Texto revelado por retângulo (clip-path), da esquerda para a direita.
     MaskReveal(tl, sec, c) {
       $(sec, ".revela").forEach((el, i) => {
@@ -181,6 +205,22 @@
     if (proxima && proxima.transicao === "wipe") return;
     tl.to(sec, { opacity: 0, duration: T.saida, ease: EASE.exit }, c.fim - T.saida);
   }
+  // Layout "dividido": a gravação (e o recorte da pessoa, se houver) encolhe para um cartão arredondado na
+  // metade de baixo, focado no rosto; a parte de cima fica para o painel da cena. Volta à tela cheia no fim.
+  function apresentador(tl, c) {
+    const alvos = ["#gravacao", "#pessoa"].map((s) => document.querySelector(s)).filter(Boolean);
+    if (!alvos.length) return;
+    const W = innerWidth, H = innerHeight, vertical = H > W;
+    const card = vertical ? { x: 40, y: 0.46 * H, w: W - 80, h: 0.34 * H } : { x: 0.55 * W, y: 0.12 * H, w: 0.4 * W, h: 0.62 * H };
+    const s = card.w / W, sh = card.h / s, sy = Math.min((c.foco ?? 0.34) * H, H - sh), R = 36;
+    const cheio = { clipPath: "inset(0px 0px 0px 0px round 0px)", x: 0, y: 0, scale: 1 };
+    const cartao = { clipPath: `inset(${sy}px 0px ${H - sy - sh}px 0px round ${R / s}px)`, x: card.x, y: card.y - sy * s, scale: s };
+    tl.set(alvos, { transformOrigin: "0 0" }, 0);
+    tl.fromTo(alvos, cheio, { ...cartao, duration: 0.7, ease: EASE.enter }, c.t0);
+    tl.fromTo(alvos, cartao, { ...cheio, duration: 0.6, ease: EASE.settle, immediateRender: false }, c.fim - 0.6);
+    marca(c.t0, "Wipe.transition", "enter", 0.7);
+  }
+
   function wipeEntra(tl, sec, c) {
     tl.fromTo(sec, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: T.entrada, ease: EASE.enter }, c.t0);
     marca(c.t0, "Wipe.transition");
@@ -196,6 +236,7 @@
       const anima = P[c.primitiva];
       if (!anima) throw new Error("Primitiva fora do kit: " + c.primitiva);
       if (c.transicao === "wipe" && i > 0) wipeEntra(tl, sec, c);
+      if (c.layout === "dividido") apresentador(tl, c);
       anima(tl, sec, c);
       // Na sobreposição todo cartão sai (a gravação continua por baixo); no motion, a última cena fica.
       if (i < cenas.length - 1 || dados.sobre) transicao(tl, sec, c, dados.sobre ? null : cenas[i + 1]);

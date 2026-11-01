@@ -96,13 +96,13 @@ export function checkLegendas(roteiro, voz) {
 const probe = (arq, sel) => +execFileSync("ffprobe", ["-v", "error", "-select_streams", sel, "-show_entries", "stream=duration",
   "-of", "csv=p=0", arq]).toString().trim();
 
-export function checkDuracao(mp4, cenas) {
-  const erros = [];
+// Antes do render: nenhuma cena abaixo do tempo de leitura (na sobreposição, o fim da gravação pode cortá-la).
+export const checkLeitura = (cenas) => cenas.filter((c) => c.fim - c.t0 < c.minimo - 0.01).map((c) =>
+  falha("tempo-de-leitura", `cena ${c.i + 1}: ${(c.fim - c.t0).toFixed(2)} s < ${c.minimo} s (comece antes ou encurte o texto)`));
+
+export function checkDuracao(mp4) {
   const v = probe(mp4, "v:0"), a = probe(mp4, "a:0");
-  if (Math.abs(v - a) > REGRAS.difDuracaoS) erros.push(falha("duracao-audio", `vídeo ${v.toFixed(2)} s × áudio ${a.toFixed(2)} s`));
-  cenas.filter((c) => c.fim - c.t0 < c.minimo - 0.01).forEach((c) =>
-    erros.push(falha("tempo-de-leitura", `cena ${c.i + 1}: ${(c.fim - c.t0).toFixed(2)} s < ${c.minimo} s`)));
-  return erros;
+  return Math.abs(v - a) > REGRAS.difDuracaoS ? [falha("duracao-audio", `vídeo ${v.toFixed(2)} s × áudio ${a.toFixed(2)} s`)] : [];
 }
 
 export function checkAudio(mp4) {

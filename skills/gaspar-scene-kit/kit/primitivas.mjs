@@ -70,6 +70,23 @@ export const TIPOS = {
     texto: (c) => [c.legenda_tela],
     itens: () => 2,
   },
+  // Texto gigante ATRÁS da pessoa (sobreposição): fica entre a gravação e o recorte dela.
+  titulo_atras: {
+    primitiva: "TitleBehind",
+    html: (c) => (c.etiqueta ? `<div class="etiqueta">${esc(c.etiqueta)}</div>` : "") +
+      `<div class="gigante" style="--chars: ${String(c.titulo).length}">${esc(c.titulo)}</div>` +
+      (c.subtitulo ? `<div class="etiqueta apagado">${esc(c.subtitulo)}</div>` : ""),
+    texto: (c) => [c.etiqueta, c.titulo, c.subtitulo],
+    itens: () => 1,
+  },
+  // Fechamento: a cena desfoca e escurece, entra o texto e um botão que pulsa.
+  chamada: {
+    primitiva: "CallToAction",
+    html: (c) => `<div class="veu"></div><div class="titulo">${esc(c.titulo)}</div>` +
+      `<div class="botao">${esc(c.botao || "Saiba mais")}</div>`,
+    texto: (c) => [c.titulo, c.botao],
+    itens: () => 2,
+  },
   frase: {
     primitiva: "MaskReveal",
     html: (c) => (c.etiqueta ? `<div class="etiqueta">${esc(c.etiqueta)}</div>` : "") +

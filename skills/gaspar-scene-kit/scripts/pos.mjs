@@ -13,7 +13,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SFX_MAP = JSON.parse(readFileSync(join(SKILL, "kit", "sfx-map.json"), "utf8"));
 const NIVEL = { sfx: -12, trilha: -9 }; // dB: SFX em relação à voz; trilha antes do ducking
-const ALVO = { I: -14, TP: -1.5, LRA: 11 };
+// TP mira em −2,0: o gate exige ≤ −1,5 e o loudnorm erra alguns décimos em gravação real com picos fortes.
+const ALVO = { I: -14, TP: -2.0, LRA: 11 };
 
 const ff = (args, opts = {}) => execFileSync("ffmpeg", ["-hide_banner", "-y", ...args], { maxBuffer: 1 << 28, ...opts });
 
