@@ -34,6 +34,10 @@
             "dia": {
                 "type": "integer",
                 "description": "Novo dia do mês (1 a 31) em que a renda é esperada ou a conta fixa vence. Não vale para transacao_avulsa, que tem data completa."
+            },
+            "futuros": {
+                "type": "boolean",
+                "description": "Só com dia numa obrigacao_fixa: muda também o dia da rubrica recorrente e das contas não pagas dos meses seguintes (\"este mês e os futuros\"). Padrão false: só este mês."
             }
         },
         "required": [

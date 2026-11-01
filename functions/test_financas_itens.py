@@ -98,6 +98,28 @@ class TestEditarExcluir(unittest.TestCase):
         self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": 32}))
         self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": "quinze"}))
 
+    def test_editar_dia_com_futuros_muda_rubrica_e_meses_seguintes_nao_pagos(self):
+        db = _db()
+        db.collection("bill_rubrics").docs["nat"] = {"description": "Natação", "dueDay": 1}
+        base = {"description": "Natação", "dueDay": 1, "rubricId": "nat", "year": 2026}
+        db.collection("fixed_bills").docs.update({
+            "n10": {**base, "month": 9}, "n11": {**base, "month": 10},
+            "n12": {**base, "month": 11}, "n12p": {**base, "month": 11, "isPaid": True},
+            "n09": {**base, "month": 8}})
+        r = financas_itens.editar(db, {"tipo": "obrigacao_fixa", "id": "n11", "dia": 5, "futuros": True})
+        self.assertEqual(r["futuros"]["contas_futuras_ajustadas"], 1)
+        fixas = db.collection("fixed_bills").docs
+        self.assertEqual(db.collection("bill_rubrics").docs["nat"]["dueDay"], 5)
+        self.assertEqual([fixas[i]["dueDay"] for i in ("n11", "n12", "n12p", "n10", "n09")], [5, 5, 1, 1, 1])
+
+    def test_futuros_sem_rubrica_avisa_e_so_muda_o_mes(self):
+        r = financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "dia": 15, "futuros": True})
+        self.assertIn("aviso", r["futuros"])
+
+    def test_futuros_so_vale_para_dia_de_conta_fixa(self):
+        self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "renda", "id": "dez", "dia": 8, "futuros": True}))
+        self.assertIn("erro", financas_itens.editar(_db(), {"tipo": "obrigacao_fixa", "id": "luz", "valor": 9, "futuros": True}))
+
     def test_editar_dia_de_transacao_avulsa_da_erro(self):
         db = _Db({"finance_transactions": {"compra": {"description": "Compra", "amount": 10, "status": "active"}}})
         r = financas_itens.editar(db, {"tipo": "transacao_avulsa", "id": "compra", "dia": 10})
