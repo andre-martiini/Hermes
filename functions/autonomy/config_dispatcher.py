@@ -91,3 +91,31 @@ def consumir_orcamento(db: Any, quantidade: int = 1) -> int:
         return _exec(tx)
     except Exception:
         return 0
+
+
+def devolver_orcamento(db: Any, quantidade: int = 1) -> int:
+    """Estorna `quantidade` baixada por `consumir_orcamento` cujo despacho NÃO ocorreu
+    (enfileirador falhou ou recusou por duplicata). Transacional, só em `ativo`; devolve quanto
+    foi estornado ou 0 (fail-closed: na dúvida não estorna, o orçamento fica gasto)."""
+    if type(quantidade) is not int or quantidade < 1:
+        return 0
+    try:
+        if not hasattr(db, "transaction"):
+            return 0
+        ref = db.collection(COLECAO_CONFIG).document(DOC_DISPATCHER)
+        tx = db.transaction()
+
+        @firestore.transactional
+        def _exec(transaction):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return 0
+            cfg = interpretar_config(snap.to_dict())
+            if cfg.modo is not ModoDispatcher.ATIVO or cfg.despachos_restantes is None:
+                return 0
+            transaction.update(ref, {"despachos_restantes": cfg.despachos_restantes + quantidade})
+            return quantidade
+
+        return _exec(tx)
+    except Exception:
+        return 0
