@@ -716,9 +716,9 @@ decisoes:
     motivo: "Fora de escopo: dependência google-cloud-tasks no requirements, criação do cliente real, fila/IAM, agendamento do ciclo, worker HTTP. ALREADY_EXISTS de nome recém-executado (reservado ~1h) é coberto pelo nome incluir tentativa e geração."
 testes:
   resultados:
-    - "functions/ completo ANTES 5174 OK (diário, P08 sub 19); DEPOIS 5204 OK (216s; 6 testes novos em test_autonomy_enfileirador_cloud_tasks). A diferença para o diário (5174) vem de testes de outras PRs já em main (5198 antes desta); a suíte rodou antes do último endurecimento (url_worker exige host), que foi revalidado rodando o arquivo de teste isolado."
+    - "functions/ completo ANTES 5174 OK (diário, P08 sub 19); DEPOIS 5205 OK (216s; 7 testes novos em test_autonomy_enfileirador_cloud_tasks). A diferença para o diário (5174) vem de testes de outras PRs já em main (5198 antes desta)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 1 bug real (regex com $ aceitava \\n final no nome) e validação frouxa de espaços na config; corrigidos (fullmatch, sem whitespace) com testes. Rodada 2 (focada na correção): não achei bug; endurecimento aceito (url_worker exige host). Não verificado contra Cloud Tasks real."
+  - "Rodada 1 (agente sem contexto, somente leitura): 1 bug real (regex com $ aceitava \\n final no nome) e validação frouxa de espaços na config; corrigidos (fullmatch, sem whitespace) com testes. Rodada 2 (focada na correção): não achei bug; endurecimento aceito (url_worker exige host). Codex na PR #598: 1 achado P2 real (request_id com espaço interno, aceito pelo repositório, era rejeitado e drenava orçamento); agora valida com _validar_id_documento do repositório; teste cobre. Rodada 3 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Cloud Tasks real."
 pendencias:
   - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM, agendar o ciclo, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
 ```

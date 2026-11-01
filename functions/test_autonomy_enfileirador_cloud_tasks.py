@@ -38,6 +38,12 @@ class TestEnfileirador(unittest.TestCase):
         self.assertEqual(h["oidc_token"]["service_account_email"], CFG.service_account_email)
         self.assertEqual(json.loads(h["body"]), {"request_id": "r1"})
 
+    def test_request_id_com_espaco_interno_vale(self):
+        cli = _Cli()
+        criar_enfileirador(cli, CFG)("n1", {"request_id": "pedido do cliente 1"})
+        self.assertEqual(json.loads(cli.chamadas[0]["task"]["http_request"]["body"]),
+                         {"request_id": "pedido do cliente 1"})
+
     def test_duplicata_vira_ja_despachado(self):
         with self.assertRaises(JaDespachado):
             criar_enfileirador(_Cli(AlreadyExists()), CFG)("n1", {"request_id": "r"})
@@ -51,7 +57,7 @@ class TestEnfileirador(unittest.TestCase):
         enf = criar_enfileirador(cli, CFG)
         for nome, p in (("a/b", {"request_id": "r"}), ("", {"request_id": "r"}), ("ok", {}),
                         ("ok\n", {"request_id": "r"}), ("ok", {"request_id": "r\n"}),
-                        ("ok", {"request_id": "r", "x": "y"}), ("ok", {"request_id": " "}), (1, {"request_id": "r"})):
+                        ("ok", {"request_id": "r", "x": "y"}), ("ok", {"request_id": " "}), ("ok", {"request_id": "a/b"}), (1, {"request_id": "r"})):
             with self.assertRaises(ValueError):
                 enf(nome, p)
         self.assertEqual(cli.chamadas, [])

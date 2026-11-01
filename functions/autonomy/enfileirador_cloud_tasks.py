@@ -24,6 +24,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from autonomy.ciclo_dispatcher import JaDespachado
+from autonomy.pedido_repositorio import _validar_id_documento
 
 _NOME_VALIDO = re.compile(r"^[A-Za-z0-9_-]{1,500}$")
 
@@ -67,10 +68,10 @@ def criar_enfileirador(cliente: Any, config: ConfigCloudTasks) -> Callable[[str,
     def enfileirar(nome: str, payload: dict[str, str]) -> None:
         if not isinstance(nome, str) or not _NOME_VALIDO.fullmatch(nome):
             raise ValueError("nome de tarefa inválido.")
-        if not isinstance(payload, dict) or set(payload) != {"request_id"} or not _texto(
-            payload["request_id"]
-        ):
+        if not isinstance(payload, dict) or set(payload) != {"request_id"}:
             raise ValueError("payload deve ter somente request_id.")
+        # Mesma regra do repositório: todo pedido persistido é enfileirável (corpo JSON escapa o resto).
+        _validar_id_documento(payload["request_id"], "request_id")
         tarefa = {
             "name": f"{pai}/tasks/{nome}",
             "http_request": {
