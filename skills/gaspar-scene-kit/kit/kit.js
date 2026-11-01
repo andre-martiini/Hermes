@@ -184,9 +184,11 @@
       tl.fromTo(sec.querySelector(".veu"), { opacity: 0 }, { opacity: 1, duration: T.entrada * 1.5, ease: EASE.enter }, c.t0);
       entra(tl, $(sec, ".titulo"), c.t0 + 0.3);
       const b = sec.querySelector(".botao");
-      tl.fromTo(b, { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: T.entrada, ease: EASE.emphasis }, c.t0 + 0.5);
-      tl.to(b, { scale: 1.06, duration: 0.45, ease: EASE.emphasis, yoyo: true, repeat: Math.max(1, Math.floor((c.fim - c.t0 - 1.2) / 0.45)) }, c.t0 + 1.0);
-      marca(c.t0 + 0.5, "Compare.reveal", "emphasis");
+      if (b) {
+        tl.fromTo(b, { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: T.entrada, ease: EASE.emphasis }, c.t0 + 0.5);
+        tl.to(b, { scale: 1.06, duration: 0.45, ease: EASE.emphasis, yoyo: true, repeat: Math.max(1, Math.floor((c.fim - c.t0 - 1.2) / 0.45)) }, c.t0 + 1.0);
+        marca(c.t0 + 0.5, "Compare.reveal", "emphasis");
+      }
     },
 
     // Texto revelado por retângulo (clip-path), da esquerda para a direita.
@@ -211,8 +213,10 @@
     const alvos = ["#gravacao", "#pessoa"].map((s) => document.querySelector(s)).filter(Boolean);
     if (!alvos.length) return;
     const W = innerWidth, H = innerHeight, vertical = H > W;
-    const card = vertical ? { x: 40, y: 0.46 * H, w: W - 80, h: 0.34 * H } : { x: 0.55 * W, y: 0.12 * H, w: 0.4 * W, h: 0.62 * H };
-    const s = card.w / W, sh = card.h / s, sy = Math.min((c.foco ?? 0.34) * H, H - sh), R = 36;
+    // Retrato: o quadro inteiro reduzido (`escala`, padrão 0,6), com um recorte leve em cima/embaixo (`foco` =
+    // fração cortada no topo, padrão 0,06), encaixado na metade de baixo. 16:9: cartão à direita.
+    const s = c.escala ?? (vertical ? 0.6 : 0.42), sy = (c.foco ?? 0.06) * H, sh = H * (vertical ? 0.84 : 0.9), R = 40;
+    const card = vertical ? { x: (W - W * s) / 2, y: 0.42 * H } : { x: 0.55 * W, y: 0.06 * H };
     const cheio = { clipPath: "inset(0px 0px 0px 0px round 0px)", x: 0, y: 0, scale: 1 };
     const cartao = { clipPath: `inset(${sy}px 0px ${H - sy - sh}px 0px round ${R / s}px)`, x: card.x, y: card.y - sy * s, scale: s };
     tl.set(alvos, { transformOrigin: "0 0" }, 0);

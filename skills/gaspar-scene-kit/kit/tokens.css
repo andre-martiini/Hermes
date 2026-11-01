@@ -93,16 +93,19 @@ html[data-modo="sobreposicao"] .cena.sobre .selo { width: 64px; height: 64px; }
 html[data-modo="sobreposicao"] .cena.sobre .conector { height: 14px; margin-left: 58px; }
 
 /* Apresentador em cartão (layout "dividido"): o painel da cena ocupa a parte de cima. */
-html[data-modo="sobreposicao"] .cena.dividida { padding: 15vh 70px 56vh; justify-content: center; gap: 28px; }
-html[data-modo="sobreposicao"] .cena.dividida .imagem-cheia { inset: 0 0 54% 0; }
+html[data-modo="sobreposicao"] .cena.dividida { padding: 15vh 70px 59vh; justify-content: center; gap: 28px; }
+html[data-modo="sobreposicao"] .cena.dividida .imagem-cheia { inset: 0 0 58% 0; }
 html[data-modo="sobreposicao"] #gravacao, html[data-modo="sobreposicao"] #pessoa {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 html[data-modo="sobreposicao"] #pessoa { pointer-events: none; }
 
 /* Título gigante atrás da pessoa: fica entre a gravação e o recorte dela. */
-html[data-modo="sobreposicao"] .cena.atras { padding: 15vh 50px 0; justify-content: flex-start; align-items: center; gap: 8px; text-align: center; }
-/* Uma linha só, larga o bastante para aparecer dos dois lados da cabeça. */
-.gigante { white-space: nowrap; font-size: min(calc(var(--tam-numero) * 1.6), calc(980px / var(--chars, 1) / 0.66)); font-weight: 900; line-height: 0.95; letter-spacing: -0.04em;
+/* O bloco se apoia no topo da cabeça (--topo): só ~1/3 de baixo das letras fica atrás dela. */
+html[data-modo="sobreposicao"] .cena.atras { padding: 0; }
+.cena.atras .bloco { position: absolute; left: 50px; right: 50px; text-align: center;
+  --tg: min(calc(var(--tam-numero) * 1.6), calc(980px / var(--chars, 1) / 0.66));
+  bottom: calc(100vh - var(--topo) - var(--tg) * 0.32); }
+.gigante { white-space: nowrap; font-size: var(--tg, calc(var(--tam-numero) * 1.6)); font-weight: 900; line-height: 0.95; letter-spacing: -0.04em;
   color: var(--accent); text-transform: uppercase; text-shadow: var(--sombra); }
 
 /* Chamada final: véu escuro sobre a cena desfocada, botão no centro. */
@@ -114,4 +117,4 @@ html[data-modo="sobreposicao"] .cena.cta { align-items: center; justify-content:
 html[data-modo="sobreposicao"] .cena.dividida { --tam-titulo: 60px; --tam-numero: 120px; --largura-util: 940px; }
 html[data-modo="sobreposicao"] .cena.dividida .caixa { padding: 22px 28px; gap: 22px; }
 html[data-modo="sobreposicao"] .cena.dividida .selo { width: 64px; height: 64px; }
-html[data-modo="sobreposicao"] .cena.dividida .legenda-tela { bottom: auto; top: 37%; }
+html[data-modo="sobreposicao"] .cena.dividida .legenda-tela { bottom: auto; top: 34%; }

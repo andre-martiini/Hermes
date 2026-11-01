@@ -60,6 +60,16 @@ export function achar(frase, legendas) {
 const itensDaCena = (c) => c.itens?.map((i) => (Array.isArray(i) ? i[0] : i)) || c.etapas || c.linhas || null;
 
 // Sobreposição: cada cartão entra quando a fala diz `quando` (ou em `inicio` s) e fica `duracao` (≥ leitura).
+// Topo da cabeça (px em 1920) no recorte da pessoa, no instante t: 1ª linha com alfa no terço central.
+export function topoCabeca(webm, t) {
+  const env = { ...process.env, PATH: pathComFfmpeg() };
+  const bruto = execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-c:v", "libvpx-vp9", "-ss", String(t), "-i", webm,
+    "-frames:v", "1", "-vf", "alphaextract,scale=108:192", "-f", "rawvideo", "-pix_fmt", "gray", "-"], { env, maxBuffer: 1 << 20 });
+  for (let y = 0; y < 192; y++)
+    for (let x = 36; x < 72; x++) if (bruto[y * 108 + x] > 128) return y * 10;
+  return null;
+}
+
 function planejarSobre(roteiro, voz) {
   const avisos = [];
   const cenas = roteiro.cenas.map((c, i) => {
@@ -72,7 +82,8 @@ function planejarSobre(roteiro, voz) {
     const depois = voz.legendas.filter((tk) => tk.startMs / 1000 >= t0);
     const itens = itensDaCena(c);
     const em = itens && !c.em ? itens.map((it) => { const e = deixa(it, depois, 0); return e == null ? null : +(e - t0).toFixed(3); }) : c.em;
-    return { ...c, i, t0: +t0.toFixed(3), fim: +fim.toFixed(3), minimo, em: em?.some((e) => e != null) ? em : undefined };
+    const topo_cabeca = c.tipo === "titulo_atras" && voz.pessoa ? topoCabeca(voz.pessoa, t0 + 0.5) : undefined;
+    return { ...c, i, t0: +t0.toFixed(3), fim: +fim.toFixed(3), minimo, em: em?.some((e) => e != null) ? em : undefined, topo_cabeca };
   });
   cenas.forEach((c, i) => cenas[i + 1] && cenas[i + 1].t0 < c.fim && avisos.push(`cartões ${i + 1} e ${i + 2} se sobrepõem`));
   return Object.assign(cenas, { avisos });
@@ -159,7 +170,7 @@ export function gerarHtml(roteiro, formato, imagens = {}, voz = null) {
     cenas: cenas.map((c, i) => ({
       primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor,
       prefixo: c.prefixo, sufixo: c.sufixo, casas: c.casas, transicao: c.transicao, primeira: i === 0 && !sobre,
-      layout: c.layout, foco: c.foco,
+      layout: c.layout, foco: c.foco, escala: c.escala,
     })),
     sobre,
     legendas: leg.dados,
