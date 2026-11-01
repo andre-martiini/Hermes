@@ -1621,7 +1621,9 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         idempotencia=_I.NAO_IDEMPOTENTE,
         nota="Irreversível pelo gasto de IA no Live Ideas (o diagrama em si vai para a lixeira com "
         "liveideas_apagar). Não idempotente: cada chamada cria uma geração nova no notebook e um pedido "
-        "novo em liveideas_pedidos (ID automático).",
+        "novo em liveideas_pedidos (ID automático). Com acao_id (só mapa) lê a ação do Gaspar e manda título, "
+        "descrição, notas, etapas e diário ao Live Ideas, que monta o grafo por código, sem IA: repetir a "
+        "chamada devolve o mapa que já existe (repetido) e só refazer=true cria outro.",
     ),
     "liveideas_consultar": ToolInventoryEntry(
         "liveideas", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
