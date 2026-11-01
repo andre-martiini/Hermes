@@ -1623,7 +1623,8 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "liveideas_apagar). Não idempotente: cada chamada cria uma geração nova no notebook e um pedido "
         "novo em liveideas_pedidos (ID automático). Com acao_id (só mapa) lê a ação do Gaspar e manda título, "
         "descrição, notas, etapas e diário ao Live Ideas, que monta o grafo por código, sem IA: repetir a "
-        "chamada devolve o mapa que já existe (repetido) e só refazer=true cria outro.",
+        "chamada devolve o mapa que já existe (repetido) e só refazer=true cria outro. agrupar_concluidas=true "
+        "(só com acao_id) pede o grafo com as etapas concluídas num único nó.",
     ),
     "liveideas_consultar": ToolInventoryEntry(
         "liveideas", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
