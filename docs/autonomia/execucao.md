@@ -655,29 +655,6 @@ pacote_concluido: P07
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 17/N -- configuração persistida do dispatcher (autonomy/config_dispatcher.py, passos 3 e 11, flag do modo e orçamento de despachos): ler_config_dispatcher(db) lê configuracoes/autonomia_dispatcher (modo off|shadow|ativo, despachos_restantes) e devolve ConfigDispatcher para decidir_lote. Fail-closed: documento ausente, erro de leitura, modo desconhecido ou orçamento ausente/inválido (bool, float, str, negativo) = OFF/sem orçamento; shadow nunca carrega orçamento. Só leitura; consumir orçamento e agendar ficam para depois. Nada chama o módulo em produção (shadow/off)."
-estado: validado
-inicio: "2026-10-31T13:45:00Z"
-fim: "2026-10-31T14:05:00Z"
-decisoes:
-  - id: p08-sub17-triagem
-    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
-  - id: p08-sub17-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P08 sub 14 arquivado em execucao-archive-p08sub14.md."
-  - id: p08-sub17-escopo
-    motivo: "Fora de escopo: transação de consumo do orçamento, agendamento do dispatcher, Cloud Tasks real, worker HTTP."
-testes:
-  resultados:
-    - "functions/ completo ANTES 5140 OK (main); DEPOIS 5147 OK (183s; 7 testes novos em test_autonomy_config_dispatcher)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observação para o wiring: proteger decidir_lote com try (item que não seja PedidoDuravel levanta TypeError). Codex na PR #579: 1 achado P2 real (ATIVO com orçamento inválido devolvia modo ATIVO, contra o contrato fail-closed); agora devolve OFF; teste assertando o modo. Rodada 2 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore real."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, consumo transacional do orçamento, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
-```
-
----
-
-```yaml
 pacote: "P08 sub-entrega 18/N -- consumo transacional do orçamento do dispatcher (autonomy/config_dispatcher.py, passo 11): consumir_orcamento(db, quantidade=1) baixa despachos_restantes de configuracoes/autonomia_dispatcher numa transação (@firestore.transactional, leitura e update na mesma transação), tudo ou nada, só em modo ativo, nunca abaixo de zero; devolve a quantidade concedida ou 0. Fail-closed: quantidade inválida (bool, não int, <1), backend sem transação, documento ausente/inválido, saldo insuficiente ou qualquer erro do Firestore = 0 sem conceder. Chamar ANTES de enfileirar. Nada chama o módulo em produção (shadow/off)."
 estado: validado
 inicio: "2026-10-31T16:47:00Z"
@@ -721,4 +698,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 4 achados reais -- vazamento de orçamento por redespacho, falha do enfileirador gastando orçamento, bloqueio de cabeça de fila (limite sem paginação), exceção da consulta escapando; corrigidos (estorno em duplicata, paginação por cursor, consulta em try, agora não-datetime = ValueError). Rodada 2 (focada na correção): nenhum bug; 2 riscos baixos: estorno em falha ambígua (corrigido: não estorna) e estorno que falha sem observabilidade (aceito, fail-closed). Codex na PR #587: 1 achado P1 real (snapshot do saldo em decidir_lote consumia a vaga de uma duplicata estornada e deixava candidatos seguintes sem despacho, fome por ids baixos); agora o teto de decidir_lote é len(pedidos) e a baixa transacional impõe o limite; teste cobre. Rodada 3 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore/Cloud Tasks reais."
 pendencias:
   - "P08: wiring (agendar o ciclo, enfileirador Cloud Tasks real tratando ALREADY_EXISTS como JaDespachado, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 20/N -- enfileirador Cloud Tasks do dispatcher (autonomy/enfileirador_cloud_tasks.py, passos 2 e 3): criar_enfileirador(cliente, ConfigCloudTasks) devolve o enfileirar(nome, payload) de executar_ciclo. Cliente injetado (sem import nem criação de cliente). Monta tarefa HTTP POST com corpo JSON só com request_id e token OIDC (service account + audience = URL do worker, como worker_auth exige); nome completo projects/.../queues/.../tasks/<nome> dá idempotência; AlreadyExists vira JaDespachado; outras falhas propagam. Fail-closed: config, nome ou payload inválidos = ValueError sem enviar. Nada chama o módulo em produção (shadow/off)."
+estado: validado
+inicio: "2026-11-01T13:45:00Z"
+fim: "2026-11-01T14:20:00Z"
+decisoes:
+  - id: p08-sub20-triagem
+    motivo: "PRs abertas #595, #594, #593, #591, #590 (vídeo), #585 e #561 (melhorias) são de outra linha: nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
+  - id: p08-sub20-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 17 arquivado em execucao-archive-p08sub17.md."
+  - id: p08-sub20-escopo
+    motivo: "Fora de escopo: dependência google-cloud-tasks no requirements, criação do cliente real, fila/IAM, agendamento do ciclo, worker HTTP. ALREADY_EXISTS de nome recém-executado (reservado ~1h) é coberto pelo nome incluir tentativa e geração."
+testes:
+  resultados:
+    - "functions/ completo ANTES 5174 OK (diário, P08 sub 19); DEPOIS 5204 OK (216s; 6 testes novos em test_autonomy_enfileirador_cloud_tasks). A diferença para o diário (5174) vem de testes de outras PRs já em main (5198 antes desta); a suíte rodou antes do último endurecimento (url_worker exige host), que foi revalidado rodando o arquivo de teste isolado."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): 1 bug real (regex com $ aceitava \\n final no nome) e validação frouxa de espaços na config; corrigidos (fullmatch, sem whitespace) com testes. Rodada 2 (focada na correção): não achei bug; endurecimento aceito (url_worker exige host). Não verificado contra Cloud Tasks real."
+pendencias:
+  - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM, agendar o ciclo, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
 ```
