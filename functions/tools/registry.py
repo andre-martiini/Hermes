@@ -214,7 +214,7 @@ _CATALOG: dict[str, str] = {
     "encerrar_objetivo_whatsapp": "Encerra um objetivo de WhatsApp e descarta o rascunho pendente",
     "decidir_objetivo_whatsapp": "Modo Objetivo conduzido pelo agente residente: aplica a decisão dele (responder, aguardar, pedir ao dono, concluir, travar) com as mesmas travas do Gemini",
     # Live Ideas (18/10/2026): processos BPMN, fluxos e mapas de ideias no notebook, pelo canal /gaspar.
-    "liveideas_gerar": "Pede ao Live Ideas um processo BPMN, fluxo ou mapa de ideias de um texto ou de uma reuniao gravada; acompanhe com liveideas_consultar",
+    "liveideas_gerar": "Pede ao Live Ideas um processo BPMN, fluxo ou mapa de ideias de um texto ou de uma reuniao gravada, ou o grafo de uma acao do Gaspar (acao_id, so mapa, sem IA); acompanhe com liveideas_consultar",
     "liveideas_consultar": "Estado de um pedido do Live Ideas (gerando, pronto ou falhou), com custo, texto, link e propostas de ajuste; anexa na acao uma vez so",
     "liveideas_listar": "Lista reunioes e processos do Live Ideas, mais recentes primeiro, com busca pelo titulo",
     "liveideas_ler": "Le uma reuniao ou processo do Live Ideas: titulo, texto do diagrama e link",

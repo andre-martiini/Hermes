@@ -13,6 +13,7 @@ consultas simultâneas não anexam duas vezes.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from firebase_admin import firestore
@@ -23,6 +24,8 @@ COLECAO = "liveideas_pedidos"
 ORIENTACAO = "consulte com liveideas_consultar em uns 30 segundos"
 _NAO_ENCONTRADO = "pedido não encontrado"
 _ROTULO = {"processo": "Processo", "fluxo": "Fluxo", "mapa": "Mapa de ideias"}
+DIARIO_MAX = 20  # entradas do diário que vão no grafo: o `obter_acao` mostra 20 por padrão e o Live Ideas usa só as 5 últimas
+_DATA_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _sem_vazios(dados: dict) -> dict:
@@ -55,21 +58,66 @@ def _criar_pedido(ctx, dados: dict) -> str:
     return ref.id
 
 
+def _acao_do_gaspar(ctx, acao_id: str) -> dict | None:
+    """A ação no formato do campo `acao` do Live Ideas, ou None se não existir.
+    Lê pelo `obter_acao` (etapa inteira, sem corte; diário do mais antigo ao mais novo); as datas são as de lá, em UTC."""
+    from tools import hermes_tools  # aqui dentro: o hermes_tools é quem carrega este módulo
+
+    a = hermes_tools.obter_acao(ctx, {"task_id": acao_id, "limite_diario": DIARIO_MAX})
+    if a.get("status") == "not_found":
+        return None
+    diario = []
+    for e in a["diario"]:
+        nota = str(e.get("nota") or "").strip()
+        if nota:
+            data = _DATA_ISO.match(e["data"])  # entrada sem data chega como "None"
+            diario.append({"texto": f"[{data[0]}] {nota}" if data else nota})
+    return {"id": a["id"], "titulo": a.get("titulo") or "", "descricao": a["descricao"], "notas": a["notas"],
+            "plano_acao": [{"texto": e["texto"], "estado": e["estado"]} for e in a["plano_acao"]],
+            "diario": diario}
+
+
+def _corpo_da_acao(ctx, args: dict, acao_id: str) -> tuple[dict | None, dict | None]:
+    """`(corpo do gerar, None)` ou `(None, {"erro": ...})`. Tudo que dá para recusar sem ler a ação vem antes."""
+    if "/" in acao_id:  # "/" mudaria o caminho no Firestore
+        return None, {"erro": "acao_id inválido: informe o id da ação do Gaspar, sem barra"}
+    if _sem_vazios({"texto": args.get("texto"), "reuniao_id": args.get("reuniao_id")}):
+        return None, {"erro": "com acao_id não informe texto nem reuniao_id: o grafo sai da própria ação"}
+    if args.get("tipo") != "mapa":
+        return None, {"erro": "acao_id só vale para tipo=mapa"}
+    acao = _acao_do_gaspar(ctx, acao_id)
+    if acao is None:
+        return None, {"erro": f"ação {acao_id!r} não encontrada no Gaspar"}
+    refazer = _incluir_transcricao(args.get("refazer")) or None  # só vai quando verdadeiro (aceita "true" como lá)
+    return _sem_vazios({"tipo": "mapa", "acao": acao, "titulo": args.get("titulo"), "refazer": refazer}), None
+
+
 def gerar(ctx, args: dict) -> dict:
     task_id = str(args.get("task_id") or "").strip() or None  # vazio ou só espaços: sem ação
-    if task_id and "/" in task_id:  # "/" mudaria o caminho no Firestore
-        return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
-    if task_id and not ctx.db.collection("tarefas").document(task_id).get().exists:
-        return {"erro": f"ação {task_id!r} não encontrada no Gaspar"}
-    resp, erro = _enviar(ctx, "gerar", _sem_vazios({
-        "tipo": args.get("tipo"), "texto": args.get("texto"),
-        "reuniao": args.get("reuniao_id"), "titulo": args.get("titulo")}))
+    acao_id = str(args.get("acao_id") or "").strip() or None
+    if acao_id:
+        corpo, erro = _corpo_da_acao(ctx, args, acao_id)
+        if erro:
+            return erro
+        task_id = acao_id  # o consultar anexa o link na própria ação
+    else:
+        if task_id and "/" in task_id:  # "/" mudaria o caminho no Firestore
+            return {"erro": "task_id inválido: informe o id da ação do Gaspar, sem barra"}
+        if task_id and not ctx.db.collection("tarefas").document(task_id).get().exists:
+            return {"erro": f"ação {task_id!r} não encontrada no Gaspar"}
+        corpo = _sem_vazios({"tipo": args.get("tipo"), "texto": args.get("texto"),
+                             "reuniao": args.get("reuniao_id"), "titulo": args.get("titulo")})
+    resp, erro = _enviar(ctx, "gerar", corpo)
     if erro:
         return erro
     tipo = resp.get("tipo") or args.get("tipo")
     pedido_id = _criar_pedido(ctx, {"tipo": tipo, "reuniao": resp.get("reuniao"), "processo": resp.get("processo"),
                                     "geracao": resp.get("geracao"), "task_id": task_id})
-    return {"pedido_id": pedido_id, "tipo": tipo, "estado": "gerando", "orientacao": ORIENTACAO}
+    saida = {"pedido_id": pedido_id, "tipo": tipo, "estado": "gerando", "orientacao": ORIENTACAO}
+    if resp.get("repetido"):  # o Live Ideas já tinha um mapa desta ação e devolveu esse
+        saida["repetido"] = True
+        saida["orientacao"] += "; já havia um mapa desta ação (para criar outro, chame de novo com refazer=true)"
+    return saida
 
 
 def ajustar(ctx, args: dict) -> dict:

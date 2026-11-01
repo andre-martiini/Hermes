@@ -1,6 +1,6 @@
 {
   "name": "liveideas_gerar",
-  "description": "Pede ao Live Ideas (no notebook) um processo BPMN, um fluxo ou um mapa de ideias, a partir de um texto da conversa ou de uma reunião já gravada. Responde na hora com um pedido_id e estado 'gerando'; acompanhe com liveideas_consultar (uns 30 s entre as chamadas) até 'pronto' ou 'falhou'. Com task_id, o resultado pronto é anotado no diário da ação (processo também anexa o .bpmn). Gasta IA do Live Ideas; o custo aparece no consultar.",
+  "description": "Pede ao Live Ideas (no notebook) um processo BPMN, um fluxo ou um mapa de ideias, a partir de um texto da conversa ou de uma reunião já gravada. Responde na hora com um pedido_id e estado 'gerando'; acompanhe com liveideas_consultar (uns 30 s entre as chamadas) até 'pronto' ou 'falhou'. Com task_id, o resultado pronto é anotado no diário da ação (processo também anexa o .bpmn). Gasta IA do Live Ideas; o custo aparece no consultar. Para o grafo de uma ação do Gaspar (tipo mapa), passe acao_id em vez de texto: o Gaspar lê a ação (título, descrição, notas, etapas e diário) e o Live Ideas monta o grafo por código, sem IA; o link vai para o diário da própria ação.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -15,11 +15,19 @@
       },
       "texto": {
         "type": "string",
-        "description": "Texto de onde gerar (as palavras do usuário ou o conteúdo da conversa). Informe este OU reuniao_id."
+        "description": "Texto de onde gerar (as palavras do usuário ou o conteúdo da conversa). Informe este OU reuniao_id OU acao_id."
       },
       "reuniao_id": {
         "type": "string",
-        "description": "Id de uma reunião já gravada no Live Ideas (de liveideas_listar), para gerar a partir da transcrição dela. Informe este OU texto."
+        "description": "Id de uma reunião já gravada no Live Ideas (de liveideas_listar), para gerar a partir da transcrição dela. Informe este OU texto OU acao_id."
+      },
+      "acao_id": {
+        "type": "string",
+        "description": "Id de uma ação do Gaspar (só com tipo=mapa), para gerar o grafo dela: título, descrição, notas, etapas e as últimas entradas do diário. Não informe texto nem reuniao_id junto. O link do grafo vai para o diário desta ação."
+      },
+      "refazer": {
+        "type": "boolean",
+        "description": "Padrão false. true (só com acao_id): cria outro grafo mesmo que a ação já tenha um. Sem isso, o Live Ideas devolve o que já existe (repetido=true)."
       },
       "titulo": {
         "type": "string",
@@ -27,7 +35,7 @@
       },
       "task_id": {
         "type": "string",
-        "description": "Opcional: ação do Gaspar onde anotar (e, para processo, anexar o .bpmn) quando ficar pronto."
+        "description": "Opcional: ação do Gaspar onde anotar (e, para processo, anexar o .bpmn) quando ficar pronto. Com acao_id não precisa: vale o acao_id."
       }
     },
     "required": [

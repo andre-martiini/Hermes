@@ -180,6 +180,119 @@ class GerarTest(Base):
         self.assertIn("erro", r)
         self.assertEqual(self.chamadas, [])
 
+    # `acao_id`: o Gaspar lê a ação e manda o grafo montado ao Live Ideas (o texto não passa pelo modelo).
+    TEXTO_LONGO = "Enviar o ofício ao fornecedor e conferir o prazo. " * 20
+
+    def setUp(self):
+        super().setUp()
+        self.db.docs[("tarefas", "a1")] = {
+            "titulo": "Renovar contrato", "descricao": "Contrato da empresa X vence em dezembro.",
+            "notas": "Falar com o jurídico.\n\nPedir três orçamentos.",
+            "plano_acao": [
+                {"id": "e1", "text": "Pedir a minuta ao jurídico", "completed": False},
+                {"id": "e2", "text": self.TEXTO_LONGO, "estado": "feito", "completed": True},
+                {"id": "e3", "text": "Esperar a resposta", "estado": "aguardando_terceiro", "aguardando_de": "Fornecedor"},
+            ],
+            "acompanhamento": [
+                {"data": "2026-10-30T12:00:00+00:00", "nota": "Liguei para o fornecedor."},
+                {"data": "2026-11-01T09:30:00+00:00", "nota": "Minuta recebida."},
+                {"nota": "Sem data."},
+            ],
+        }
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN})
+
+    def _gerar(self, **extra):
+        return hermes_tools.execute("liveideas_gerar", {"tipo": "mapa", "acao_id": "a1", **extra}, self.ctx)
+
+    def test_acao_id_monta_o_corpo_com_titulo_descricao_notas_plano_e_diario(self):
+        r = self._gerar(titulo="Grafo do contrato")
+        self.assertEqual((r["tipo"], r["estado"]), ("mapa", "gerando"))
+        self.assertEqual(len(self.chamadas), 1)
+        acao, corpo = self.chamadas[0]
+        self.assertEqual(acao, "gerar")
+        self.assertEqual(corpo["acao"], {
+            "id": "a1", "titulo": "Renovar contrato", "descricao": "Contrato da empresa X vence em dezembro.",
+            "notas": "Falar com o jurídico.\n\nPedir três orçamentos.",
+            "plano_acao": [{"texto": "Pedir a minuta ao jurídico", "estado": "pendente"},
+                           {"texto": self.TEXTO_LONGO.strip(), "estado": "feito"},
+                           {"texto": "Esperar a resposta", "estado": "aguardando_terceiro"}],
+            "diario": [{"texto": "[2026-10-30] Liguei para o fornecedor."},  # mais antiga primeiro
+                       {"texto": "[2026-11-01] Minuta recebida."},
+                       {"texto": "Sem data."}]})
+        self.assertEqual({k: v for k, v in corpo.items() if k != "acao"}, {"tipo": "mapa", "titulo": "Grafo do contrato"})
+
+    def test_etapa_concluida_vai_com_estado_feito_e_o_texto_inteiro_sem_corte(self):
+        self._gerar()
+        etapa = self.chamadas[0][1]["acao"]["plano_acao"][1]
+        self.assertEqual(etapa["estado"], "feito")
+        self.assertGreater(len(etapa["texto"]), 500)
+        self.assertEqual(etapa["texto"], self.TEXTO_LONGO.strip())
+
+    def test_o_pedido_criado_leva_task_id_igual_a_acao_id(self):
+        r = self._gerar(task_id="t1")  # o acao_id manda: o link vai para a ação do grafo
+        pedido = self.db.pedidos()[r["pedido_id"]]
+        self.assertEqual((pedido["task_id"], pedido["tipo"], pedido["reuniao"]), ("a1", "mapa", REUN))
+        self.assertFalse(pedido["anexado"])
+
+    def test_acao_inexistente_devolve_erro_e_nao_chama_o_notebook(self):
+        r = hermes_tools.execute("liveideas_gerar", {"tipo": "mapa", "acao_id": "nao"}, self.ctx)
+        self.assertEqual(r, {"erro": "ação 'nao' não encontrada no Gaspar"})
+        self.assertEqual(self.chamadas, [])
+        self.assertEqual(self.db.pedidos(), {})
+
+    def test_acao_id_com_barra_e_recusado_antes_do_firestore(self):
+        with mock.patch.object(self.db, "collection", side_effect=AssertionError("não pode ir ao Firestore")):
+            r = lt.gerar(self.ctx, {"tipo": "mapa", "acao_id": "a1/../x"})
+        self.assertEqual(r, {"erro": "acao_id inválido: informe o id da ação do Gaspar, sem barra"})
+        self.assertEqual(self.chamadas, [])
+
+    def test_acao_id_com_texto_ou_reuniao_id_e_recusado(self):
+        for extra in ({"texto": "y" * 50}, {"reuniao_id": REUN}):
+            with self.subTest(extra=extra):
+                r = self._gerar(**extra)
+                self.assertIn("com acao_id não informe texto nem reuniao_id", r["erro"])
+        self.assertEqual(self.chamadas, [])
+        self.assertEqual(self.db.pedidos(), {})
+
+    def test_texto_e_reuniao_id_vazios_nao_atrapalham_o_acao_id(self):
+        r = self._gerar(texto="", reuniao_id="  ")
+        self.assertNotIn("erro", r)
+        self.assertEqual(sorted(self.chamadas[0][1]), ["acao", "tipo"])
+
+    def test_acao_id_com_tipo_fluxo_e_recusado(self):
+        r = hermes_tools.execute("liveideas_gerar", {"tipo": "fluxo", "acao_id": "a1"}, self.ctx)
+        self.assertEqual(r, {"erro": "acao_id só vale para tipo=mapa"})
+        self.assertEqual(self.chamadas, [])
+
+    def test_refazer_vai_no_corpo_so_quando_verdadeiro(self):
+        for refazer, vai in ((True, True), ("true", True), (False, False), ("false", False), ("", False), (None, False)):
+            with self.subTest(refazer=refazer):
+                self.chamadas.clear()
+                self._gerar(refazer=refazer)
+                corpo = self.chamadas[0][1]
+                self.assertEqual("refazer" in corpo, vai)
+                if vai:
+                    self.assertIs(corpo["refazer"], True)
+
+    def test_repetido_do_notebook_chega_ao_claude(self):
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN, "repetido": True})
+        r = self._gerar()
+        self.assertIs(r["repetido"], True)
+        self.assertIn("refazer", r["orientacao"])
+
+    def test_diario_vai_com_as_20_ultimas_entradas_em_ordem(self):
+        self.db.docs[("tarefas", "a1")]["acompanhamento"] = [
+            {"data": f"2026-10-{d:02d}T10:00:00+00:00", "nota": f"nota {d}"} for d in range(1, 26)]
+        self._gerar()
+        diario = self.chamadas[0][1]["acao"]["diario"]
+        self.assertEqual([e["texto"] for e in diario[:2]], ["[2026-10-06] nota 6", "[2026-10-07] nota 7"])
+        self.assertEqual((len(diario), diario[-1]["texto"]), (20, "[2026-10-25] nota 25"))
+
+    def test_sem_acao_id_o_corpo_continua_igual(self):
+        r = lt.gerar(self.ctx, {"tipo": "mapa", "texto": "y" * 50, "refazer": True})
+        self.assertEqual(self.chamadas, [("gerar", {"tipo": "mapa", "texto": "y" * 50})])  # refazer só vale com acao_id
+        self.assertNotIn("repetido", r)
+
 
 class ConsultarTest(Base):
     def setUp(self):
