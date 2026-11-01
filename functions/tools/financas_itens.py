@@ -94,14 +94,39 @@ def editar(db, args: dict) -> dict:
         if not 1 <= dia <= 31:
             return {"erro": "dia deve ser um número entre 1 e 31."}
         mudanca[campo] = dia
+    if args.get("futuros") and (tipo != "obrigacao_fixa" or "dueDay" not in mudanca):
+        return {"erro": "futuros só vale para o dia (dia) de uma obrigacao_fixa."}
     if not mudanca:
         return {"erro": "Nada para mudar: informe descricao, valor, competencia, quitado ou dia."}
     ref.update(mudanca)
     saida = {"status": "ok", "tipo": tipo, "id": ref.id,
              "alterado": {k: [atual.get(k), v] for k, v in mudanca.items()}}
+    if args.get("futuros"):
+        saida["futuros"] = _dia_nos_futuros(db, atual, mudanca["dueDay"])
     if "month" in mudanca:
         saida["periodo"] = competencia.periodo(mudanca["month"], mudanca["year"])
     return saida
+
+
+def _dia_nos_futuros(db, atual: dict, dia: int) -> dict:
+    """Muda o dia na rubrica da conta fixa (vale para os meses que ainda serão criados) e nas contas
+    não pagas dos meses seguintes da mesma rubrica que já existem."""
+    rubrica_id = atual.get("rubricId")
+    if not rubrica_id:
+        return {"aviso": "A conta não tem rubrica ligada; só este mês mudou."}
+    ref = db.collection("bill_rubrics").document(str(rubrica_id))
+    if not ref.get().exists:
+        return {"aviso": f"Rubrica {rubrica_id} não encontrada; só este mês mudou."}
+    ref.update({"dueDay": dia})
+    inicio = (atual.get("year") or 0, atual.get("month") or 0)
+    ajustadas = 0
+    for snap in db.collection(COLECAO["obrigacao_fixa"]).where("rubricId", "==", rubrica_id).stream():
+        d = snap.to_dict() or {}
+        if ((d.get("year") or 0, d.get("month") or 0) > inicio and not (d.get("isPaid") or d.get("paid"))
+                and d.get("status") != "deleted"):
+            snap.reference.update({"dueDay": dia})
+            ajustadas += 1
+    return {"rubrica": str(rubrica_id), "dueDay": dia, "contas_futuras_ajustadas": ajustadas}
 
 
 def excluir(db, args: dict) -> dict:
