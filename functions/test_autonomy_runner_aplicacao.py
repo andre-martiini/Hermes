@@ -12,6 +12,7 @@ from autonomy.execution import (
 )
 from autonomy.requests import RequestStatus, lease_expirada
 from autonomy.runner_aplicacao import (
+    falhar_por_reconciliacao,
     acordar_espera_externa,
     aplicar_decisao_continuacao,
     reconciliar_resultado_desconhecido,
@@ -325,3 +326,62 @@ class TestReconciliarDesconhecido(unittest.TestCase):
             dataclasses.replace(p, tentativas=DEFAULT_MAX_TENTATIVAS - 1), False, agora,
             continuar_em=agora + timedelta(days=1))
         self.assertEqual(ok.tentativas, DEFAULT_MAX_TENTATIVAS)
+
+
+class TestFalharPorReconciliacao(unittest.TestCase):
+    def test_sela_ledger_com_lease_nova_e_fica_terminal(self):
+        p, agora = _desconhecido()
+        n, antigo = falhar_por_reconciliacao(p, " desistiu ", agora, "ex-b")
+        self.assertEqual(n.status, RequestStatus.FALHA_FINAL)
+        self.assertEqual(n.lease.generation, p.lease.generation + 1)
+        self.assertEqual(n.lease.executor_id, "ex-b")
+        self.assertIsNotNone(n.ledger_entry.resultado_registrado_em)
+        self.assertEqual(n.ledger_entry.resultado["motivo"], "desistiu")
+        self.assertIsNone(n.run)
+        self.assertIsNone(antigo)  # sweep já fechou o run
+
+    def test_funciona_com_teto_esgotado_onde_reconciliar_recusa(self):
+        from autonomy.requests import DEFAULT_MAX_TENTATIVAS
+        p, agora = _desconhecido()
+        p = dataclasses.replace(p, tentativas=DEFAULT_MAX_TENTATIVAS)
+        n, _ = falhar_por_reconciliacao(p, "teto", agora, "ex-b")
+        self.assertEqual(n.status, RequestStatus.FALHA_FINAL)
+        self.assertEqual(n.tentativas, DEFAULT_MAX_TENTATIVAS)
+
+    def test_sem_ledger_so_transiciona(self):
+        p, agora = _desconhecido()
+        p = dataclasses.replace(p, ledger_entry=None)
+        n, _ = falhar_por_reconciliacao(p, "sem ledger", agora, "ex-b")
+        self.assertEqual(n.status, RequestStatus.FALHA_FINAL)
+        self.assertIsNone(n.ledger_entry)
+
+    def test_run_ativo_e_fechado_por_timeout_e_devolvido(self):
+        p, agora = _desconhecido()
+        ativo = dataclasses.replace(p, run=_em_andamento().run)
+        n, antigo = falhar_por_reconciliacao(ativo, "x", agora, "ex-b")
+        self.assertIsNotNone(antigo)
+        self.assertEqual(antigo.status, AgentRunStatus.TIMEOUT)
+        self.assertIsNone(n.run)
+
+    def test_lease_valida_recusa(self):
+        from autonomy.execution import LeaseInvalida
+        p, _ = _desconhecido()
+        with self.assertRaises(LeaseInvalida):
+            falhar_por_reconciliacao(p, "x", p.lease.expires_at - timedelta(seconds=1), "ex-b")
+
+    def test_entradas_invalidas(self):
+        p, agora = _desconhecido()
+        for args in (("", agora, "e"), ("   ", agora, "e"), (None, agora, "e"),
+                     ("m", agora, ""), ("m", agora, None), ("m", datetime(2026, 11, 1), "e")):
+            with self.assertRaises(ValueError):
+                falhar_por_reconciliacao(p, *args)
+        with self.assertRaises(ValueError):
+            falhar_por_reconciliacao("x", "m", agora, "e")
+        with self.assertRaises(ValueError):
+            falhar_por_reconciliacao(_em_andamento(), "m", agora, "e")
+
+    def test_nao_reabre_terminal(self):
+        p, agora = _desconhecido()
+        n, _ = falhar_por_reconciliacao(p, "x", agora, "ex-b")
+        with self.assertRaises(ValueError):
+            falhar_por_reconciliacao(n, "x", agora + timedelta(days=1), "ex-c")
