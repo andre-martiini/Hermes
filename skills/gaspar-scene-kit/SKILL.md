@@ -64,6 +64,22 @@ npm test                                               # testes do kit e do lint
 - Dados de pessoas: nada real; valores de exemplo marcados como fictícios.
 - Exemplo completo: `exemplos/cartoes.json` (os 3 cartões de teste da Fase 1).
 
+## Voz e legendas (Fase 2)
+
+- **Motion** (cenas com `"narracao"`): o montador chama `narrar.py` (voz Aoede, ~US$ 0,15/min, cache) e
+  `legendas.py motion` (whisper local só para o tempo; **o texto é o do roteiro**, zero erro de grafia).
+  Cada cena dura a fala + respiro; cada item entra quando a fala o cita (ou use `"em"`).
+- **Sobreposição** (`"gravacao": "video.mp4"` no roteiro): a gravação fica no fundo com o som original, a
+  legenda vem da fala transcrita (`legendas.py fala`) e cada cartão entra no topo, em painel de vidro,
+  quando a fala diz o seu `"quando"` (frase exata) ou em `"inicio"` (s). `"chaves": ["Ifes", ...]` ajuda o
+  whisper com nomes próprios.
+- `"legenda_estilo"`: `"palavra"` (300 ms, padrão na sobreposição/Reels) ou `"frase"` (1200 ms, padrão no
+  motion/aula). `"legenda": false` desliga.
+- Palavras com confiança < 0,6 saem listadas no terminal: corrija em `SAIDA/legendas.json`, rode de novo
+  (o alinhamento só refaz se a narração ou a gravação mudar) e registre a lista no diário da ação.
+- Requisitos: a venv da tutorial-sistema (`preparar.py` → PY) com `faster-whisper` (`PY -m pip install
+  faster-whisper==1.1.1`); modelo em `GASPAR_WHISPER_MODELO` (padrão `small`; `medium` é mais exato).
+
 ## Revisão
 
 Abra `SAIDA/<formato>/revisao/contact-sheet.jpg` e confira: nada cortado ou fora da safe area, número
@@ -72,4 +88,4 @@ numa linha, item ativo em âmbar, cena assentada. Só então entregue.
 ## Motor
 
 `GASPAR_VIDEO_ENGINE=legacy|hyperframes`. O padrão continua `legacy` (motion.py com voz, legenda e trilha)
-até o kit ganhar voz e legendas alinhadas (Fase 2) e som (Fase 3).
+até o kit ganhar som (Fase 3: trilha com ducking, SFX, loudness e LUT).

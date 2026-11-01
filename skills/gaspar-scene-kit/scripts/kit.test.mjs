@@ -38,3 +38,21 @@ test("duração nunca fica abaixo do tempo de leitura", () => {
   const { cenas } = gerarHtml({ cenas: [{ tipo: "topicos", titulo: "Três passos", itens: ["um", "dois", "três"], duracao: 1 }] }, "vertical");
   assert.ok(cenas[0].fim >= cenas[0].minimo && cenas[0].minimo > 1);
 });
+
+import { paginar, deixa } from "./montar.mjs";
+
+const tok = (text, startMs, endMs) => ({ text, startMs, endMs, timestampMs: (startMs + endMs) / 2, confidence: 0.9 });
+
+test("páginas de legenda não se sobrepõem e 300 ms junta menos que 1200 ms", () => {
+  const leg = [tok("Tudo", 0, 180), tok(" começa", 180, 560), tok(" na", 560, 700), tok(" demanda.", 840, 1500), tok(" Depois", 1760, 2100)];
+  const curtas = paginar(leg, 300), longas = paginar(leg, 1200);
+  assert.ok(curtas.length > longas.length);
+  for (const p of [curtas, longas]) p.forEach((pg, k) => p[k + 1] && assert.equal(pg.endMs, p[k + 1].startMs));
+  assert.equal(longas.flatMap((p) => p.tokens).map((t) => t.text).join(""), leg.map((t) => t.text).join(""));
+});
+
+test("item entra quando a fala o cita", () => {
+  const leg = [tok("Depois", 0, 300), tok(" vem", 300, 500), tok(" o", 500, 560), tok(" planejamento,", 560, 1400)];
+  assert.equal(deixa("Planejamento", leg), 0.25 + 0.56);
+  assert.equal(deixa("Contrato", leg), null);
+});

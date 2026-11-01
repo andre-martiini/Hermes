@@ -44,6 +44,7 @@
     ImageKenBurns: { zoom: "settle" },
     MaskReveal: { revela: "enter" },
     Wipe: { transicao: "enter" },
+    Captions: { ativa: "emphasis", solta: "settle" },
   };
 
   // Marcadores de SFX: {t, evento}. A Fase 3 mapeia evento → som (sfx-map).
@@ -187,7 +188,8 @@
 
   // `dadosId`: o <script type="application/json"> que o montar.mjs escreve com o tempo de cada cena.
   function montar(dadosId, compId) {
-    const { cenas } = JSON.parse(document.getElementById(dadosId).textContent);
+    const dados = JSON.parse(document.getElementById(dadosId).textContent);
+    const { cenas } = dados;
     const tl = gsap.timeline({ paused: true });
     cenas.forEach((c, i) => {
       const sec = document.getElementById("cena-" + i);
@@ -195,8 +197,17 @@
       if (!anima) throw new Error("Primitiva fora do kit: " + c.primitiva);
       if (c.transicao === "wipe" && i > 0) wipeEntra(tl, sec, c);
       anima(tl, sec, c);
-      if (i < cenas.length - 1) transicao(tl, sec, c, cenas[i + 1]);
+      // Na sobreposição todo cartão sai (a gravação continua por baixo); no motion, a última cena fica.
+      if (i < cenas.length - 1 || dados.sobre) transicao(tl, sec, c, dados.sobre ? null : cenas[i + 1]);
     });
+    // Captions: palavra ativa em âmbar e 1,05× (emphasis) enquanto é falada.
+    (dados.legendas || []).forEach((pagina, n) => pagina.forEach(([s, e], k) => {
+      const el = document.getElementById(`leg-${n}-${k}`);
+      tl.set(el, { className: "palavra ativa" }, s);
+      tl.fromTo(el, { scale: 1 }, { scale: 1.05, duration: 0.12, ease: EASE.emphasis }, s);
+      tl.set(el, { className: "palavra" }, e);
+      tl.to(el, { scale: 1, duration: 0.1, ease: EASE.settle }, e);
+    }));
     sfx.sort((a, b) => a.t - b.t);
     window.__sfx = sfx;
     window.__timelines = window.__timelines || {};
