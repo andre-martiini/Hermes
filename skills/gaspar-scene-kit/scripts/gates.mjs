@@ -89,7 +89,7 @@ export function checkLegendas(roteiro, voz) {
   return roteiro.cenas.flatMap((c, i) => {
     if (!c.narracao) return [];
     const leg = (voz.legendas[i] || []).map((t) => t.text).join("");
-    return leg === c.narracao.trim() ? [] : [falha("legenda-cobertura", `cena ${i + 1}: a legenda não reproduz a narração`, { esperado: c.narracao, obtido: leg })];
+    return leg === c.narracao.trim().split(/\s+/).join(" ") ? [] : [falha("legenda-cobertura", `cena ${i + 1}: a legenda não reproduz a narração`, { esperado: c.narracao, obtido: leg })];
   });
 }
 

@@ -72,3 +72,15 @@ test("check-legendas: motion exige a narração inteira; sobreposição exige re
   fala.legendas[0].revisado = true;
   assert.deepEqual(checkLegendas(sobre, fala), []);
 });
+
+import { achar } from "./montar.mjs";
+import { filtroAudio } from "./pos.mjs";
+
+test("correções do review: frase vazia, mix sem entradas, narração com quebra de linha", () => {
+  assert.equal(achar("", [tok("Oi", 0, 100)]), null);
+  assert.equal(achar("qualquer", []), null);
+  assert.match(filtroAudio({ voz: false, trilha: null, sfx: [], total: 5 }).filtro, /anullsrc/);
+  const roteiro = { cenas: [{ tipo: "titulo", titulo: "x", narracao: "Primeiro a demanda.\nDepois  o ETP." }] };
+  const voz = { legendas: [[tok("Primeiro", 0, 1), tok(" a", 1, 2), tok(" demanda.", 2, 3), tok(" Depois", 3, 4), tok(" o", 4, 5), tok(" ETP.", 5, 6)]] };
+  assert.deepEqual(checkLegendas(roteiro, voz), []);
+});

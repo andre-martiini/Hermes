@@ -20,10 +20,7 @@ const ff = (args, opts = {}) => execFileSync("ffmpeg", ["-hide_banner", "-y", ..
 // Abre o index.html do projeto no Chrome do HyperFrames e roda `fn(pagina)` (marcadores, checagens).
 export async function comPagina(projeto, fn, { largura, altura } = {}) {
   const { default: puppeteer } = await import("puppeteer-core");
-  const base = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
-  const versao = readdirSync(base).sort().at(-1);
-  const exe = join(base, versao, "chrome-headless-shell-win64", "chrome-headless-shell.exe");
-  const nav = await puppeteer.launch({ executablePath: existsSync(exe) ? exe : undefined, args: ["--allow-file-access-from-files"] });
+  const nav = await puppeteer.launch({ executablePath: chromeDoHyperframes(), args: ["--allow-file-access-from-files"] });
   try {
     const pg = await nav.newPage();
     if (largura) await pg.setViewport({ width: largura, height: altura });
@@ -33,6 +30,18 @@ export async function comPagina(projeto, fn, { largura, altura } = {}) {
   } finally {
     await nav.close();
   }
+}
+
+let _chrome;
+function chromeDoHyperframes() {
+  if (_chrome) return _chrome;
+  const bin = join(SKILL, "node_modules", "hyperframes", "bin", "hyperframes.mjs");
+  const saida = execFileSync(process.execPath, [bin, "browser", "ensure"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
+  const caminho = saida.match(/Path:\s*(.+)/)?.[1].trim();
+  _chrome = caminho && existsSync(caminho) ? caminho : undefined;
+  if (!_chrome) throw new Error(`Chrome do HyperFrames não encontrado ("hyperframes browser ensure" disse: ${saida.slice(-200)}). ` +
+    "Rode: node node_modules/hyperframes/bin/hyperframes.mjs browser ensure");
+  return _chrome;
 }
 
 // Marcadores {t, evento} que o kit.js deixou em window.__sfx.
@@ -89,7 +98,8 @@ export function filtroAudio({ voz, trilha, sfx, total }) {
       mix.push(`[d${idx}_${k}]`);
     });
   }
-  partes.push(`${mix.join("")}amix=inputs=${mix.length}:normalize=0:duration=longest,apad,atrim=0:${total}[mix]`);
+  if (!mix.length) partes.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total}[mix]`);
+  else partes.push(`${mix.join("")}amix=inputs=${mix.length}:normalize=0:duration=longest,apad,atrim=0:${total}[mix]`);
   return { filtro: partes.join(";"), arquivosSfx: [...porArquivo.keys()] };
 }
 

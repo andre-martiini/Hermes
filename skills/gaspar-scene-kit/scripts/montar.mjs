@@ -50,6 +50,7 @@ export function deixa(item, legendas, lead = LEAD) {
 // Início (s) da 1ª ocorrência da frase na fala, palavras consecutivas; null se não for dita.
 export function achar(frase, legendas) {
   const alvo = String(frase).split(/\s+/).map(norm).filter(Boolean);
+  if (!alvo.length) return null;
   const fala = legendas.map((c) => norm(c.text));
   for (let i = 0; i + alvo.length <= fala.length; i++)
     if (alvo.every((p, k) => fala[i + k] === p)) return legendas[i].startMs / 1000;
@@ -63,7 +64,8 @@ function planejarSobre(roteiro, voz) {
   const avisos = [];
   const cenas = roteiro.cenas.map((c, i) => {
     if (!TIPOS[c.tipo]) throw new Error(`Cartão ${i + 1}: tipo "${c.tipo}" fora do kit.`);
-    const t0 = c.inicio ?? achar(c.quando || "", voz.legendas);
+    if (c.inicio == null && !c.quando) throw new Error(`Cartão ${i + 1}: falta "quando" (frase dita) ou "inicio" (s).`);
+    const t0 = c.inicio ?? achar(c.quando, voz.legendas);
     if (t0 == null) throw new Error(`Cartão ${i + 1}: a fala não diz "${c.quando}". Use "inicio" (s) ou corrija "quando".`);
     const minimo = duracaoMinima(c);
     const fim = Math.min(t0 + Math.max(c.duracao || 0, minimo), voz.duracao);
@@ -283,7 +285,8 @@ async function main() {
       const tempos = cenas.map((c) => Math.max(c.t0, c.fim - 0.5).toFixed(2)).join(",");
       hyperframes(["snapshot", "--at", tempos, "--no-end", "-o", join(pasta, "revisao")], projeto, env);
     }
-    const mp4 = resolve(saida, `${roteiro.titulo || "Gaspar Vídeo"} (${formato}).mp4`);
+    const nome = (roteiro.titulo || "Gaspar Vídeo").replace(/[<>:"/\\|?*\u0000-\u001f]/g, " -").replace(/\s+/g, " ").trim();
+    const mp4 = resolve(saida, `${nome} (${formato}).mp4`);
     const bruto = join(pasta, "bruto.mp4");
     hyperframes(["render", "-o", bruto, "-f", String(FPS), "-q", "delivery"], projeto, env);
     // Pós (Fase 3): SFX nos marcadores, trilha com ducking, −14 LUFS, LUT de marca.
