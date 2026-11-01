@@ -70,6 +70,25 @@ export const TIPOS = {
     texto: (c) => [c.legenda_tela],
     itens: () => 2,
   },
+  // Texto gigante ATRÁS da pessoa (sobreposição): fica entre a gravação e o recorte dela.
+  titulo_atras: {
+    primitiva: "TitleBehind",
+    // --topo: onde começa a cabeça (px, medido no recorte pelo montar.mjs); o título se apoia nela.
+    html: (c) => `<div class="bloco" style="--chars: ${String(c.titulo).length}; --topo: ${c.topo_cabeca ?? 420}px">` +
+      (c.etiqueta ? `<div class="etiqueta">${esc(c.etiqueta)}</div>` : "") +
+      `<div class="gigante">${esc(c.titulo)}</div></div>`,
+    texto: (c) => [c.etiqueta, c.titulo],
+    itens: () => 1,
+  },
+  // Fechamento: a cena desfoca e escurece, entra o texto e um botão que pulsa.
+  chamada: {
+    primitiva: "CallToAction",
+    // Título e botão opcionais: sem nenhum, é só o fechamento desfocado.
+    html: (c) => `<div class="veu"></div>` + (c.titulo ? `<div class="titulo">${esc(c.titulo)}</div>` : "") +
+      (c.botao ? `<div class="botao">${esc(c.botao)}</div>` : ""),
+    texto: (c) => [c.titulo, c.botao].filter(Boolean),
+    itens: (c) => (c.titulo ? 1 : 0) + (c.botao ? 1 : 0),
+  },
   frase: {
     primitiva: "MaskReveal",
     html: (c) => (c.etiqueta ? `<div class="etiqueta">${esc(c.etiqueta)}</div>` : "") +
