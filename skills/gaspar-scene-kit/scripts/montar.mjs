@@ -4,10 +4,17 @@
 //   node montar.mjs roteiro.json SAIDA              # 9:16 e/ou 16:9 conforme "formato"
 //   node montar.mjs roteiro.json SAIDA --so-html    # só gera o projeto e passa o lint (grátis, segundos)
 //   node montar.mjs roteiro.json SAIDA --revisao    # + PNG de cada cena assentada em SAIDA/<formato>/revisao
+//   node montar.mjs roteiro.json SAIDA --sem-voz    # ignora "narracao" (vídeo mudo, grátis)
 //
+// Com "gravacao" (modo sobreposição): o vídeo do André fica no fundo com o som original, a legenda vem da
+// fala transcrita (palavra a palavra) e cada cartão entra no topo quando a fala diz o seu "quando".
+//
+// Com "narracao" nas cenas: voz Aoede (~US$ 0,15/min, com cache) e legendas palavra a palavra alinhadas ao
+// roteiro; cada item entra quando a fala o cita, e a cena dura a fala + respiro.
 // Saída: SAIDA/<formato>/projeto/index.html, SAIDA/<titulo> (<formato>).mp4 e SAIDA/<formato>/cenas.json
 // (tempo de cada cena; os marcadores de SFX ficam em window.__sfx na página).
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -21,35 +28,130 @@ const DIM = { vertical: [1080, 1920], horizontal: [1920, 1080] };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-export function planejar(roteiro) {
+// Com voz: a fala de cada cena começa LEAD s depois da cena e termina RESPIRO s antes da próxima.
+const LEAD = 0.25;
+const RESPIRO = 0.6;
+const JUNTAR_MS = { palavra: 300, frase: 1200 };
+
+const norm = (s) => s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// Instante (s, relativo à cena) em que a fala cita o item: 1ª palavra forte (≥ 4 letras) do item, ou a 1ª.
+export function deixa(item, legendas, lead = LEAD) {
+  const palavras = String(item).split(/\s+/).map(norm).filter(Boolean);
+  const alvo = palavras.find((p) => p.length >= 4) || palavras[0];
+  const tok = legendas.find((c) => norm(c.text) === alvo) || legendas.find((c) => alvo && norm(c.text).startsWith(alvo.slice(0, 5)));
+  return tok ? lead + tok.startMs / 1000 : null;
+}
+
+// Início (s) da 1ª ocorrência da frase na fala, palavras consecutivas; null se não for dita.
+export function achar(frase, legendas) {
+  const alvo = String(frase).split(/\s+/).map(norm).filter(Boolean);
+  const fala = legendas.map((c) => norm(c.text));
+  for (let i = 0; i + alvo.length <= fala.length; i++)
+    if (alvo.every((p, k) => fala[i + k] === p)) return legendas[i].startMs / 1000;
+  return null;
+}
+
+const itensDaCena = (c) => c.itens?.map((i) => (Array.isArray(i) ? i[0] : i)) || c.etapas || c.linhas || null;
+
+// Sobreposição: cada cartão entra quando a fala diz `quando` (ou em `inicio` s) e fica `duracao` (≥ leitura).
+function planejarSobre(roteiro, voz) {
+  const avisos = [];
+  const cenas = roteiro.cenas.map((c, i) => {
+    if (!TIPOS[c.tipo]) throw new Error(`Cartão ${i + 1}: tipo "${c.tipo}" fora do kit.`);
+    const t0 = c.inicio ?? achar(c.quando || "", voz.legendas);
+    if (t0 == null) throw new Error(`Cartão ${i + 1}: a fala não diz "${c.quando}". Use "inicio" (s) ou corrija "quando".`);
+    const minimo = duracaoMinima(c);
+    const fim = Math.min(t0 + Math.max(c.duracao || 0, minimo), voz.duracao);
+    const depois = voz.legendas.filter((tk) => tk.startMs / 1000 >= t0);
+    const itens = itensDaCena(c);
+    const em = itens && !c.em ? itens.map((it) => { const e = deixa(it, depois, 0); return e == null ? null : +(e - t0).toFixed(3); }) : c.em;
+    return { ...c, i, t0: +t0.toFixed(3), fim: +fim.toFixed(3), minimo, em: em?.some((e) => e != null) ? em : undefined };
+  });
+  cenas.forEach((c, i) => cenas[i + 1] && cenas[i + 1].t0 < c.fim && avisos.push(`cartões ${i + 1} e ${i + 2} se sobrepõem`));
+  return Object.assign(cenas, { avisos });
+}
+
+export function planejar(roteiro, voz = null) {
+  if (roteiro.gravacao) return planejarSobre(roteiro, voz);
   let t = 0;
-  return roteiro.cenas.map((c, i) => {
+  const avisos = [];
+  const cenas = roteiro.cenas.map((c, i) => {
     if (!TIPOS[c.tipo]) throw new Error(`Cena ${i + 1}: tipo "${c.tipo}" fora do kit (${Object.keys(TIPOS).join(", ")}).`);
     const minimo = duracaoMinima(c);
-    const dur = Math.max(c.duracao || 0, minimo);
-    const p = { ...c, i, t0: +t.toFixed(3), fim: +(t + dur).toFixed(3), minimo };
+    const fala = voz?.falas[i]?.segundos || 0;
+    const dur = Math.max(c.duracao || 0, minimo, fala ? LEAD + fala + RESPIRO : 0);
+    const p = { ...c, i, t0: +t.toFixed(3), fim: +(t + dur).toFixed(3), minimo, fala };
+    const itens = itensDaCena(c);
+    if (voz && itens && !c.em) {
+      const em = itens.map((it) => deixa(it, voz.legendas[i] || []));
+      em.forEach((e, k) => e == null && avisos.push(`cena ${i + 1}: a fala não cita "${itens[k]}" (entra em sequência)`));
+      if (em.some((e) => e != null)) p.em = em;
+    }
     t += dur;
     return p;
   });
+  return Object.assign(cenas, { avisos });
 }
 
-export function gerarHtml(roteiro, formato, imagens = {}) {
+// Como createTikTokStyleCaptions: a palavra entra na página enquanto começa a menos de `juntarMs` do início dela.
+export function paginar(legendas, juntarMs) {
+  const paginas = [];
+  for (const c of legendas) {
+    const pg = paginas.at(-1);
+    if (pg && c.startMs - pg.startMs < juntarMs) { pg.tokens.push(c); pg.endMs = c.endMs; }
+    else paginas.push({ startMs: c.startMs, endMs: c.endMs, tokens: [c] });
+  }
+  paginas.forEach((p, k) => { if (paginas[k + 1]) p.endMs = paginas[k + 1].startMs; });
+  return paginas;
+}
+
+// `trechos`: [[deslocamento em s, legendas]] — um por cena no motion, um só na sobreposição.
+function htmlLegendas(trechos, juntarMs) {
+  const blocos = [];
+  const dados = [];
+  trechos.forEach(([off, legendas]) => {
+    const paginas = paginar(legendas || [], juntarMs);
+    paginas.forEach((pg, k) => {
+      const n = dados.length;
+      const ini = off + pg.startMs / 1000;
+      // Termina quando a próxima página começa (nunca duas na tela); a última do trecho fica 0,15 s a mais.
+      const fim = off + (paginas[k + 1] ? pg.endMs : pg.tokens.at(-1).endMs + 150) / 1000;
+      blocos.push(`<div id="leg-${n}" class="legenda clip" data-start="${ini.toFixed(3)}" data-duration="${(fim - ini).toFixed(3)}" data-track-index="2">` +
+        pg.tokens.map((tk, k) => `<span class="palavra" id="leg-${n}-${k}">${esc(tk.text)}</span>`).join("") + `</div>`);
+      dados.push(pg.tokens.map((tk) => [+(off + tk.startMs / 1000).toFixed(3), +(off + tk.endMs / 1000).toFixed(3)]));
+    });
+  });
+  return { html: blocos.join("\n      "), dados };
+}
+
+export function gerarHtml(roteiro, formato, imagens = {}, voz = null) {
   const [w, h] = DIM[formato];
-  const cenas = planejar(roteiro);
-  const total = cenas.at(-1).fim;
-  const secoes = cenas.map((c, i) => {
+  const cenas = planejar(roteiro, voz);
+  const sobre = Boolean(roteiro.gravacao);
+  const total = sobre ? voz.duracao : cenas.at(-1).fim;
+  const fundo = sobre ? `<video id="gravacao" class="clip" src="assets/gravacao.mp4" data-start="0" data-duration="${total}" data-has-audio="true" data-track-index="0"></video>
+      ` : "";
+  const secoes = fundo + cenas.map((c, i) => {
     const sobra = cenas[i + 1]?.transicao === "wipe" ? ENTRADA : 0;
-    return `<section id="cena-${i}" class="cena clip" data-start="${c.t0}" data-duration="${+(c.fim - c.t0 + sobra).toFixed(3)}" data-track-index="0">` +
+    return `<section id="cena-${i}" class="cena${sobre ? " sobre" : ""} clip" data-start="${c.t0}" data-duration="${+(c.fim - c.t0 + sobra).toFixed(3)}" data-track-index="0">` +
       TIPOS[c.tipo].html(c, imagens[i]) + `</section>`;
   }).join("\n      ");
+  const audios = voz && !sobre ? cenas.filter((c) => c.fala).map((c) =>
+    `<audio id="voz-${c.i}" class="clip" src="assets/voz-${c.i}.wav" data-start="${(c.t0 + LEAD).toFixed(3)}" data-duration="${c.fala}" data-track-index="1"></audio>`).join("\n      ") : "";
+  const leg = voz && roteiro.legenda !== false
+    ? htmlLegendas(sobre ? [[0, voz.legendas]] : cenas.map((c, i) => [c.t0 + LEAD, voz.legendas[i]]),
+      JUNTAR_MS[roteiro.legenda_estilo || (sobre ? "palavra" : "frase")]) : { html: "", dados: [] };
   const dados = {
     cenas: cenas.map((c, i) => ({
       primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor,
-      prefixo: c.prefixo, sufixo: c.sufixo, casas: c.casas, transicao: c.transicao, primeira: i === 0,
+      prefixo: c.prefixo, sufixo: c.sufixo, casas: c.casas, transicao: c.transicao, primeira: i === 0 && !sobre,
     })),
+    sobre,
+    legendas: leg.dados,
   };
   const html = `<!doctype html>
-<html lang="pt-BR" data-formato="${formato}">
+<html lang="pt-BR" data-formato="${formato}"${leg.dados.length ? " data-legenda" : ""}${sobre ? " data-modo=\"sobreposicao\"" : ""}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=${w}, height=${h}" />
@@ -62,6 +164,8 @@ export function gerarHtml(roteiro, formato, imagens = {}) {
   <body style="width: ${w}px; height: ${h}px">
     <div id="root" data-composition-id="main" data-start="0" data-duration="${total}" data-width="${w}" data-height="${h}">
       ${secoes}
+      ${audios}
+      ${leg.html}
     </div>
     <script type="application/json" id="dados">${JSON.stringify(dados).replace(/</g, "\\u003c")}</script>
     <script>Kit.montar("dados", "main");</script>
@@ -107,23 +211,51 @@ function preparar(projeto, roteiro, base) {
   return imagens;
 }
 
+// Voz: narrar.py (Aoede, com cache) + legendas.py (whisper só para o tempo; o texto é o do roteiro).
+// Refaz o alinhamento só quando a narração mudou.
+// Sobreposição ("gravacao" no roteiro): a legenda vem da fala transcrita, e a duração é a da gravação.
+function prepararVoz(arq, saida, flags) {
+  const roteiro = JSON.parse(readFileSync(arq, "utf8"));
+  const py = process.env.GASPAR_PY || join(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const rodar = (script, ...a) => execFileSync(py, [join(SKILL, "scripts", script), ...a], { stdio: ["ignore", "inherit", "inherit"] });
+  if (roteiro.gravacao) {
+    const video = resolve(dirname(resolve(arq)), roteiro.gravacao);
+    const legArq = join(saida, "legendas.json");
+    if (!existsSync(legArq) || statSync(legArq).mtimeMs < statSync(video).mtimeMs)
+      rodar("legendas.py", "fala", video, saida, ...(roteiro.chaves ? ["--chaves", roteiro.chaves.join(",")] : []));
+    const dur = execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video],
+      { env: { ...process.env, PATH: pathComFfmpeg() } }).toString().trim();
+    return { video, duracao: +(+dur).toFixed(3), legendas: JSON.parse(readFileSync(legArq, "utf8")) };
+  }
+  if (flags.includes("--sem-voz") || !roteiro.cenas.some((c) => c.narracao)) return null;
+  rodar("narrar.py", arq, saida);
+  const falasArq = join(saida, "narracao", "falas.json");
+  const legArq = join(saida, "legendas.json");
+  if (!existsSync(legArq) || statSync(legArq).mtimeMs < statSync(falasArq).mtimeMs) rodar("legendas.py", "motion", arq, saida);
+  return { falas: JSON.parse(readFileSync(falasArq, "utf8")), legendas: JSON.parse(readFileSync(legArq, "utf8")) };
+}
+
 function main() {
   const [arq, saida, ...flags] = process.argv.slice(2);
-  if (!arq || !saida) { console.error("uso: node montar.mjs roteiro.json SAIDA [--so-html] [--revisao]"); process.exit(2); }
+  if (!arq || !saida) { console.error("uso: node montar.mjs roteiro.json SAIDA [--so-html] [--revisao] [--sem-voz]"); process.exit(2); }
   const roteiro = JSON.parse(readFileSync(arq, "utf8"));
   const formatos = roteiro.formato === "ambos" ? ["vertical", "horizontal"] : [roteiro.formato || "vertical"];
   const env = flags.includes("--so-html") ? process.env : { ...process.env, PATH: pathComFfmpeg() };
+  const voz = prepararVoz(arq, resolve(saida), flags);
   let falhou = false;
 
   for (const formato of formatos) {
     const pasta = resolve(saida, formato);
     const projeto = join(pasta, "projeto");
     const imagens = preparar(projeto, roteiro, dirname(resolve(arq)));
-    const { html, cenas, total } = gerarHtml(roteiro, formato, imagens);
+    if (voz?.video) cpSync(voz.video, join(projeto, "assets", "gravacao.mp4"));
+    voz?.falas?.filter((f) => f.wav).forEach((f) => cpSync(join(saida, "narracao", f.wav), join(projeto, "assets", `voz-${f.i}.wav`)));
+    const { html, cenas, total } = gerarHtml(roteiro, formato, imagens, voz);
     writeFileSync(join(projeto, "index.html"), html);
-    writeFileSync(join(pasta, "cenas.json"), JSON.stringify(cenas.map(({ i, tipo, t0, fim, minimo }) => ({ i, tipo, t0, fim, minimo })), null, 2));
+    writeFileSync(join(pasta, "cenas.json"), JSON.stringify(cenas.map(({ i, tipo, t0, fim, minimo, fala, em }) => ({ i, tipo, t0, fim, minimo, fala, em })), null, 2));
     cenas.filter((c) => c.duracao && c.duracao < c.minimo).forEach((c) =>
       console.warn(`aviso: cena ${c.i + 1} pediu ${c.duracao} s, mas a leitura exige ${c.minimo} s (usei ${c.minimo}).`));
+    cenas.avisos.forEach((a) => console.warn("aviso: " + a));
 
     const erros = lint(html);
     if (erros.length) {

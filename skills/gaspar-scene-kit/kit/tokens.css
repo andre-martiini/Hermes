@@ -69,3 +69,25 @@ html[data-formato="horizontal"] .etapas .conector { height: 6px; width: 32px; ma
 .imagem-cheia img { width: 100%; height: 100%; object-fit: cover; }
 .legenda-tela { position: absolute; left: 90px; right: 90px; bottom: 22%; font-size: var(--tam-texto); font-weight: 600; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8); }
 .ativo { border-color: var(--accent); }
+
+/* Captions: dentro da safe area (logo acima dos 20% de baixo); as cenas sobem para dar lugar. */
+.legenda { position: absolute; left: 90px; right: 90px; bottom: 20.5%; text-align: center; font-size: var(--tam-texto);
+  font-weight: 750; line-height: 1.25; color: var(--ink); text-shadow: 0 4px 18px rgba(0, 0, 0, 0.85); text-wrap: balance; }
+.legenda .palavra { display: inline-block; white-space: pre; transform-origin: 50% 80%; }
+.legenda .ativa { color: var(--accent); }
+html[data-formato="vertical"][data-legenda] .cena { padding-bottom: 29%; }
+html[data-formato="vertical"][data-legenda] .etapas .caixa { padding-top: 26px; padding-bottom: 26px; }
+html[data-formato="horizontal"] .legenda { left: 200px; right: 200px; bottom: 64px; }
+
+/* Sobreposição: a gravação do André ocupa a tela; cada cartão é um painel de vidro no topo
+   (ele grava deixando o espaço acima da cabeça livre). Tamanhos menores que no motion. */
+html[data-modo="sobreposicao"] #gravacao { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+html[data-modo="sobreposicao"] .cena.sobre {
+  inset: 4% 50px auto 50px; padding: 40px 44px; gap: 24px; justify-content: flex-start;
+  background: rgba(15, 23, 42, 0.8); border-radius: var(--raio); box-shadow: var(--sombra); backdrop-filter: blur(14px);
+  --tam-numero: 112px; --tam-titulo: 56px; --tam-texto: 38px; --largura-util: 860px;
+}
+html[data-modo="sobreposicao"][data-formato="horizontal"] .cena.sobre { inset: 5% 28% auto 28%; --largura-util: 760px; }
+html[data-modo="sobreposicao"] .cena.sobre .caixa { padding: 22px 28px; gap: 22px; }
+html[data-modo="sobreposicao"] .cena.sobre .selo { width: 64px; height: 64px; }
+html[data-modo="sobreposicao"] .cena.sobre .conector { height: 14px; margin-left: 58px; }

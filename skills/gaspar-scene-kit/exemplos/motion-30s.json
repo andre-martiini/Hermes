@@ -1,0 +1,17 @@
+{
+  "titulo": "Gaspar Vídeo - Fase 2 - legendas",
+  "formato": "vertical",
+  "pronuncia": {"SIPAC": "Sipaque", "Ifes": "Ífes"},
+  "cenas": [
+    {"tipo": "titulo", "etiqueta": "Gaspar", "titulo": "Do pedido ao contrato no Ifes",
+     "narracao": "Veja como uma compra anda no Ifes, do pedido até o contrato."},
+    {"tipo": "fluxo", "etiqueta": "Fluxo", "titulo": "Quatro etapas",
+     "etapas": ["Demanda", "Planejamento", "Licitação", "Contrato"],
+     "narracao": "Tudo começa na demanda. Depois vem o planejamento, a licitação e, por fim, o contrato."},
+    {"tipo": "numero", "etiqueta": "Prestação de contas", "titulo": "Executado em 2026",
+     "valor": 1250000, "prefixo": "R$ ", "rotulo": "valores fictícios",
+     "narracao": "Neste ano, foram executados um milhão e duzentos e cinquenta mil reais."},
+    {"tipo": "titulo", "etiqueta": "Acompanhe", "titulo": "Processo no SIPAC, aviso no Gaspar",
+     "narracao": "O processo fica no SIPAC, e o Gaspar avisa você a cada passo."}
+  ]
+}
