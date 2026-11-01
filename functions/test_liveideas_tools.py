@@ -327,6 +327,21 @@ class GerarTest(Base):
         self.assertIs(r["repetido"], True)
         self.assertIn("refazer", r["orientacao"])
 
+    def test_orientacao_do_repetido_depende_de_agrupar_concluidas(self):
+        generica = lt.ORIENTACAO +"; já havia um mapa desta ação (para criar outro, chame de novo com refazer=true)"
+        especifica = (lt.ORIENTACAO + "; já havia um mapa desta ação; o grafo existente não foi agrupado; "
+                      "para a versão agrupada, chame de novo com refazer=true e agrupar_concluidas=true")
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN, "repetido": True})
+        for valor in (True, "true"):  # repetido + agrupar: a orientação específica
+            with self.subTest(agrupar_concluidas=valor):
+                self.assertEqual(self._gerar(agrupar_concluidas=valor)["orientacao"], especifica)
+        for valor in (False, None):  # repetido sem agrupar: a genérica de sempre
+            with self.subTest(agrupar_concluidas=valor):
+                self.assertEqual(self._gerar(agrupar_concluidas=valor)["orientacao"], generica)
+        self.respostas["gerar"] = (200, {"ok": True, "tipo": "mapa", "reuniao": REUN})  # sem repetido: inalterado
+        r = self._gerar(agrupar_concluidas=True)
+        self.assertEqual((r["orientacao"], "repetido" in r), (lt.ORIENTACAO, False))
+
     def test_repetido_cria_o_pedido_sem_task_id_e_o_consultar_nao_anota_de_novo(self):
         # o link já foi (ou será) anotado pelo pedido que gerou o grafo: um segundo pedido não anota outra vez
         r = self._gerar()

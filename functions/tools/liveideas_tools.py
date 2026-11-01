@@ -141,7 +141,9 @@ def gerar(ctx, args: dict) -> dict:
     saida = {"pedido_id": pedido_id, "tipo": tipo, "estado": "gerando", "orientacao": ORIENTACAO}
     if resp.get("repetido"):  # o Live Ideas já tinha um mapa desta ação e devolveu esse
         saida["repetido"] = True
-        saida["orientacao"] += "; já havia um mapa desta ação (para criar outro, chame de novo com refazer=true)"
+        saida["orientacao"] += ("; já havia um mapa desta ação; o grafo existente não foi agrupado; para a versão agrupada, "
+                                "chame de novo com refazer=true e agrupar_concluidas=true" if corpo.get("agrupar_concluidas")
+                                else "; já havia um mapa desta ação (para criar outro, chame de novo com refazer=true)")
     return saida
 
 
