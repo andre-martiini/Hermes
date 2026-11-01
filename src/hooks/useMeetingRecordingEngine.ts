@@ -3,6 +3,8 @@ import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/firebase';
 import { collection, addDoc, getDocs, query, orderBy, limit, doc, setDoc, getDoc } from 'firebase/firestore';
 import { SincronizadorTranscricao, type ChamarTranscricao } from '../utils/transcricaoAoVivo';
+import { montarTextoReuniao, nomeArquivoReuniao } from '../utils/arquivoReuniao';
+import { formatarCabecalhoConsentimento } from '../utils/reuniaoAgenda';
 
 export interface TranscriptionEntry {
   id: string;
@@ -30,6 +32,12 @@ export interface MeetingHistoryEntry {
   driveWebViewLink?: string;
   consentimentoAviso?: RegistroConsentimento | null;
   eventoCalendarId?: string | null;
+}
+
+/** Evento da agenda escolhido no painel ("Gravar"): a tela da reunião abre com ele. */
+export interface EventoParaGravar {
+  id: string | null;
+  titulo: string;
 }
 
 export interface RecordingMeta {
@@ -168,6 +176,12 @@ export function useMeetingRecordingEngine(
   const [deepgramKey, setDeepgramKey] = useState<string | null>(null);
   const [chaveRejeitada, setChaveRejeitada] = useState(false);
   const [registroConsentimento, setRegistroConsentimento] = useState<RegistroConsentimento | null>(null);
+  const [eventoParaGravar, setEventoParaGravar] = useState<EventoParaGravar | null>(null);
+  // Gravação no ar: o id da sessão ao vivo (o painel o usa para saber se o
+  // Claude está acompanhando) e o título mostrado no selo de "gravando".
+  const [sessaoAoVivoId, setSessaoAoVivoId] = useState<string | null>(null);
+  const [tituloGravacao, setTituloGravacao] = useState<string | null>(null);
+  const [driveSalvo, setDriveSalvo] = useState<{ meetingId: string; webViewLink: string } | null>(null);
 
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const systemRecorderRef = useRef<MediaRecorder | null>(null);
@@ -486,6 +500,40 @@ export function useMeetingRecordingEngine(
     }
   }, []);
 
+  // Toda reunião gravada vai sozinha para o Drive (pasta Reuniões) ao parar.
+  // O botão "Salvar no Drive" da tela continua para reuniões antigas e para
+  // quando isto falhar.
+  const salvarNoDrive = useCallback(async (
+    meetingId: string,
+    firestoreId: string,
+    titulo: string,
+    startedAt: Date,
+    ended: Date,
+    falas: TranscriptionEntry[],
+  ) => {
+    if (driveLinkByMeetingIdRef.current[meetingId]) return;
+    try {
+      const salvar = httpsCallable(functions, 'salvarTranscricaoReuniao');
+      const result = await salvar({
+        startedAt: startedAt.toISOString(),
+        endedAt: ended.toISOString(),
+        fileName: nomeArquivoReuniao(startedAt, titulo),
+        privado: true,
+        content: montarTextoReuniao(startedAt, ended, falas, formatarCabecalhoConsentimento(registroConsentimentoRef.current), [], titulo),
+      });
+      const link = (result.data as { webViewLink?: string })?.webViewLink || '';
+      if (!link) return;
+      driveLinkByMeetingIdRef.current[meetingId] = link;
+      setDriveSalvo({ meetingId, webViewLink: link });
+      setMeetingHistory(prev => prev.map(entry => (entry.id === meetingId ? { ...entry, driveWebViewLink: link } : entry)));
+      await setDoc(doc(db, 'reunioes', firestoreId), { driveWebViewLink: link }, { merge: true });
+      showToast('Transcrição salva no Google Drive (pasta Reuniões).', 'success');
+    } catch (err) {
+      console.error('Erro ao salvar a reunião no Drive automaticamente:', err);
+      showToast('Não consegui salvar a transcrição no Drive. Use o botão "Salvar no Drive".', 'error');
+    }
+  }, [showToast]);
+
   const finalizeAndPersistMeeting = useCallback(async (ended: Date) => {
     const startedAt = meetingStartedAtRef.current;
     if (!startedAt) return;
@@ -540,12 +588,13 @@ export function useMeetingRecordingEngine(
           eventoCalendarId: eventoId,
         } : entry
       ));
+      await salvarNoDrive(meetingId, docRef.id, titulo, startedAt, ended, transcriptSnapshot);
     } catch (err) {
       console.error('Erro ao salvar reunião no Firestore:', err);
     } finally {
       setIsTitleGenerating(false);
     }
-  }, [generateMeetingTitle]);
+  }, [generateMeetingTitle, salvarNoDrive]);
 
   const finalizeAndPersistMeetingRef = useRef(finalizeAndPersistMeeting);
   useEffect(() => {
@@ -583,6 +632,7 @@ export function useMeetingRecordingEngine(
       const ended = new Date();
       setMeetingEndedAt(ended);
       setIsRecording(false);
+      setSessaoAoVivoId(null);
 
       if (persistHistory) {
         persistCurrentMeetingToHistory(ended);
@@ -667,6 +717,10 @@ export function useMeetingRecordingEngine(
       });
       sincronizadorRef.current = sincronizador;
       ultimoSincronizadorRef.current = sincronizador;
+      setSessaoAoVivoId(sincronizador.sessaoId);
+      setTituloGravacao(tituloInicial);
+      setDriveSalvo(null);
+      setEventoParaGravar(null);
       if (sincronizadorIntervaloRef.current !== null) window.clearInterval(sincronizadorIntervaloRef.current);
       sincronizadorIntervaloRef.current = window.setInterval(() => { void sincronizador.tick(); }, TRANSCRICAO_AO_VIVO_INTERVALO_MS);
       void sincronizador.tick();
@@ -807,6 +861,11 @@ export function useMeetingRecordingEngine(
     setChaveRejeitada,
     registroConsentimento,
     setRegistroConsentimento,
+    eventoParaGravar,
+    setEventoParaGravar,
+    sessaoAoVivoId,
+    tituloGravacao,
+    driveSalvo,
     // refs (leitura ao vivo sem re-render; escrita pontual pela view em pontos específicos)
     transcriptsRef,
     meetingStartedAtRef,

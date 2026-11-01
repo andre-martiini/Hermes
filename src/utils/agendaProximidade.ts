@@ -31,9 +31,12 @@ export interface EventoDoDia {
     fimDeclarado: boolean;
     /** Compromisso que o agente achou fora da agenda (tracejado na linha do tempo). */
     foraDaAgenda: boolean;
+    /** Id do evento no Google Agenda (google_calendar_events), quando se sabe. */
+    eventoId?: string | null;
 }
 
 export interface EventoDaAgenda {
+    id?: string;
     titulo: string;
     inicio: string | null;
     fim: string | null;
@@ -97,6 +100,7 @@ export const eventosDoDia = (
             fim: fimDeclarado ? (fimBruto as number) : inicio + DURACAO_PADRAO_MIN,
             fimDeclarado,
             foraDaAgenda: false,
+            eventoId: e.id ?? null,
         });
     });
     (foraDaAgenda || []).forEach((e, i) => {

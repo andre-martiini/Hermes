@@ -46,3 +46,14 @@ Uso típico pelo Claude: `listar_transcricoes_ao_vivo` → `ler_transcricao_ao_v
 1. Abrir Ferramentas › Reuniões em Tempo Real, gravar com o áudio de um vídeo do YouTube tocando.
 2. Conferir no console do Firebase a sessão em `transcricoes_ao_vivo` com `ultimo_seq` subindo a cada ~10 s.
 3. Parar: a sessão vira `encerrada` e, alguns segundos depois, ganha o título e o `reuniao_id`.
+
+## Acompanhamento pelo Claude (01/11/2026)
+
+O Claude acompanha a reunião sozinho, sem o André chamar a cada pergunta.
+
+- **Como o André usa:** no painel, "● Gravar" no evento da agenda de hoje (ou Ferramentas › Reuniões em Tempo Real) → aviso de consentimento → compartilha o áudio. No app do Claude, `/reuniao` (ou "acompanha a reunião"). Para parar: "Parar" no selo do painel, na pílula flutuante ou na tela da reunião. A transcrição vai sozinha para o Drive, pasta Reuniões, privada.
+- **Skill:** `skills/reuniao/SKILL.md` — contexto inicial, três intervenções em forma de fala (pergunta ao André, divergência, compromisso C1, C2…), ata e um bloco único de mudanças no Gaspar aprovado no fim. Instalação local: copiar `skills/reuniao/SKILL.md` e `scripts/acompanhar_reuniao.py` para `~/.claude/skills/reuniao/`.
+- **Leitor:** `scripts/acompanhar_reuniao.py`, rodado pelo Monitor do Claude Code neste computador (onde está a sessão do Claude; o notebook-servidor não entra). Lê `trechos` a cada 3 s com a conta de serviço (`firebase_service_account_key.json`, ou `GASPAR_SA_KEY`; `GASPAR_RAIZ` aponta o repositório), manda cada fala dos outros ao Jev com os 8 trechos anteriores e imprime `URGENTE` (pergunta ou problema ≥ 0,6) na hora ou `LOTE` a cada 60 s; `ENCERRADA` quando a sessão fecha; `SEM SINAL` depois de 2 min sem nada do navegador. Jev fora do ar = só lote. O Monitor expira a cada 30 min; a skill religa com `--sessao` e `--apos-seq`.
+- **Por que essa régua:** teste de 01/11 com as 5 reuniões de outubro (1.400 trechos, 3,4 h; diário da ação `186e2bd8`). Pergunta ou problema ≥ 0,6 só nas falas dos outros: 31 de 33 momentos urgentes, ~35 alertas/h, 0,19 s por trecho, ~US$ 0,01/h. Fato verificável no gatilho quase dobrava os alertas sem ganho; fica para o lote.
+- **Sinal no painel:** `acompanhamento_claude/{sessao}` (`ativo`, `visto_em` a cada 30 s); "Claude acompanhando" com sinal de até 75 s.
+- **Terceiros:** as falas dos outros vão também à TypeSafe (Jev); o aviso de consentimento diz isso.

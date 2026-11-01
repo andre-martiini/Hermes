@@ -66,8 +66,10 @@ service cloud.firestore {
     // Coleções com leitura liberada ao dono (visibilidade na UI), mas
     // escrita direta do cliente bloqueada: quem decide o estado é sempre
     // o servidor (detectores de atenção, scheduler de promessas).
+    // acompanhamento_claude/{sessao}: sinal de vida do leitor local da skill
+    // `reuniao` (Admin SDK); o painel lê para mostrar "Claude acompanhando".
     function isColecaoSomenteLeitura(collectionId) {
-      return collectionId in ['atencao', 'promessas_abertas'];
+      return collectionId in ['atencao', 'promessas_abertas', 'acompanhamento_claude'];
     }
 
     // briefing_dia/{YYYY-MM-DD}: o briefing das 05:00 em itens, escrito pelo
