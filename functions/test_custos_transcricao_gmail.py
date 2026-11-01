@@ -22,6 +22,7 @@ from unittest import mock
 
 from google.api_core.exceptions import AlreadyExists
 
+import fatura_cartao
 import main
 
 
@@ -99,6 +100,21 @@ class _Collection(_Query):
         return (None, ref)
 
 
+class _Batch:
+    def __init__(self):
+        self._ops = []
+
+    def set(self, ref, data, merge=False):
+        self._ops.append(lambda: ref.set(data, merge=merge))
+
+    def delete(self, ref):
+        self._ops.append(ref.delete)
+
+    def commit(self):
+        for op in self._ops:
+            op()
+
+
 class _Db:
     def __init__(self):
         self.stores: dict[str, dict] = {}
@@ -107,6 +123,9 @@ class _Db:
 
     def collection(self, name):
         return _Collection(self, name)
+
+    def batch(self):
+        return _Batch()
 
     def doc_data(self, collection, key):
         return self.stores.get(collection, {}).get(key)
@@ -664,6 +683,83 @@ class TestSyncBoletosSemRearquivar(unittest.TestCase):
         m_keys.assert_not_called()
         self.assertFalse(FINANCEIRAS.intersection(db.streamed))
         self.assertEqual(_arquivados(gs), [])
+
+
+class TestFaturaCartaoPendente(unittest.TestCase):
+    """E-mail de cartão cujo boleto já existe mas os lançamentos nunca foram
+    extraídos (chegou antes da senha do PDF ser cadastrada) -- a sincronização
+    tem que destravar isso sozinha, sem refazer a leitura do boleto."""
+
+    def _mensagem_xp(self):
+        return {
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "fatura@xpi.com.br"},
+                    {"name": "Subject", "value": "A fatura do seu cartão XP chegou"},
+                ],
+                "parts": [
+                    {"filename": "fatura.pdf", "body": {"attachmentId": "att1"}},
+                ],
+            },
+        }
+
+    def _rodar(self, db, gs, genai=None):
+        gs.users.return_value.messages.return_value.get.return_value.execute.return_value = (
+            self._mensagem_xp()
+        )
+        gs.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
+            "data": "ZmFrZS1wZGY="  # "fake-pdf"
+        }
+        genai = genai or mock.Mock()
+        genai.Client.return_value.models.generate_content.return_value.text = (
+            '{"cabecalho": {"total": 1209.30, "vencimento": "2026-11-05", '
+            '"competencia": "2026-11"}, "itens": [{"data": "2026-10-05", '
+            '"estabelecimento": "LOJA X", "valor": 1209.30}]}'
+        )
+        keys = mock.Mock(exists=True)
+        keys.to_dict.return_value = {"gemini_api_key": "chave-de-teste"}
+        with mock.patch("main.get_db", return_value=db), \
+             mock.patch("main.log_to_firestore"), \
+             mock.patch("main.emit_notification_backend"), \
+             mock.patch("main.find_password_config", return_value=None), \
+             mock.patch("main.prepare_pdf_for_gemini", return_value=(b"decrypted-pdf", None)), \
+             mock.patch("main.get_genai_module", return_value=genai), \
+             mock.patch("fatura_cartao.avisar_importacao"), \
+             mock.patch("main._cached_doc_get", return_value=keys):
+            resultado = main.sync_boletos_gmail(gs, mock.Mock(), [])
+        self.assertIsNot(resultado, False)
+
+    def test_tenta_de_novo_quando_o_boleto_existe_sem_fatura_extraida(self):
+        db = _Db()
+        db.collection("fixed_bills").document("xp-nov").set({
+            "description": "Fatura XP", "amount": 1209.30, "dueDay": 5,
+            "month": 10, "year": 2026, "google_message_id": "xp1",
+        })
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["xp1"]})
+        self._rodar(db, gs)
+
+        gs.users.return_value.messages.return_value.get.assert_called_once()
+        faturas = db.stores.get(fatura_cartao.COL_FATURAS, {})
+        self.assertEqual(list(faturas.keys()), ["xp-2026-11"])
+        self.assertEqual(faturas["xp-2026-11"]["total"], 1209.30)
+        itens = db.stores.get(fatura_cartao.COL_ITENS, {})
+        self.assertEqual(len(itens), 1)
+
+    def test_nao_tenta_de_novo_quando_a_fatura_ja_foi_extraida(self):
+        """Segunda sincronização, com `fatura_cartao` já gravado para este e-mail:
+        não pode tentar de novo pra sempre, nem chamar o Gmail outra vez."""
+        db = _Db()
+        db.collection("fixed_bills").document("xp-nov").set({
+            "description": "Fatura XP", "amount": 1209.30, "dueDay": 5,
+            "month": 10, "year": 2026, "google_message_id": "xp1",
+        })
+        db.collection(fatura_cartao.COL_FATURAS).document("xp-2026-11").set({
+            "fatura_id": "xp-2026-11", "cartao": "xp", "competencia": "2026-11",
+            "google_message_id": "xp1", "total": 1209.30,
+        })
+        gs = _gmail_listas({"in:inbox": [], main.GMAIL_JANELA_RECUPERACAO: ["xp1"]})
+        self._rodar(db, gs)
+        gs.users.return_value.messages.return_value.get.assert_not_called()
 
 
 class TestTruncagemProcessedEmailsCompartilhada(unittest.TestCase):

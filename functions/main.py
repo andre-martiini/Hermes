@@ -2449,6 +2449,15 @@ def sync_boletos_gmail(service, sync_ref, logs):
         # Cache de boletos existentes para permitir duplicatas ou vinculação
         existing_bills_cache = []
         existing_bill_google_ids = set()
+        # E-mails de cartão cujo boleto (conta a pagar) já existe, mas cuja
+        # extração por lançamento ainda não rodou -- acontece quando o e-mail
+        # chegou antes da senha do PDF ser cadastrada: o boleto genérico lê
+        # total/vencimento do corpo do e-mail e já cria a conta, e a partir
+        # daí o e-mail conta como "já lançado" e nunca mais passa pelo bloco
+        # de extração de cartão abaixo. `cartao_pendente_por_msg` reabre essa
+        # porta uma vez (ver uso perto de `existing_bill_google_ids`, mais
+        # abaixo), sem re-rodar a leitura de boleto, que já está certa.
+        cartao_pendente_por_msg = {}
         for b in db.collection('fixed_bills').stream():
             d = b.to_dict()
             existing_bills_cache.append({
@@ -2461,8 +2470,80 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'isPaid': d.get('isPaid', False),
                 'rubricId': d.get('rubricId')
             })
-            if d.get('google_message_id'):
-                existing_bill_google_ids.add(d['google_message_id'])
+            msg_vinculado = d.get('google_message_id')
+            if msg_vinculado:
+                existing_bill_google_ids.add(msg_vinculado)
+                _palavras_da_conta = fatura_cartao._palavras(d.get('description', ''))
+                for _cid, _marcador in fatura_cartao._DESCRICAO_DO_CARTAO.items():
+                    if _marcador in _palavras_da_conta:
+                        cartao_pendente_por_msg[msg_vinculado] = _cid
+                        break
+
+        if cartao_pendente_por_msg:
+            # Só tenta de novo quando `fatura_cartao.salvar` nunca rodou para
+            # este e-mail -- senão toda sincronização tentaria de novo pra
+            # sempre, mesmo depois de já ter extraído com sucesso.
+            _faturas_ja_extraidas = {
+                (h.to_dict() or {}).get('google_message_id')
+                for h in db.collection(fatura_cartao.COL_FATURAS).stream()
+            }
+            cartao_pendente_por_msg = {
+                msg_id: cid for msg_id, cid in cartao_pendente_por_msg.items()
+                if msg_id not in _faturas_ja_extraidas
+            }
+
+        def _processar_fatura_cartao(cartao, msg_id_proc, sender_proc, subject_proc,
+                                      pdf_data_proc, pdf_fallback_proc):
+            """Extrai e grava os lançamentos da fatura de UM e-mail de cartão.
+
+            Compartilhado entre a passada normal e a retentativa de e-mails já
+            vinculados a um boleto (`cartao_pendente_por_msg`, acima). Uma
+            falha aqui nunca pode derrubar a sincronização de boletos -- só
+            cria item na fila de atenção.
+            """
+            if not pdf_data_proc:
+                fatura_cartao.registrar_falha(
+                    db, cartao, msg_id_proc, pdf_fallback_proc or "e-mail sem PDF anexado"
+                )
+                log_to_firestore(
+                    sync_ref, logs,
+                    f"[FATURA] {cartao}: não foi possível ler o PDF de {msg_id_proc} "
+                    f"({pdf_fallback_proc or 'sem anexo'}); item criado na fila de atenção."
+                )
+                return
+            try:
+                _extraido = fatura_cartao.extrair(
+                    client, types, pdf_data_proc,
+                    contexto_email=f"Remetente: {sender_proc}\nAssunto: {subject_proc or ''}",
+                )
+                _resumo = fatura_cartao.salvar(
+                    db, cartao, _extraido, google_message_id=msg_id_proc
+                )
+                log_to_firestore(
+                    sync_ref, logs,
+                    f"[FATURA] {cartao} {_resumo['competencia']}: "
+                    f"{_resumo['itens_gravados']} lançamento(s), total R$ {_resumo['total']}."
+                )
+                fatura_cartao.resolver_falha_se_existir(db, cartao, msg_id_proc)
+                fatura_cartao.verificar_divergencia(db, cartao, _resumo)
+                _correcao = fatura_cartao.corrigir_fixed_bill(db, cartao, _resumo)
+                if _correcao.get("corrigido"):
+                    log_to_firestore(
+                        sync_ref, logs,
+                        f"[FATURA] Total do card corrigido: {_correcao['alteracoes']}"
+                    )
+                elif _correcao.get("motivo"):
+                    log_to_firestore(
+                        sync_ref, logs,
+                        f"[FATURA] Card não corrigido — {_correcao['motivo']}."
+                    )
+                fatura_cartao.avisar_importacao(db, cartao, _resumo)
+            except Exception as _fatura_err:
+                fatura_cartao.registrar_falha(db, cartao, msg_id_proc, str(_fatura_err))
+                log_to_firestore(
+                    sync_ref, logs,
+                    f"[FATURA] Falha ao extrair lançamentos de {msg_id_proc}: {_fatura_err}"
+                )
 
         # Cache de rubricas para vinculação automática
         rubrics_cache = []
@@ -2487,6 +2568,49 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     # Já lançado (google_message_id em fixed_bills) mas fora da lista de
                     # processados: registra, senão ele força o caminho caro em toda rodada.
                     new_processed_ids.append(msg_id)
+                _cartao_pendente = cartao_pendente_por_msg.get(msg_id)
+                if _cartao_pendente:
+                    try:
+                        _msg_pend = service.users().messages().get(
+                            userId='me', id=msg_id
+                        ).execute(num_retries=3)
+                        _sender_pend, _subject_pend = _gmail_message_headers(_msg_pend)
+                        _pdf_pend = None
+                        def _achar_pdf_pendente(part):
+                            nonlocal _pdf_pend
+                            if part.get('parts'):
+                                for sub in part['parts']: _achar_pdf_pendente(sub)
+                            if part.get('filename', '').lower().endswith('.pdf') and part.get('body', {}).get('attachmentId'):
+                                att = service.users().messages().attachments().get(
+                                    userId='me', messageId=msg_id, id=part['body']['attachmentId']
+                                ).execute(num_retries=3)
+                                _pdf_pend = base64.urlsafe_b64decode(att['data'])
+                                return
+                        _achar_pdf_pendente(_msg_pend['payload'])
+                        _pdf_fallback_pend = None
+                        if _pdf_pend:
+                            _senha_pend = None
+                            _config_pend = find_password_config(db, _sender_pend)
+                            if _config_pend:
+                                try:
+                                    _senha_pend = read_password_secret(
+                                        os.environ.get("GCLOUD_PROJECT") or "gestao-hermes",
+                                        _config_pend["secret_id"],
+                                    )
+                                except Exception:
+                                    pass
+                            _pdf_pend, _pdf_fallback_pend = prepare_pdf_for_gemini(
+                                _pdf_pend, passwords=[_senha_pend] if _senha_pend else None,
+                            )
+                        _processar_fatura_cartao(
+                            _cartao_pendente, msg_id, _sender_pend, _subject_pend,
+                            _pdf_pend, _pdf_fallback_pend,
+                        )
+                    except Exception as _pendente_err:
+                        log_to_firestore(
+                            sync_ref, logs,
+                            f"[FATURA] Falha ao tentar lançamentos pendentes de {msg_id}: {_pendente_err}"
+                        )
                 continue
             if msg_id in processed_set: continue
             
@@ -2576,49 +2700,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
             # devolver `pdf_data=None` acima, e sem isso o remetente de cartão
             # ficaria sem nenhum aviso de que a fatura não entrou.
             _cartao = fatura_cartao.e_fatura_de_cartao(sender)
-            if _cartao and not pdf_data:
-                fatura_cartao.registrar_falha(
-                    db, _cartao, msg_id, pdf_fallback_reason or "e-mail sem PDF anexado"
-                )
-                log_to_firestore(
-                    sync_ref, logs,
-                    f"[FATURA] {_cartao}: não foi possível ler o PDF de {msg_id} "
-                    f"({pdf_fallback_reason or 'sem anexo'}); item criado na fila de atenção."
-                )
-            elif _cartao:
-                try:
-                    _extraido = fatura_cartao.extrair(
-                        client, types, pdf_data,
-                        contexto_email=f"Remetente: {sender}\nAssunto: {subject or ''}",
-                    )
-                    _resumo = fatura_cartao.salvar(
-                        db, _cartao, _extraido, google_message_id=msg_id
-                    )
-                    log_to_firestore(
-                        sync_ref, logs,
-                        f"[FATURA] {_cartao} {_resumo['competencia']}: "
-                        f"{_resumo['itens_gravados']} lançamento(s), total R$ {_resumo['total']}."
-                    )
-                    fatura_cartao.resolver_falha_se_existir(db, _cartao, msg_id)
-                    fatura_cartao.verificar_divergencia(db, _cartao, _resumo)
-                    _correcao = fatura_cartao.corrigir_fixed_bill(db, _cartao, _resumo)
-                    if _correcao.get("corrigido"):
-                        log_to_firestore(
-                            sync_ref, logs,
-                            f"[FATURA] Total do card corrigido: {_correcao['alteracoes']}"
-                        )
-                    elif _correcao.get("motivo"):
-                        log_to_firestore(
-                            sync_ref, logs,
-                            f"[FATURA] Card não corrigido — {_correcao['motivo']}."
-                        )
-                    fatura_cartao.avisar_importacao(db, _cartao, _resumo)
-                except Exception as _fatura_err:
-                    fatura_cartao.registrar_falha(db, _cartao, msg_id, str(_fatura_err))
-                    log_to_firestore(
-                        sync_ref, logs,
-                        f"[FATURA] Falha ao extrair lançamentos de {msg_id}: {_fatura_err}"
-                    )
+            if _cartao:
+                _processar_fatura_cartao(_cartao, msg_id, sender, subject, pdf_data, pdf_fallback_reason)
 
             # Formata rubricas para o prompt
             rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']})" for r in rubrics_cache])
