@@ -1,0 +1,12 @@
+{
+  "titulo": "Gaspar Vídeo - Kit - cartões",
+  "formato": "ambos",
+  "cenas": [
+    {"tipo": "numero", "etiqueta": "Prestação de contas", "titulo": "Recurso executado em 2026",
+     "valor": 1250000, "prefixo": "R$ ", "rotulo": "valores fictícios", "duracao": 5},
+    {"tipo": "ranking", "etiqueta": "Ranking", "titulo": "Onde o recurso foi aplicado",
+     "itens": [["Assistência estudantil", "42%"], ["Pesquisa", "31%"], ["Extensão", "18%"]], "duracao": 5},
+    {"tipo": "fluxo", "etiqueta": "Fluxo", "titulo": "Da demanda ao contrato", "transicao": "wipe",
+     "etapas": ["Demanda", "Planejamento", "Licitação", "Contrato"], "duracao": 6}
+  ]
+}

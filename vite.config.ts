@@ -120,7 +120,8 @@ export default defineConfig(() => {
       // tests/rules/README.md) — excluído do `npm test` padrão para não
       // quebrar o gate normal quando o emulador não está de pé. Roda via
       // `npm run test:rules`, que sobe o emulador antes.
-      exclude: [...defaultExclude, "tests/rules/**"],
+      // skills/** usam o test runner do Node (node --test), não o vitest.
+      exclude: [...defaultExclude, "tests/rules/**", "skills/**"],
     },
   };
 });
