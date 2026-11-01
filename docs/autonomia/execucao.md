@@ -654,26 +654,7 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P08 sub-entrega 18/N -- consumo transacional do orçamento do dispatcher (autonomy/config_dispatcher.py, passo 11): consumir_orcamento(db, quantidade=1) baixa despachos_restantes de configuracoes/autonomia_dispatcher numa transação (@firestore.transactional, leitura e update na mesma transação), tudo ou nada, só em modo ativo, nunca abaixo de zero; devolve a quantidade concedida ou 0. Fail-closed: quantidade inválida (bool, não int, <1), backend sem transação, documento ausente/inválido, saldo insuficiente ou qualquer erro do Firestore = 0 sem conceder. Chamar ANTES de enfileirar. Nada chama o módulo em produção (shadow/off)."
-estado: validado
-inicio: "2026-10-31T16:47:00Z"
-fim: "2026-10-31T17:15:00Z"
-decisoes:
-  - id: p08-sub18-triagem
-    motivo: "PRs abertas #572, #565, #561 e #556 são de outra linha (melhorias): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
-  - id: p08-sub18-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P08 sub 15 arquivado em execucao-archive-p08sub15.md."
-  - id: p08-sub18-escopo
-    motivo: "Fora de escopo: agendamento do dispatcher, Cloud Tasks real, worker HTTP, estorno de orçamento se o enfileiramento falhar depois da baixa (perde-se orçamento, lado seguro)."
-testes:
-  resultados:
-    - "functions/ completo ANTES 5147 OK (diário, P08 sub 17); DEPOIS 5154 OK (247s; 7 testes novos em test_autonomy_consumo_orcamento)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): não achei nada. Observações aceitas: commit ambíguo (timeout após aplicar) perde orçamento, lado seguro; o duplo de transação dos testes acopla a atributos privados do google-cloud-firestore. Não verificado contra Firestore real."
-pendencias:
-  - "P08: wiring (worker HTTP verificando JWT, Cloud Tasks real, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, agendamento do dispatcher chamando ler_config_dispatcher + consumir_orcamento + decidir_lote, IAM mínimo)."
-```
+# (Em 2026-11-01 o bloco "P08 sub-entrega 18/N" foi movido para docs/autonomia/execucao-archive-p08sub18.md.)
 
 ---
 
@@ -721,4 +702,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): 1 bug real (regex com $ aceitava \\n final no nome) e validação frouxa de espaços na config; corrigidos (fullmatch, sem whitespace) com testes. Rodada 2 (focada na correção): não achei bug; endurecimento aceito (url_worker exige host). Codex na PR #598: 1 achado P2 real (request_id com espaço interno, aceito pelo repositório, era rejeitado e drenava orçamento); agora valida com _validar_id_documento do repositório; teste cobre. Rodada 3 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Cloud Tasks real."
 pendencias:
   - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM, agendar o ciclo, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 21/N -- tratador HTTP do worker (autonomy/worker_http.py, passos 2, 3 e 5): processar_chamada_worker(headers, corpo, config, agora, verificar_token, executar) -> RespostaWorker(status_http, codigo). Ordem fail-closed: Bearer -> verificar_token (injetado) -> autorizar_chamada_worker -> só então lê o corpo JSON {request_id} (único campo, ASCII, validado como id de documento do repositório) -> executar(request_id). StatusRunner.RETENTAR vira 503; os demais 200; exceção da execução 500; sem token 401; não autorizado 403; corpo inválido 400. Mensagens são códigos fixos (nunca ecoam token nem exceção). Nada chama o módulo em produção (shadow/off); criação do endpoint, verificação real do token (google.oauth2.id_token) e IAM ficam para o wiring."
+estado: validado
+inicio: "2026-11-01T16:40:00Z"
+fim: "2026-11-01T17:20:00Z"
+decisoes:
+  - id: p08-sub21-triagem
+    motivo: "PRs abertas #605 (vídeo, atualizada na hora), #585 e #561 (melhorias) são de outra linha: nenhuma tocada. Nenhuma PR da autonomia pendente."
+  - id: p08-sub21-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 18 arquivado em execucao-archive-p08sub18.md."
+  - id: p08-sub21-cloud-tasks
+    motivo: "Cloud Tasks reenvia qualquer resposta não-2xx; 400/401/403/500 também serão retentados até o limite da fila. Configurar max_attempts/backoff da fila é decisão do wiring; documentado no módulo."
+testes:
+  resultados:
+    - "functions/ completo ANTES 5205 OK (diário, P08 sub 20); DEPOIS 5281 OK (206s; 12 testes novos em test_autonomy_worker_http). A diferença para o diário (5205) vem de testes de outras PRs já em main (5269 antes desta)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): sem bypass; achados baixos reais corrigidos: Mapping hostil em headers/claims (agora 401/403), agora ingênuo (ValueError antes de verificar o token), request_id não-ASCII aceito via escape JSON (agora 400); chave JSON duplicada descartada (só chamador autenticado). Rodada 2 (focada na correção): não achei nada."
+pendencias:
+  - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM e max_attempts, agendar o ciclo, endpoint HTTP com verificação real do token ligando executar ao runner, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
 ```
