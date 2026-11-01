@@ -425,12 +425,13 @@ async function main() {
     const nome = (roteiro.titulo || "Gaspar Vídeo").replace(/[<>:"/\\|?*\u0000-\u001f]/g, " -").replace(/\s+/g, " ").trim();
     const mp4 = resolve(saida, `${nome} (${formato}).mp4`);
     const bruto = join(pasta, "bruto.mp4");
+    // Ambiente antes do render: se faltar som ou passar do teto, falha já, sem desperdiçar o render.
+    const ambientes = prepararAmbientes(roteiro, cenas, total, dirname(resolve(arq)), flags);
     hyperframes(["render", "-o", bruto, "-f", String(FPS), "-q", "delivery"], projeto, env);
     // Pós (Fase 3): SFX nos marcadores, trilha com ducking, −14 LUFS, LUT de marca.
     process.env.PATH = env.PATH;
     const trilha = flags.includes("--sem-trilha") || roteiro.trilha === false ? null
       : roteiro.trilha ? resolve(dirname(resolve(arq)), roteiro.trilha) : trilhaPadrao();
-    const ambientes = prepararAmbientes(roteiro, cenas, total, dirname(resolve(arq)), flags);
     const r = await posProduzir({ bruto, projeto, final: mp4, trilha, ambientes, sfx: !flags.includes("--sem-sfx"),
       lut: !flags.includes("--sem-lut") && roteiro.lut !== false });
     const lu = medirLoudness(mp4);

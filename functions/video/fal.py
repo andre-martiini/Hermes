@@ -164,8 +164,10 @@ def _duracao_resultado(resultado: dict) -> float | None:
 def _resolver_arquivos(db, uid: str, arquivos: dict, entrada: dict) -> tuple[dict, list[str]]:
     """`arquivos` = {campo da entrada: {"upload_token": ...} | {"drive_file_id": ...}}: o Hermes busca o arquivo
     (o agente da nuvem não alcança o fal nem tem URL pública), sobe ao bucket do Hermes Vídeo e põe no campo uma
-    URL assinada de 2 h. Campo terminado em "_urls" recebe uma lista. Devolve a entrada nova e os tokens a consumir."""
+    URL assinada de 2 h. Campo terminado em "_urls" recebe uma lista. Devolve a entrada nova, os tokens a consumir e
+    os blobs publicados (para apagar se o envio falhar)."""
     import mimetypes
+    import re
     import uuid
     from types import SimpleNamespace
 
@@ -175,7 +177,9 @@ def _resolver_arquivos(db, uid: str, arquivos: dict, entrada: dict) -> tuple[dic
     from video.midia import BUCKET
 
     ctx = SimpleNamespace(db=db, user_uid=uid)
-    nova, tokens = copy.deepcopy(entrada), []
+    nova, tokens, blobs = copy.deepcopy(entrada), [], []
+    if not isinstance(arquivos, dict):
+        raise ErroFal("`arquivos` precisa ser um objeto {campo: {upload_token | drive_file_id}}.")
     for campo, ref in arquivos.items():
         fontes = [k for k in ("upload_token", "drive_file_id") if isinstance(ref, dict) and ref.get(k)]
         if len(fontes) != 1:
@@ -184,16 +188,30 @@ def _resolver_arquivos(db, uid: str, arquivos: dict, entrada: dict) -> tuple[dic
             dados, nome = anexar_arquivo._resolver_conteudo(ctx, {fontes[0]: ref[fontes[0]]})
         except ValueError as e:
             raise ErroFal(f"arquivos.{campo}: {e}") from e
-        blob = storage.Client().bucket(BUCKET).blob(f"tmp/fal/{uid}/{uuid.uuid4().hex[:12]}/{nome}")
-        blob.upload_from_string(dados, content_type=mimetypes.guess_type(nome)[0] or "application/octet-stream")
-        url = anexar_arquivo.assinar(blob, minutos=120)
+        nome = re.sub(r"[^\w.-]", "_", str(nome).replace("\\", "/").rsplit("/", 1)[-1])[:80] or "arquivo"
+        try:
+            blob = storage.Client().bucket(BUCKET).blob(f"tmp/fal/{uid}/{uuid.uuid4().hex[:12]}/{nome}")
+            blob.upload_from_string(dados, content_type=mimetypes.guess_type(nome)[0] or "application/octet-stream")
+            blobs.append(blob)
+            url = anexar_arquivo.assinar(blob, minutos=120)
+        except Exception as e:  # noqa: BLE001 — storage/IAM: erro legível, não traceback
+            _apagar(blobs)
+            raise ErroFal(f"arquivos.{campo}: não consegui publicar o arquivo ({type(e).__name__}: {str(e)[:200]})") from e
         if campo.endswith("_urls"):
             nova.setdefault(campo, []).append(url)
         else:
             nova[campo] = url
         if fontes[0] == "upload_token":
             tokens.append(ref["upload_token"])
-    return nova, tokens
+    return nova, tokens, blobs
+
+
+def _apagar(blobs):
+    for b in blobs:
+        try:
+            b.delete()
+        except Exception:  # noqa: BLE001 — limpeza é melhor esforço
+            pass
 
 
 def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=None) -> dict:
@@ -223,13 +241,14 @@ def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=
                 "teto_sem_confirmacao_usd": TETO_CONFIRMACAO_USD,
                 "mensagem": f"Custo estimado US$ {custo:.2f} passa do teto de US$ {TETO_CONFIRMACAO_USD:.2f}. "
                             f"Mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd={custo}."}
-    tokens = []
+    tokens, blobs = [], []
     try:
         if args.get("arquivos"):
-            entrada, tokens = _resolver_arquivos(db, uid, args["arquivos"], entrada)
+            entrada, tokens, blobs = _resolver_arquivos(db, uid, args["arquivos"], entrada)
         api_key = chave(db)
         job = executar(modelo, entrada, api_key, http=http)
     except ErroFal as e:
+        _apagar(blobs)  # nada foi enviado: o arquivo publicado não serve a ninguém
         return {"erro": str(e)}
     if tokens:
         from types import SimpleNamespace

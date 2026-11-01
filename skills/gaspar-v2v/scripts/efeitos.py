@@ -594,7 +594,7 @@ def refinar_alfa(a: np.ndarray, anterior: np.ndarray | None, nucleo: np.ndarray 
 
 def recortar(video: Path, destino: Path, pasta: Path, *, modelo: str = "rvm_resnet50_fp32", reducao: float = 0.25) -> Path:
     """Pessoa com alfa suave (WebM VP9 com alfa, 1080×1920, 30 fps). Com cache pelo horário do vídeo."""
-    if destino.exists() and destino.stat().st_mtime > video.stat().st_mtime:
+    if destino.exists() and destino.stat().st_mtime > video.stat().st_mtime and (pasta / "rastro.json").exists():
         return destino
     sess = _rvm(modelo)
     rastro = rastrear(video, pasta)

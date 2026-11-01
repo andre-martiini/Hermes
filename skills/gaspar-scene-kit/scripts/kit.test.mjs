@@ -166,3 +166,15 @@ test("versão em outro idioma: o número segue o locale do roteiro", () => {
   assert.match(gerarHtml({ cenas: [cena] }, "vertical").html, /"locale":"pt-BR"/);
   assert.match(gerarHtml({ idioma: "en", cenas: [cena] }, "vertical").html, /"locale":"en-US"/);
 });
+
+import { execFileSync as execPy } from "node:child_process";
+import { homedir } from "node:os";
+
+test("siglas: corrige Redtec→Reditec e ifes→Ifes, mas não troca palavra comum por sigla", () => {
+  const py = process.env.GASPAR_PY || pj(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const saida = execPy(py, ["-c", `import sys, json; sys.path.insert(0, ${JSON.stringify(new URL(".", import.meta.url).pathname.replace(/^\/(\w:)/, "$1"))})
+from legendas import corrigir_siglas
+ws = ["Redtec!", "mago", "ifes", "pago", "magro", "fies", "gastar"]
+print(json.dumps([p["w"] for p in corrigir_siglas([{"w": w, "p": 0.5} for w in ws], ["Reditec", "MAGO", "Ifes", "Gaspar"])]))`]).toString();
+  assert.deepEqual(JSON.parse(saida), ["Reditec!", "mago", "Ifes", "pago", "magro", "fies", "gastar"]);
+});

@@ -241,3 +241,21 @@ class TestArquivos(unittest.TestCase):
 
     def test_som_de_ambiente_tem_preco(self):
         self.assertEqual(fal.estimar_custo("fal-ai/elevenlabs/sound-effects/v2", segundos=20), 0.04)
+
+
+class TestArquivosFalhas(unittest.TestCase):
+    def test_falha_ao_assinar_vira_erro_e_apaga_o_publicado(self):
+        from unittest import mock
+
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+        blob = mock.MagicMock()
+        cliente = mock.MagicMock()
+        cliente.return_value.bucket.return_value.blob.return_value = blob
+        with mock.patch("tools.anexar_arquivo._resolver_conteudo", return_value=(b"x", "a/../b c.mp4")), \
+                mock.patch("tools.anexar_arquivo.assinar", side_effect=ValueError("sem IAM")), \
+                mock.patch("google.cloud.storage.Client", cliente):
+            r = fal.executar_tool(db, "u", {"modelo": TestTool.KLING, "entrada": {}, "segundos": 5,
+                                            "arquivos": {"video_url": {"drive_file_id": "d"}}}, http=lambda *a, **k: 1 / 0)
+        self.assertIn("não consegui publicar", r["erro"])
+        blob.delete.assert_called_once()
+        self.assertTrue(cliente.return_value.bucket.return_value.blob.call_args[0][0].endswith("/b_c.mp4"))

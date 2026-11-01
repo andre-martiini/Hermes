@@ -5,7 +5,7 @@
 // O áudio do bruto é a "voz" (narração do motion ou som original da gravação na sobreposição).
 // O pico de cada SFX cai no pico da curva (marcador do kit.js), não no início do arquivo.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -153,6 +153,16 @@ export async function posProduzir({ bruto, projeto, final, trilha = trilhaPadrao
     "-filter_complex", `${filtro};[mix]${norm},${LIMITADOR},aresample=48000[a]`, "-map", "0:v", "-map", "[a]",
     ...video, "-c:v", lut ? "libx264" : "copy", ...(lut ? ["-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"] : []),
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-t", String(total), resolve(final)], { cwd: dirname(lutArq) });
+  // O limitador tira volume quando a voz tem muitos picos (dublagem: −15,1 LUFS no teste de 01/11/2026).
+  // Mede o arquivo final e, se saiu do alvo, corrige com ganho fixo + limitador de novo (só o áudio).
+  const lu = medirLoudness(resolve(final));
+  if (Math.abs(lu.I - ALVO.I) > 0.4) {
+    const tmp = resolve(final) + ".aj.mp4";
+    ff(["-loglevel", "error", "-i", resolve(final), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+      "-af", `volume=${(ALVO.I - lu.I).toFixed(2)}dB,${LIMITADOR},aresample=48000`, "-c:a", "aac", "-b:a", "192k",
+      "-movflags", "+faststart", tmp]);
+    renameSync(tmp, resolve(final));
+  }
   return { total, voz, sfx: usos.length };
 }
 

@@ -28,14 +28,17 @@ def _gerar(prompt: str, seg: float, bruto: Path) -> tuple[str, float]:
     sys.path.insert(0, str(RAIZ / "functions"))
     sys.path.insert(0, str(RAIZ / "skills" / "gaspar-v2v" / "scripts"))
     entrada = {"text": prompt, "duration_seconds": seg, "loop": True, "prompt_influence": 0.4}
-    try:
-        from v2v import rodar_fal
+    from v2v import rodar_fal
 
+    try:
         r = rodar_fal("fal-ai/elevenlabs/sound-effects/v2", entrada, segundos=seg)
-        urllib.request.urlretrieve(r["urls"][0], bruto)
-        return "fal-ai/elevenlabs/sound-effects/v2", float(r.get("custo_real_usd") or seg * 0.002)
-    except (SystemExit, Exception) as e:  # noqa: BLE001 — qualquer falha do fal cai no ElevenLabs direto
+    except (SystemExit, Exception) as e:  # noqa: BLE001 — o fal não gerou (fora do ar, sem saldo): ElevenLabs direto
+        if "aprovado-ate" in str(e):  # teto de custo: nunca contornar a aprovação
+            raise
         print(f"aviso: fal indisponível para o ambiente ({str(e)[:120]}); usando o ElevenLabs direto", file=sys.stderr)
+    else:
+        urllib.request.urlretrieve(r["urls"][0], bruto)  # já pago: se o download falhar, falha (sem gerar de novo)
+        return "fal-ai/elevenlabs/sound-effects/v2", float(r.get("custo_real_usd") or seg * 0.002)
     import requests
     from efeitos import _chave_eleven
 

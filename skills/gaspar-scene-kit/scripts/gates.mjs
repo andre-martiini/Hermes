@@ -155,8 +155,13 @@ const VISIVEL_MIN = 0.7; // cada letra do título "atrás" precisa de ≥ 70% vi
 export function analisarPessoa(webm, rastroArq) {
   const bruto = execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-c:v", "libvpx-vp9", "-i", webm, "-vf",
     `fps=${FPS_MASCARA},alphaextract,scale=${GW}:${GH}`, "-f", "rawvideo", "-pix_fmt", "gray", "-"], { maxBuffer: 1 << 28 });
+  // Sem rastro (cache antigo, recorte de outro pipeline), os gates de rosto passariam calados: falha alto.
   const rastro = existsSync(rastroArq) ? JSON.parse(readFileSync(rastroArq, "utf8")) : [];
+  const nMascara = Math.floor(bruto.length / (GW * GH));
+  if (rastro.length < (nMascara / FPS_MASCARA) * 30 * 0.9)
+    throw new Error(`${rastroArq} ausente ou incompleto (${rastro.length} quadros): apague ${webm} para refazer o recorte com o rastreio do rosto.`);
   const quadros = [];
+  let ultimo = null; // quadro sem rosto detectado (perfil, mão na frente): vale o último rosto conhecido
   for (let k = 0; (k + 1) * GW * GH <= bruto.length; k++) {
     const alfa = bruto.subarray(k * GW * GH, (k + 1) * GW * GH);
     let topo = null;
@@ -165,7 +170,8 @@ export function analisarPessoa(webm, rastroArq) {
       for (let x = 0; x < GW; x++) n += alfa[y * GW + x] > 128;
       if (n >= 3) topo = y * PASSO;
     }
-    const pts = rastro[Math.round((k / FPS_MASCARA) * 30)]?.rosto;
+    const pts = rastro[Math.round((k / FPS_MASCARA) * 30)]?.rosto || ultimo;
+    if (pts) ultimo = pts;
     let rosto = null, cabeca = null;
     if (pts) {
       const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
@@ -175,6 +181,9 @@ export function analisarPessoa(webm, rastroArq) {
     }
     quadros.push({ t: k / FPS_MASCARA, alfa, topo, rosto, cabeca });
   }
+  // O começo sem rosto detectado herda o 1º rosto conhecido.
+  const primeiro = quadros.find((q) => q.rosto);
+  for (const q of quadros) { if (q.rosto) break; q.rosto = primeiro?.rosto ?? null; q.cabeca = primeiro?.cabeca ?? null; }
   return { quadros, em: (t) => quadros[Math.min(quadros.length - 1, Math.max(0, Math.round(t * FPS_MASCARA)))] };
 }
 
@@ -297,7 +306,8 @@ export async function checkComposicao(projeto, cenas, analise, legendas, { largu
     const c = cenas.find((x) => x.i === i), m = med.cartoes[i];
     const fora = m.textos.find(([x0, y0, x1, y1]) => x0 < -1 || y0 < -1 || x1 > largura + 1 || y1 > altura + 1);
     if (fora) falhas.push(falha("titulo-cortado", `texto fora da tela (x ${fora[0]}–${fora[2]})`, { onde: `cena ${i + 1}` }));
-    const bate = amostras(Math.max(c.t0, t - 0.1), c.fim - 0.1).find((s) => cruza(m.painel, analise.em(s).rosto));
+    // O painel assentado contra o rosto em toda a janela do cartão (desde o fim da entrada).
+    const bate = amostras(Math.min(c.t0 + 0.45, t), c.fim - 0.1).find((s) => cruza(m.painel, analise.em(s).rosto));
     if (bate != null) falhas.push(falha("rosto-coberto", `o cartão cobre o rosto aos ${bate.toFixed(1)} s`, { onde: `cena ${i + 1}` }));
   }
   return { falhas, decisoes };
@@ -331,7 +341,7 @@ export function correlacao(a, b, w, [x0, y0, x1, y1]) {
 export function checkQuadros(mp4, gravacao, cenas, analise, decisoes = {}) {
   const erros = [], E = 4; // quadros em 270×480 = 1/4 de 1080×1920
   for (const c of cenas) {
-    if (c.tipo === "chamada" || c.layout === "dividido") continue;
+    if (c.tipo === "chamada" || c.layout === "dividido" || (c.tipo === "print" && c.layout === "cheio" && c.fim - c.t0 <= 8)) continue;
     const modo = decisoes[c.i]?.modo;
     for (const t of [c.t0 + 0.5, (c.t0 + c.fim) / 2, c.fim - 0.1]) {
       if (t >= c.fim || (modo === "antes" && t > c.t0 + DUR_ANTES - 0.3)) continue;

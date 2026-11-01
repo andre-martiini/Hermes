@@ -71,8 +71,26 @@ PARAKEET = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 URL_PARAKEET = f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{PARAKEET}.tar.bz2"
 
 
-def _parakeet(amostras, trecho_s: float = 25.0) -> list[dict]:
-    """Parakeet TDT por trechos de 25 s; tokens BPE ("▁" = começo de palavra) viram palavras com tempo."""
+def cortes(amostras, sr: int = 16000, trecho_s: float = 25.0, busca_s: float = 4.0) -> list[tuple[int, int]]:
+    """Trechos de até `trecho_s`, cortados no ponto mais silencioso (RMS de 0,1 s) dos últimos `busca_s` s de cada
+    um: nunca no meio de uma palavra."""
+    import numpy as np
+
+    j, n, saida, ini = int(0.1 * sr), int(trecho_s * sr), [], 0
+    while ini < len(amostras):
+        fim = ini + n
+        if fim < len(amostras):
+            jan = amostras[fim - int(busca_s * sr):fim]
+            rms = [float(np.sqrt((jan[k:k + j] ** 2).mean())) for k in range(0, len(jan) - j + 1, j)]
+            fim = fim - int(busca_s * sr) + rms.index(min(rms)) * j + j // 2
+        saida.append((ini, min(fim, len(amostras))))
+        ini = fim
+    return saida
+
+
+def _parakeet(amostras) -> list[dict]:
+    """Parakeet TDT por trechos cortados no silêncio; tokens BPE ("▁" = começo de palavra) viram palavras com
+    tempo. Sem probabilidade por palavra no modelo: 0,9."""
     import sherpa_onnx
 
     pasta = Path.home() / ".tutorial-sistema" / "modelos" / PARAKEET
@@ -86,14 +104,16 @@ def _parakeet(amostras, trecho_s: float = 25.0) -> list[dict]:
     rec = sherpa_onnx.OfflineRecognizer.from_transducer(
         encoder=str(pasta / "encoder.int8.onnx"), decoder=str(pasta / "decoder.int8.onnx"),
         joiner=str(pasta / "joiner.int8.onnx"), tokens=str(pasta / "tokens.txt"), model_type="nemo_transducer", num_threads=4)
-    palavras, sr, n = [], 16000, int(trecho_s * 16000)
-    for ini in range(0, len(amostras), n):
+    palavras, sr = [], 16000
+    for ini, fim_trecho in cortes(amostras, sr):
         st = rec.create_stream()
-        st.accept_waveform(sr, amostras[ini:ini + n])
+        st.accept_waveform(sr, amostras[ini:fim_trecho])
         rec.decode_stream(st)
         r, off = st.result, ini / sr
         for k, (tok, t) in enumerate(zip(r.tokens, r.timestamps)):
-            fim = off + (r.timestamps[k + 1] if k + 1 < len(r.timestamps) else len(amostras[ini:ini + n]) / sr)
+            # Fim do token = início do próximo, limitado a 0,6 s (o último não se estica pelo silêncio do trecho).
+            prox = r.timestamps[k + 1] if k + 1 < len(r.timestamps) else (fim_trecho - ini) / sr
+            fim = off + min(prox, t + 0.6)
             if tok.startswith("▁") or tok.startswith(" ") or not palavras or ini and k == 0:
                 palavras.append({"w": tok.lstrip("▁ "), "s": off + t, "e": fim, "p": 0.9})
             else:
@@ -103,20 +123,25 @@ def _parakeet(amostras, trecho_s: float = 25.0) -> list[dict]:
 
 
 def corrigir_siglas(palavras: list[dict], chaves: list[str]) -> list[dict]:
-    """"Redtec", "Mago", "ifes" → grafia das chaves (difflib ≥ 0,75 sem acento/caixa), mantendo a pontuação."""
+    """"Redtec" → "Reditec", "ifes" → "Ifes": grafia das chaves, mantendo a pontuação. Conservador: chave curta
+    (≤ 4 letras) só corrige a caixa; aproximada só com semelhança ≥ 0,85 e no máximo 1 letra de diferença
+    (evita "pago"/"magro" → "MAGO"). Sigla toda em maiúsculas que também é palavra comum ("mago") fica como veio.
+    A confiança não muda: a troca fica marcada em "corrigido_de" e palavra incerta continua na revisão."""
     alvo = {_norm(c): c for c in chaves}
     for p in palavras:
         m = re.match(r"^(\W*)(.*?)(\W*)$", p["w"])
         miolo = _norm(m.group(2))
-        if not miolo:
+        if not miolo or not alvo:
             continue
         melhor = max(alvo, key=lambda c: difflib.SequenceMatcher(a=miolo, b=c).ratio())
-        # Mesma palavra, só a caixa muda: sigla toda em maiúsculas (MAGO) pode ser palavra comum ("mago"), fica.
-        if miolo == melhor and alvo[melhor].isupper():
-            continue
-        if difflib.SequenceMatcher(a=miolo, b=melhor).ratio() >= 0.75 and m.group(2) != alvo[melhor]:
+        if miolo == melhor:
+            troca = not alvo[melhor].isupper()  # "ifes" → "Ifes"; "mago" não vira "MAGO"
+        else:
+            troca = (len(melhor) >= 5 and abs(len(miolo) - len(melhor)) <= 1
+                     and difflib.SequenceMatcher(a=miolo, b=melhor).ratio() >= 0.85)
+        if troca and m.group(2) != alvo[melhor]:
+            p["corrigido_de"] = p["w"]
             p["w"] = m.group(1) + alvo[melhor] + m.group(3)
-            p["p"] = max(p["p"], CONFIANCA_MINIMA)
     return palavras
 
 
