@@ -17,7 +17,7 @@ from typing import Any
 from autonomy.acordar_persistido import ResultadoDespertar
 from autonomy.pedido_repositorio import _validar_id_documento, atualizar_pedido
 from autonomy.requests import DEFAULT_LEASE_SEGUNDOS, _exigir_tz_aware
-from autonomy.runner_aplicacao import reconciliar_resultado_desconhecido
+from autonomy.runner_aplicacao import falhar_por_reconciliacao, reconciliar_resultado_desconhecido
 from autonomy.runs import AgentRun
 
 
@@ -49,6 +49,34 @@ def reconciliar_pedido(
             novo.run is None or novo.run.run_id != atual.run.run_id
         ):
             antigo = atual.run
+        ultimo["antigo"] = antigo
+        return novo
+
+    pedido = atualizar_pedido(db, request_id, _transformar, run_encerrado=lambda: ultimo["antigo"])
+    return ResultadoDespertar(pedido=pedido, run_antigo=ultimo["antigo"])
+
+
+def falhar_pedido_por_reconciliacao(
+    db: Any,
+    request_id: str,
+    motivo: str,
+    executor_id: str,
+    agora: datetime | None = None,
+    duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
+) -> ResultadoDespertar:
+    """Persiste `falhar_por_reconciliacao` (sub 22): pedido terminal `FALHA_FINAL` e o run
+    antigo (fechado aqui ou já terminal do sweep) arquivado na mesma transação."""
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
+    agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    ultimo: dict[str, AgentRun | None] = {"antigo": None}
+
+    def _transformar(atual):
+        novo, antigo = falhar_por_reconciliacao(
+            atual, motivo, agora_resolvido, executor_id, duracao_segundos=duracao_segundos,
+        )
+        if antigo is None and atual.run is not None:
+            antigo = atual.run  # novo.run é sempre None: o run terminal do sweep também sai
         ultimo["antigo"] = antigo
         return novo
 

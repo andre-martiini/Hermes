@@ -261,7 +261,7 @@ def reconciliar_resultado_desconhecido(
     estava ativo e precisou ser fechado por timeout (o wiring persiste os
     dois). Exclusão mútua entre reconciliações concorrentes é do wiring
     (compare-and-swap em `generation`/`status`). `FALHA_FINAL` por
-    reconciliação fica fora desta fatia (selar o ledger exige fencing)."""
+    reconciliação é `falhar_por_reconciliacao` (sub 22)."""
     if not isinstance(pedido, PedidoDuravel):
         raise ValueError("pedido deve ser PedidoDuravel.")
     if not isinstance(efeito_ocorreu, bool):
@@ -334,3 +334,72 @@ def reconciliar_resultado_desconhecido(
         pedido, status=destino, lease=lease_nova, run=run_novo,
         proximo_tentativa_em=None, condicao_espera="",
     ), run_antigo
+
+
+def falhar_por_reconciliacao(
+    pedido: PedidoDuravel,
+    motivo: str,
+    agora: datetime,
+    executor_id: str,
+    duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
+) -> tuple[PedidoDuravel, AgentRun | None]:
+    """Encerra um `RESULTADO_DESCONHECIDO` em `FALHA_FINAL` (P08, sub 22).
+
+    Saída para o que `reconciliar_resultado_desconhecido` recusa: efeito
+    comprovadamente inexistente mas teto de tentativas esgotado (ou decisão de
+    desistir). NUNCA retenta e não declara o efeito ocorrido: o pedido fica
+    terminal com o ledger selado (`{"motivo", "reconciliacao":
+    "falha_final"}`), então nada reexecuta a operação.
+
+    Selar o ledger exige fencing. Como a lease anterior está vencida (exigida,
+    como nas demais reconciliações), emite lease NOVA (geração + 1) em nome de
+    `executor_id` e sela com o token dela; o token antigo perde o direito.
+    O run antigo é fechado por timeout e devolvido como `run_antigo` (o wiring
+    o arquiva); `pedido.run` do resultado é `None`, como em
+    `acordar_espera_externa` o run substituído sai do pedido. Sem ledger, só
+    transiciona. Função pura; exclusão mútua é do wiring (compare-and-swap)."""
+    if not isinstance(pedido, PedidoDuravel):
+        raise ValueError("pedido deve ser PedidoDuravel.")
+    if not isinstance(agora, datetime) or agora.tzinfo is None or agora.utcoffset() is None:
+        raise ValueError("agora deve ser datetime com fuso.")
+    if not isinstance(motivo, str) or not motivo.strip():
+        raise ValueError("motivo deve ser texto não vazio.")
+    if not isinstance(executor_id, str) or not executor_id.strip():
+        raise ValueError("falha_final exige executor_id.")
+    agora = agora.astimezone(timezone.utc)
+    if pedido.status != RequestStatus.RESULTADO_DESCONHECIDO:
+        raise ValueError(
+            f"pedido '{pedido.request_id}' está em '{pedido.status.value}', "
+            "não 'resultado_desconhecido'."
+        )
+    ok, motivo_transicao = validar_transicao(pedido.status, RequestStatus.FALHA_FINAL)
+    if not ok:
+        raise ValueError(motivo_transicao)
+    if pedido.lease is None:
+        raise LeaseInvalida(f"pedido '{pedido.request_id}' não tem lease anterior para suceder.")
+    if not lease_expirada(pedido.lease, agora=agora):
+        raise LeaseInvalida(
+            f"lease anterior ainda válida (expira em {pedido.lease.expires_at.isoformat()}) "
+            "-- não é possível encerrar antes de expirar."
+        )
+    run_antigo = pedido.run
+    if run_antigo is not None and run_esta_ativo(run_antigo):
+        run_antigo = _run_expirar_por_timeout(run_antigo, lease_expirada=True, agora=agora)
+    else:
+        run_antigo = None
+
+    lease_nova = nova_lease(
+        executor_id, pedido.lease.generation, agora=agora, duracao_segundos=duracao_segundos
+    )
+    base = dataclasses.replace(
+        pedido, lease=lease_nova, run=None, proximo_tentativa_em=None, condicao_espera="",
+    )
+    resultado = {"motivo": motivo.strip(), "reconciliacao": "falha_final"}
+    if base.ledger_entry is not None:
+        novo = registrar_resultado_observado(
+            base, lease_nova.lease_token, lease_nova.generation, resultado,
+            RequestStatus.FALHA_FINAL, agora=agora,
+        )
+    else:
+        novo = dataclasses.replace(base, status=RequestStatus.FALHA_FINAL)
+    return novo, run_antigo

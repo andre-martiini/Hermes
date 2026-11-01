@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from autonomy import pedido_repositorio as repo
 from autonomy.execution import LeaseInvalida
-from autonomy.reconciliar_persistido import reconciliar_pedido
+from autonomy.reconciliar_persistido import falhar_pedido_por_reconciliacao, reconciliar_pedido
 from autonomy.requests import RequestStatus
 from autonomy.runs import AgentRunStatus
 from test_autonomy_pedido_repositorio import _Db
@@ -97,6 +97,28 @@ class TestReconciliarPedido(unittest.TestCase):
     def test_retentativa_sem_continuar_em_recusa(self):
         with self.assertRaises(ValueError):
             reconciliar_pedido(self.db, self.rid, False, agora=self.agora)
+        self.assertEqual(self.db.docs[self.rid]["revisao"], 1)
+
+    def test_falha_final_persiste_e_arquiva_run_do_sweep(self):
+        r = falhar_pedido_por_reconciliacao(self.db, self.rid, "desistiu", "ex-b", agora=self.agora)
+        self.assertEqual(r.pedido.status, RequestStatus.FALHA_FINAL)
+        self.assertEqual(repo.ler_pedido(self.db, self.rid), r.pedido)
+        self.assertEqual(r.run_antigo, self.p.run)
+        self.assertIn(f"{self.arq}/{self.p.run.run_id}", self.db.docs)
+        with self.assertRaises(ValueError):
+            falhar_pedido_por_reconciliacao(self.db, self.rid, "de novo", "ex-c", agora=self.agora)
+
+    def test_falha_final_com_run_ativo_arquiva_timeout(self):
+        db, p, agora = self._com_run_ativo()
+        r = falhar_pedido_por_reconciliacao(db, p.request_id, "x", "ex-b", agora=agora)
+        self.assertEqual(r.run_antigo.status, AgentRunStatus.TIMEOUT)
+        gravado = db.docs[f"{p.request_id}/{repo.SUBCOLECAO_RUNS_ENCERRADOS}/{p.run.run_id}"]
+        self.assertEqual(gravado["status"], AgentRunStatus.TIMEOUT.value)
+
+    def test_falha_final_lease_valida_recusa_sem_gravar(self):
+        with self.assertRaises(LeaseInvalida):
+            falhar_pedido_por_reconciliacao(
+                self.db, self.rid, "x", "ex-b", agora=self.p.lease.expires_at - timedelta(seconds=1))
         self.assertEqual(self.db.docs[self.rid]["revisao"], 1)
 
     def test_inexistente_e_agora_sem_fuso(self):

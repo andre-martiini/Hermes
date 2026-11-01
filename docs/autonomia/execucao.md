@@ -658,28 +658,8 @@ pacote_concluido: P07
 
 ---
 
-```yaml
-pacote: "P08 sub-entrega 19/N -- ciclo do dispatcher (autonomy/ciclo_dispatcher.py, passos 3, 4 e 11): executar_ciclo(db, enfileirar, agora, limite) lê a config (off = não toca em pedidos), lê até 5 páginas (cursor por id) de pedidos PENDENTE/RETENTATIVA_AGENDADA, decide com decidir_lote e executa: shadow só devolve o que seria enfileirado; ativo baixa 1 do orçamento (consumir_orcamento) ANTES de chamar o enfileirar(nome, payload) injetado. config_dispatcher ganhou devolver_orcamento (estorno transacional, só ativo). JaDespachado (ALREADY_EXISTS) estorna a baixa; falha genérica do enfileirador não estorna (resultado ambíguo, lado seguro). Falha da consulta vira erro sem enfileirar. Nada chama o módulo em produção (shadow/off)."
-estado: validado
-inicio: "2026-10-31T19:48:00Z"
-fim: "2026-10-31T20:30:00Z"
-decisoes:
-  - id: p08-sub19-triagem
-    motivo: "PRs abertas #586, #585 e #561 são de outra linha (melhorias/upload/finanças): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma execução paralela da linha."
-  - id: p08-sub19-arquivo
-    motivo: "execucao.md acima de ~50KB: bloco P08 sub 16 arquivado em execucao-archive-p08sub16.md."
-  - id: p08-sub19-estorno
-    motivo: "Achado da rodada 1 (pedido segue PENDENTE e reaparece a cada passada, drenando o orçamento): estorno em duplicata. Rodada 2 apontou que estornar em falha genérica pode deixar despacho real fora da conta: removido, orçamento fica gasto nesse caso."
-  - id: p08-sub19-escopo
-    motivo: "Fora de escopo: agendamento (função/scheduler), enfileirador Cloud Tasks real, worker HTTP, observabilidade de estorno que falhou, pedidos além de 5 páginas."
-testes:
-  resultados:
-    - "functions/ completo ANTES 5159 OK (main); DEPOIS 5174 OK (214s; 15 testes novos em test_autonomy_ciclo_dispatcher e test_autonomy_consumo_orcamento)."
-revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): 4 achados reais -- vazamento de orçamento por redespacho, falha do enfileirador gastando orçamento, bloqueio de cabeça de fila (limite sem paginação), exceção da consulta escapando; corrigidos (estorno em duplicata, paginação por cursor, consulta em try, agora não-datetime = ValueError). Rodada 2 (focada na correção): nenhum bug; 2 riscos baixos: estorno em falha ambígua (corrigido: não estorna) e estorno que falha sem observabilidade (aceito, fail-closed). Codex na PR #587: 1 achado P1 real (snapshot do saldo em decidir_lote consumia a vaga de uma duplicata estornada e deixava candidatos seguintes sem despacho, fome por ids baixos); agora o teto de decidir_lote é len(pedidos) e a baixa transacional impõe o limite; teste cobre. Rodada 3 (focada na correção, agente sem contexto, somente leitura): não achei nada. Não verificado contra Firestore/Cloud Tasks reais."
-pendencias:
-  - "P08: wiring (agendar o ciclo, enfileirador Cloud Tasks real tratando ALREADY_EXISTS como JaDespachado, worker HTTP verificando JWT, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt, IAM mínimo)."
-```
+
+# (Em 2026-11-01 o bloco "P08 sub-entrega 19/N" foi movido para docs/autonomia/execucao-archive-p08sub19.md.)
 
 ---
 
@@ -725,4 +705,27 @@ revisao_adversarial:
   - "Rodada 1 (agente sem contexto, somente leitura): sem bypass; achados baixos reais corrigidos: Mapping hostil em headers/claims (agora 401/403), agora ingênuo (ValueError antes de verificar o token), request_id não-ASCII aceito via escape JSON (agora 400 -- REVERTIDO em seguida, ver Codex); chave JSON duplicada descartada (só chamador autenticado). Rodada 2 (focada na correção): não achei nada. Codex na PR #606: 1 achado P2 real (a regra ASCII era incompatível com _validar_id_documento/enfileirador, que aceitam ids não-ASCII válidos: a tarefa seria retentada para sempre com o orçamento já gasto); removida, o worker usa só o validador do repositório (qualquer forma do JSON); teste cobre. Rodada 3 (focada, agente sem contexto): 1 achado real (MAX_CORPO_BYTES 4096 rejeitava o id astral máximo de 1500 bytes que o enfileirador serializa com escapes ASCII = 4518 bytes; limite subido para 16384, teste cobre). Rodada 4 (focada na correção): não achei nada."
 pendencias:
   - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM e max_attempts, agendar o ciclo, endpoint HTTP com verificação real do token ligando executar ao runner, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
+```
+
+---
+
+```yaml
+pacote: "P08 sub-entrega 22/N -- saída FALHA_FINAL para RESULTADO_DESCONHECIDO (autonomy/runner_aplicacao.py: falhar_por_reconciliacao; autonomy/reconciliar_persistido.py: falhar_pedido_por_reconciliacao, passo 5/6): fecha o caso que reconciliar_resultado_desconhecido recusa (efeito inexistente mas teto de tentativas esgotado, ou decisão de desistir). Exige lease anterior vencida, emite lease NOVA (geração + 1) em nome de executor_id e sela o ledger com o token dela (fencing), resultado {motivo, reconciliacao: falha_final}; sem ledger só transiciona. Run antigo ativo é fechado por timeout; run (ativo ou já terminal do sweep) sai do pedido (run=None) e é arquivado na mesma transação. Nunca retenta nem declara o efeito ocorrido. Nada chama o módulo em produção (shadow/off)."
+estado: validado
+inicio: "2026-11-01T19:48:00Z"
+fim: "2026-11-01T20:15:00Z"
+decisoes:
+  - id: p08-sub22-triagem
+    motivo: "PRs abertas #608, #607, #585 e #561 são de outra linha (melhorias/grafo): nenhuma tocada. Nenhuma PR da autonomia pendente; nenhuma branch claude/* atualizada na última hora além desta."
+  - id: p08-sub22-arquivo
+    motivo: "execucao.md acima de ~50KB: bloco P08 sub 19 arquivado em execucao-archive-p08sub19.md."
+  - id: p08-sub22-escopo
+    motivo: "Fora de escopo: AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), quem decide chamar a falha final (política de reconciliação no wiring), limite de tamanho de motivo."
+testes:
+  resultados:
+    - "functions/ completo ANTES 5282 OK (main, 186s); DEPOIS 5292 OK (191s; 10 testes novos em test_autonomy_runner_aplicacao e test_autonomy_reconciliar_persistido)."
+revisao_adversarial:
+  - "Rodada 1 (agente sem contexto, somente leitura): não achei bug real; observações baixas sem impacto (duracao_segundos=True herdado de nova_lease, motivo sem limite de tamanho, lease nova ainda válida no pedido terminal). Lógica pura com wrapper sobre padrão existente: uma rodada sem achado. Não verificado contra Firestore real."
+pendencias:
+  - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM e max_attempts, agendar o ciclo, endpoint HTTP com verificação real do token ligando executar ao runner, política que chama falhar_pedido_por_reconciliacao, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
 ```
