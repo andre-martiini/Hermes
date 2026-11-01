@@ -80,6 +80,19 @@ npm test                                               # testes do kit e do lint
 - Requisitos: a venv da tutorial-sistema (`preparar.py` → PY) com `faster-whisper` (`PY -m pip install
   faster-whisper==1.1.1`); modelo em `GASPAR_WHISPER_MODELO` (padrão `small`; `medium` é mais exato).
 
+## Som e cor (Fase 3)
+
+Depois do render, o `pos.mjs` (chamado pelo montador) faz no FFmpeg:
+- **SFX** nos marcadores do kit (`kit/sfx-map.json`: `Title.enter`→whoosh-curto, `CountUp.tick`→tick,
+  `Ranking.item`→pop, `StepFlow.advance`→swipe, `Compare.reveal`→impacto-suave…), com o **pico do som no
+  pico da curva**, a −12 dB da voz. Biblioteca: `assets/sfx/` (20 sons ElevenLabs, ≤ 0,8 s; refazer um:
+  `scripts/gerar_sfx.py --refazer nome`).
+- **Trilha** (a da tutorial-sistema, ou `"trilha": "x.m4a"`; `false` desliga) com **ducking** de ~9 dB sob a voz.
+- **Loudness** −14 LUFS / −1,5 dBTP (loudnorm em dois passes); o montador imprime a medição EBU R128.
+- **LUT de marca** `assets/lut/gaspar.cube` (quente leve, contraste médio, pretos levantados) em todo vídeo;
+  os botões ficam em `scripts/gerar_lut.py`. `"lut": false` ou `--sem-lut` desliga.
+- Transições são do kit (fade/wipe, no HyperFrames), não `xfade`. Requer FFmpeg completo (winget Gyan.FFmpeg).
+
 ## Revisão
 
 Abra `SAIDA/<formato>/revisao/contact-sheet.jpg` e confira: nada cortado ou fora da safe area, número
@@ -88,4 +101,4 @@ numa linha, item ativo em âmbar, cena assentada. Só então entregue.
 ## Motor
 
 `GASPAR_VIDEO_ENGINE=legacy|hyperframes`. O padrão continua `legacy` (motion.py com voz, legenda e trilha)
-até o kit ganhar som (Fase 3: trilha com ducking, SFX, loudness e LUT).
+até a revisão do André nos vídeos de teste das Fases 2 e 3.

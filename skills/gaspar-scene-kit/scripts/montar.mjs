@@ -5,6 +5,7 @@
 //   node montar.mjs roteiro.json SAIDA --so-html    # só gera o projeto e passa o lint (grátis, segundos)
 //   node montar.mjs roteiro.json SAIDA --revisao    # + PNG de cada cena assentada em SAIDA/<formato>/revisao
 //   node montar.mjs roteiro.json SAIDA --sem-voz    # ignora "narracao" (vídeo mudo, grátis)
+//   --sem-trilha --sem-sfx --sem-lut                 # desliga partes da pós (Fase 3)
 //
 // Com "gravacao" (modo sobreposição): o vídeo do André fica no fundo com o som original, a legenda vem da
 // fala transcrita (palavra a palavra) e cada cartão entra no topo quando a fala diz o seu "quando".
@@ -20,6 +21,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TIPOS, duracaoMinima } from "../kit/primitivas.mjs";
 import { lint } from "./lint-cena.mjs";
+import { medirLoudness, posProduzir, trilhaPadrao } from "./pos.mjs";
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FPS = 30;
@@ -235,7 +237,7 @@ function prepararVoz(arq, saida, flags) {
   return { falas: JSON.parse(readFileSync(falasArq, "utf8")), legendas: JSON.parse(readFileSync(legArq, "utf8")) };
 }
 
-function main() {
+async function main() {
   const [arq, saida, ...flags] = process.argv.slice(2);
   if (!arq || !saida) { console.error("uso: node montar.mjs roteiro.json SAIDA [--so-html] [--revisao] [--sem-voz]"); process.exit(2); }
   const roteiro = JSON.parse(readFileSync(arq, "utf8"));
@@ -272,8 +274,17 @@ function main() {
       hyperframes(["snapshot", "--at", tempos, "--no-end", "-o", join(pasta, "revisao")], projeto, env);
     }
     const mp4 = resolve(saida, `${roteiro.titulo || "Gaspar Vídeo"} (${formato}).mp4`);
-    hyperframes(["render", "-o", mp4, "-f", String(FPS), "-q", "delivery"], projeto, env);
-    console.log(`→ ${mp4}`);
+    const bruto = join(pasta, "bruto.mp4");
+    hyperframes(["render", "-o", bruto, "-f", String(FPS), "-q", "delivery"], projeto, env);
+    // Pós (Fase 3): SFX nos marcadores, trilha com ducking, −14 LUFS, LUT de marca.
+    process.env.PATH = env.PATH;
+    const trilha = flags.includes("--sem-trilha") || roteiro.trilha === false ? null
+      : roteiro.trilha ? resolve(dirname(resolve(arq)), roteiro.trilha) : trilhaPadrao();
+    const r = await posProduzir({ bruto, projeto, final: mp4, trilha, sfx: !flags.includes("--sem-sfx"),
+      lut: !flags.includes("--sem-lut") && roteiro.lut !== false });
+    const lu = medirLoudness(mp4);
+    console.log(`→ ${mp4}
+  ${r.sfx} SFX, trilha ${trilha ? "com ducking" : "não"}, ${lu.I} LUFS, pico ${lu.TP} dBTP`);
   }
   process.exit(falhou ? 1 : 0);
 }

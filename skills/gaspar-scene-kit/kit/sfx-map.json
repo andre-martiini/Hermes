@@ -1,0 +1,12 @@
+{
+  "Title.enter": "whoosh-curto",
+  "BulletList.item": "pop-2",
+  "CountUp.tick": "tick",
+  "Ranking.item": "pop",
+  "Ranking.primeiro": "impacto-suave",
+  "Compare.reveal": "impacto-suave",
+  "StepFlow.advance": "swipe",
+  "ScreenshotCard.enter": "whoosh-longo",
+  "MaskReveal.reveal": "whoosh-curto",
+  "Wipe.transition": "whoosh-longo"
+}
