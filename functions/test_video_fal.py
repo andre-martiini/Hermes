@@ -193,3 +193,69 @@ class TestTool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestArquivos(unittest.TestCase):
+    """Entrada de arquivo por upload_token/drive_file_id: o Hermes resolve, publica e assina (Gaspar Vídeo v2)."""
+
+    def _rodar(self, arquivos, entrada=None):
+        from unittest import mock
+
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+        enviados, consumidos = [], []
+
+        def http(metodo, url, api_key, corpo=None):
+            if metodo == "POST":
+                enviados.append(corpo)
+                return {"request_id": "r9", "status_url": "s", "response_url": "r"}
+            return {"status": "COMPLETED"} if url == "s" else {"video": {"url": "https://cdn/v.mp4"}}
+
+        blob = mock.MagicMock()
+        cliente = mock.MagicMock()
+        cliente.return_value.bucket.return_value.blob.return_value = blob
+        with mock.patch("tools.anexar_arquivo._resolver_conteudo", return_value=(b"mp4", "clipe.mp4")) as res, \
+                mock.patch("tools.anexar_arquivo.assinar", return_value="https://assinada/clipe.mp4"), \
+                mock.patch("tools.anexar_arquivo.consumir_upload_token", side_effect=lambda ctx, t: consumidos.append(t)), \
+                mock.patch("google.cloud.storage.Client", cliente):
+            r = fal.executar_tool(db, "u", {"modelo": TestTool.KLING, "entrada": entrada or {"prompt": "p"}, "segundos": 5,
+                                            "arquivos": arquivos}, http=http, dormir=lambda s: None)
+        return r, enviados, consumidos, res, blob
+
+    def test_upload_token_vira_url_assinada_e_e_consumido(self):
+        r, enviados, consumidos, res, blob = self._rodar({"video_url": {"upload_token": "upl-1"}})
+        self.assertEqual(r["status"], "COMPLETED")
+        self.assertEqual(enviados[0]["video_url"], "https://assinada/clipe.mp4")
+        self.assertEqual(consumidos, ["upl-1"])
+        blob.upload_from_string.assert_called_once()
+        self.assertEqual(res.call_args[0][1], {"upload_token": "upl-1"})
+
+    def test_drive_em_campo_de_lista(self):
+        r, enviados, consumidos, _, _ = self._rodar({"image_urls": {"drive_file_id": "d1"}})
+        self.assertEqual(enviados[0]["image_urls"], ["https://assinada/clipe.mp4"])
+        self.assertEqual(consumidos, [])
+
+    def test_referencia_ambigua_recusa_sem_gastar(self):
+        r, enviados, _, _, _ = self._rodar({"video_url": {"upload_token": "a", "drive_file_id": "b"}})
+        self.assertIn("exatamente um", r["erro"])
+        self.assertEqual(enviados, [])
+
+    def test_som_de_ambiente_tem_preco(self):
+        self.assertEqual(fal.estimar_custo("fal-ai/elevenlabs/sound-effects/v2", segundos=20), 0.04)
+
+
+class TestArquivosFalhas(unittest.TestCase):
+    def test_falha_ao_assinar_vira_erro_e_apaga_o_publicado(self):
+        from unittest import mock
+
+        db = _DbEscrita({"system/api_keys": {"fal_key": "k"}})
+        blob = mock.MagicMock()
+        cliente = mock.MagicMock()
+        cliente.return_value.bucket.return_value.blob.return_value = blob
+        with mock.patch("tools.anexar_arquivo._resolver_conteudo", return_value=(b"x", "a/../b c.mp4")), \
+                mock.patch("tools.anexar_arquivo.assinar", side_effect=ValueError("sem IAM")), \
+                mock.patch("google.cloud.storage.Client", cliente):
+            r = fal.executar_tool(db, "u", {"modelo": TestTool.KLING, "entrada": {}, "segundos": 5,
+                                            "arquivos": {"video_url": {"drive_file_id": "d"}}}, http=lambda *a, **k: 1 / 0)
+        self.assertIn("não consegui publicar", r["erro"])
+        blob.delete.assert_called_once()
+        self.assertTrue(cliente.return_value.bucket.return_value.blob.call_args[0][0].endswith("/b_c.mp4"))

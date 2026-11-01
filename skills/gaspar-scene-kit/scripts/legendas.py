@@ -10,7 +10,12 @@ confiança < 0,6 vão para a lista de revisão (nomes próprios como Ifes, SIPAC
     PY legendas.py fala gravacao.mp4 SAIDA [--chaves "Ifes,SIPAC,Gaspar"]
 
 Saída no formato Caption do Remotion/HyperFrames: {text, startMs, endMs, timestampMs, confidence}, com o
-espaço em branco ANTES de cada palavra. A paginação (300 ms palavra a palavra, 1200 ms frases) é do montar.mjs. Modelo: GASPAR_WHISPER_MODELO (padrão small; medium é mais exato).
+espaço em branco ANTES de cada palavra. A paginação (300 ms palavra a palavra, 1200 ms frases) é do montar.mjs.
+
+Motor (GASPAR_ASR): "whisper" (padrão; faster-whisper, modelo GASPAR_WHISPER_MODELO, padrão small, baixado do
+Hugging Face) ou "parakeet" (NVIDIA Parakeet TDT 0.6B v3 int8 via sherpa-onnx, pesos nos releases do GitHub:
+serve onde o Hugging Face é bloqueado; se o whisper falhar ao carregar, cai nele sozinho). Nos dois, as palavras
+parecidas com as `--chaves` (Reditec, MAGO, Ifes…) são trocadas pela grafia certa.
 """
 import difflib
 import json
@@ -40,20 +45,116 @@ def _ffmpeg() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def transcrever(audio: Path, chaves: list[str]) -> list[dict]:
-    """[{w, s, e, p}] em segundos, com probabilidade por palavra."""
-    from faster_whisper import WhisperModel
-
+def _pcm(audio: Path):
     import numpy as np
 
     # Decodifica com o ffmpeg (o PyAV do faster-whisper briga com versões novas do av).
     bruto = subprocess.run([_ffmpeg(), "-loglevel", "error", "-i", str(audio), "-f", "f32le", "-ac", "1", "-ar", "16000", "-"],
                            capture_output=True, check=True).stdout
+    return np.frombuffer(bruto, np.float32)
+
+
+IDIOMA = "pt"  # --idioma (versão dublada); o Parakeet v3 detecta sozinho
+
+
+def _whisper(amostras, chaves: list[str]) -> list[dict]:
+    from faster_whisper import WhisperModel
+
     modelo = WhisperModel(os.environ.get("GASPAR_WHISPER_MODELO", "small"), device="cpu", compute_type="int8")
-    trechos, _ = modelo.transcribe(np.frombuffer(bruto, np.float32), language="pt", word_timestamps=True, vad_filter=False,
+    trechos, _ = modelo.transcribe(amostras, language=IDIOMA, word_timestamps=True, vad_filter=False,
                                    initial_prompt="Vocabulário: " + ", ".join(chaves) + ".")
     return [{"w": w.word.strip(), "s": w.start, "e": w.end, "p": w.probability}
             for t in trechos for w in (t.words or []) if w.word.strip()]
+
+
+PARAKEET = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+URL_PARAKEET = f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{PARAKEET}.tar.bz2"
+
+
+def cortes(amostras, sr: int = 16000, trecho_s: float = 25.0, busca_s: float = 4.0) -> list[tuple[int, int]]:
+    """Trechos de até `trecho_s`, cortados no ponto mais silencioso (RMS de 0,1 s) dos últimos `busca_s` s de cada
+    um: nunca no meio de uma palavra."""
+    import numpy as np
+
+    j, n, saida, ini = int(0.1 * sr), int(trecho_s * sr), [], 0
+    while ini < len(amostras):
+        fim = ini + n
+        if fim < len(amostras):
+            jan = amostras[fim - int(busca_s * sr):fim]
+            rms = [float(np.sqrt((jan[k:k + j] ** 2).mean())) for k in range(0, len(jan) - j + 1, j)]
+            fim = fim - int(busca_s * sr) + rms.index(min(rms)) * j + j // 2
+        saida.append((ini, min(fim, len(amostras))))
+        ini = fim
+    return saida
+
+
+def _parakeet(amostras) -> list[dict]:
+    """Parakeet TDT por trechos cortados no silêncio; tokens BPE ("▁" = começo de palavra) viram palavras com
+    tempo. Sem probabilidade por palavra no modelo: 0,9."""
+    import sherpa_onnx
+
+    pasta = Path.home() / ".tutorial-sistema" / "modelos" / PARAKEET
+    if not pasta.exists():
+        import tarfile
+        import urllib.request
+
+        arq, _ = urllib.request.urlretrieve(URL_PARAKEET)
+        with tarfile.open(arq) as t:
+            t.extractall(pasta.parent, filter="data")
+    rec = sherpa_onnx.OfflineRecognizer.from_transducer(
+        encoder=str(pasta / "encoder.int8.onnx"), decoder=str(pasta / "decoder.int8.onnx"),
+        joiner=str(pasta / "joiner.int8.onnx"), tokens=str(pasta / "tokens.txt"), model_type="nemo_transducer", num_threads=4)
+    palavras, sr = [], 16000
+    for ini, fim_trecho in cortes(amostras, sr):
+        st = rec.create_stream()
+        st.accept_waveform(sr, amostras[ini:fim_trecho])
+        rec.decode_stream(st)
+        r, off = st.result, ini / sr
+        for k, (tok, t) in enumerate(zip(r.tokens, r.timestamps)):
+            # Fim do token = início do próximo, limitado a 0,6 s (o último não se estica pelo silêncio do trecho).
+            prox = r.timestamps[k + 1] if k + 1 < len(r.timestamps) else (fim_trecho - ini) / sr
+            fim = off + min(prox, t + 0.6)
+            if tok.startswith("▁") or tok.startswith(" ") or not palavras or ini and k == 0:
+                palavras.append({"w": tok.lstrip("▁ "), "s": off + t, "e": fim, "p": 0.9})
+            else:
+                palavras[-1]["w"] += tok
+                palavras[-1]["e"] = fim
+    return [p for p in palavras if p["w"].strip()]
+
+
+def corrigir_siglas(palavras: list[dict], chaves: list[str]) -> list[dict]:
+    """"Redtec" → "Reditec", "ifes" → "Ifes": grafia das chaves, mantendo a pontuação. Conservador: chave curta
+    (≤ 4 letras) só corrige a caixa; aproximada só com semelhança ≥ 0,85 e no máximo 1 letra de diferença
+    (evita "pago"/"magro" → "MAGO"). Sigla toda em maiúsculas que também é palavra comum ("mago") fica como veio.
+    A confiança não muda: a troca fica marcada em "corrigido_de" e palavra incerta continua na revisão."""
+    alvo = {_norm(c): c for c in chaves}
+    for p in palavras:
+        m = re.match(r"^(\W*)(.*?)(\W*)$", p["w"])
+        miolo = _norm(m.group(2))
+        if not miolo or not alvo:
+            continue
+        melhor = max(alvo, key=lambda c: difflib.SequenceMatcher(a=miolo, b=c).ratio())
+        if miolo == melhor:
+            troca = not alvo[melhor].isupper()  # "ifes" → "Ifes"; "mago" não vira "MAGO"
+        else:
+            troca = (len(melhor) >= 5 and abs(len(miolo) - len(melhor)) <= 1
+                     and difflib.SequenceMatcher(a=miolo, b=melhor).ratio() >= 0.85)
+        if troca and m.group(2) != alvo[melhor]:
+            p["corrigido_de"] = p["w"]
+            p["w"] = m.group(1) + alvo[melhor] + m.group(3)
+    return palavras
+
+
+def transcrever(audio: Path, chaves: list[str]) -> list[dict]:
+    """[{w, s, e, p}] em segundos, com probabilidade por palavra (Parakeet não dá: 0,9)."""
+    amostras = _pcm(audio)
+    if os.environ.get("GASPAR_ASR", "whisper") == "parakeet":
+        return corrigir_siglas(_parakeet(amostras), chaves)
+    try:
+        return corrigir_siglas(_whisper(amostras, chaves), chaves)
+    except Exception as e:  # noqa: BLE001 — sem Hugging Face (rede bloqueada), sem modelo: Parakeet
+        print(f"aviso: whisper indisponível ({str(e)[:100]}); usando Parakeet", file=sys.stderr)
+        return corrigir_siglas(_parakeet(amostras), chaves)
 
 
 def alinhar(texto: str, reconhecidas: list[dict], duracao: float) -> list[dict]:
@@ -108,6 +209,9 @@ def main():
     chaves = CHAVES_PADRAO
     if "--chaves" in sys.argv:
         chaves = sys.argv[sys.argv.index("--chaves") + 1].split(",")
+    if "--idioma" in sys.argv:
+        global IDIOMA
+        IDIOMA = sys.argv[sys.argv.index("--idioma") + 1]
     saida.mkdir(parents=True, exist_ok=True)
     if modo == "motion":
         falas = json.loads((saida / "narracao" / "falas.json").read_text(encoding="utf-8"))

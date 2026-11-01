@@ -3033,6 +3033,13 @@ def _video_fal_executar(ctx: ToolContext, args: dict):
     return fal.executar_tool(ctx.db, ctx.user_uid, args)
 
 
+# Dublagem ElevenLabs no servidor (Gaspar Vídeo v2): a sessão de nuvem não alcança a API do ElevenLabs.
+def _video_dublar(ctx: ToolContext, args: dict):
+    from video import dublagem
+
+    return dublagem.executar_tool(ctx.db, ctx.user_uid, args)
+
+
 # Fase 4 — pagas (piso de confirmação obrigatória: só rodam depois do "sim", via
 # confirmar_acao) e o cancelamento, que é livre.
 def _video_renderizar(ctx: ToolContext, args: dict):
@@ -3399,6 +3406,7 @@ _HANDLERS: dict = {
     "video_status": _video_status,
     "video_gerar_previa": _video_gerar_previa,
     "video_fal_executar": _video_fal_executar,
+    "video_dublar": _video_dublar,
     "video_ajustar": _video_ajustar,
     "video_renderizar": _video_renderizar,
     "video_refazer_cena": _video_refazer_cena,

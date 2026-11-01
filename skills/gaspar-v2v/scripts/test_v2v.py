@@ -49,3 +49,69 @@ class TestSegmentar(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------- recorte (alfa suave), Gaspar Vídeo v2
+import os
+from pathlib import Path
+
+import numpy as np
+
+from efeitos import CINTILACAO_MAX, furos_internos, medir_recorte, refinar_alfa
+
+
+def _silhueta(h=200, w=120):
+    a = np.zeros((h, w), np.float32)
+    a[40:200, 20:100] = 1.0  # tronco/cabeça sólidos
+    return a
+
+
+class TestRecorte(unittest.TestCase):
+    def test_furo_no_pescoco_fecha_e_vao_no_cabelo_fica(self):
+        a = _silhueta()
+        a[120:126, 55:61] = 0.0  # furo no pescoço (abaixo do topo do rosto)
+        a[44:47, 55:58] = 0.0    # vão entre fios, acima do topo do rosto (y=60)
+        r = refinar_alfa(a, None, topo_rosto=60)
+        self.assertGreater(r[123, 58], 0.95)
+        self.assertLess(r[45, 56], 0.6)
+
+    def test_furo_dentro_de_borda_semitransparente_nao_conta(self):
+        a = _silhueta()
+        a[100:120, 90:100] = 0.55
+        a[108:111, 94:96] = 0.0
+        self.assertEqual(int(furos_internos(a, 0).sum()), 0)
+
+    def test_nucleo_do_rosto_sempre_opaco_e_borda_suave(self):
+        a = _silhueta()
+        nucleo = np.zeros_like(a, bool)
+        nucleo[60:90, 40:80] = True
+        a[70:75, 50:55] = 0.3  # o modelo "duvidou" dentro do rosto
+        r = refinar_alfa(a, None, nucleo, topo_rosto=60)
+        self.assertTrue((r[nucleo] == 1).all())
+        borda = r[150, 15:25]
+        self.assertTrue(((borda > 0.02) & (borda < 0.98)).any(), "borda tem degradê")
+        self.assertGreater(r[150, 22], 0.9, "suaviza para fora, sem encolher")
+
+    def test_metricas(self):
+        a = _silhueta()
+        m = medir_recorte([a, a.copy()])
+        self.assertEqual(m["furos_px"], 0)
+        self.assertLessEqual(m["cintilacao"], CINTILACAO_MAX)
+
+    @unittest.skipUnless(os.environ.get("GASPAR_CLIPE_TESTE"), "regressão com o clipe 1000414196.mp4 (defina GASPAR_CLIPE_TESTE)")
+    def test_regressao_quadros_fixos(self):
+        import cv2
+        import tempfile
+
+        from efeitos import FPS, quadros_rgba, recortar
+
+        pasta = Path(tempfile.mkdtemp())
+        webm = recortar(Path(os.environ["GASPAR_CLIPE_TESTE"]), pasta / "pessoa.webm", pasta)
+        refs = {round(float(p.stem.split("-")[1]) * FPS): p for p in (Path(__file__).parents[1] / "testes" / "recorte_ref").glob("alfa-*.png")}
+        for k, rgba in enumerate(quadros_rgba(webm)):
+            if k in refs:
+                novo = cv2.resize(rgba[..., 3], (270, 480), interpolation=cv2.INTER_AREA) > 0.5
+                ref = cv2.imread(str(refs[k]), cv2.IMREAD_GRAYSCALE) > 127
+                self.assertGreater((novo & ref).sum() / (novo | ref).sum(), 0.97, f"quadro {k}")
+            if k > max(refs):
+                break

@@ -32,6 +32,11 @@ PRECOS_FAL: dict = {
     "fal-ai/luma-dream-machine/ray-3.2/reframe": {"unidade": "segundo", "usd": 0.12, "nome": "Luma Ray 3.2 Reframe 720p"},
     "fal-ai/sync-lipsync/v2/pro": {"unidade": "segundo", "usd": 0.083, "nome": "Sync lipsync-2-pro"},
     "fal-ai/ltx-2/retake": {"unidade": "segundo", "usd": 0.10, "nome": "LTX-2 Retake"},
+    # Gaspar Vídeo v2 (01/11/2026): animação de ilustração e elemento do efeito na mão sem a Vertex, e sons.
+    "fal-ai/veo3.1/fast/image-to-video": {"unidade": "segundo", "usd": 0.10, "nome": "Veo 3.1 Fast imagem→vídeo, sem áudio (animar ilustração/elemento)"},
+    "fal-ai/veo3.1/image-to-video": {"unidade": "segundo", "usd": 0.20, "nome": "Veo 3.1 imagem→vídeo, sem áudio"},
+    "fal-ai/kling-video/o3/pro/image-to-video": {"unidade": "segundo", "usd": 0.168, "nome": "Kling O3 Pro imagem→vídeo"},
+    "fal-ai/elevenlabs/sound-effects/v2": {"unidade": "segundo", "usd": 0.002, "nome": "ElevenLabs Sound Effects v2 (ambiente e SFX; 0,5–22 s)"},
 }
 
 
@@ -156,6 +161,59 @@ def _duracao_resultado(resultado: dict) -> float | None:
     return None
 
 
+def _resolver_arquivos(db, uid: str, arquivos: dict, entrada: dict) -> tuple[dict, list[str]]:
+    """`arquivos` = {campo da entrada: {"upload_token": ...} | {"drive_file_id": ...}}: o Hermes busca o arquivo
+    (o agente da nuvem não alcança o fal nem tem URL pública), sobe ao bucket do Hermes Vídeo e põe no campo uma
+    URL assinada de 2 h. Campo terminado em "_urls" recebe uma lista. Devolve a entrada nova, os tokens a consumir e
+    os blobs publicados (para apagar se o envio falhar)."""
+    import mimetypes
+    import re
+    import uuid
+    from types import SimpleNamespace
+
+    from google.cloud import storage
+
+    from tools import anexar_arquivo
+    from video.midia import BUCKET
+
+    ctx = SimpleNamespace(db=db, user_uid=uid)
+    nova, tokens, blobs = copy.deepcopy(entrada), [], []
+    if not isinstance(arquivos, dict):
+        raise ErroFal("`arquivos` precisa ser um objeto {campo: {upload_token | drive_file_id}}.")
+    for campo, ref in arquivos.items():
+        fontes = [k for k in ("upload_token", "drive_file_id") if isinstance(ref, dict) and ref.get(k)]
+        if len(fontes) != 1:
+            raise ErroFal(f"arquivos.{campo}: informe exatamente um de upload_token (preparar_upload) ou drive_file_id.")
+        try:
+            dados, nome = anexar_arquivo._resolver_conteudo(ctx, {fontes[0]: ref[fontes[0]]})
+        except ValueError as e:
+            raise ErroFal(f"arquivos.{campo}: {e}") from e
+        nome = re.sub(r"[^\w.-]", "_", str(nome).replace("\\", "/").rsplit("/", 1)[-1])[:80] or "arquivo"
+        try:
+            blob = storage.Client().bucket(BUCKET).blob(f"tmp/fal/{uid}/{uuid.uuid4().hex[:12]}/{nome}")
+            blob.upload_from_string(dados, content_type=mimetypes.guess_type(nome)[0] or "application/octet-stream")
+            blobs.append(blob)
+            url = anexar_arquivo.assinar(blob, minutos=120)
+        except Exception as e:  # noqa: BLE001 — storage/IAM: erro legível, não traceback
+            _apagar(blobs)
+            raise ErroFal(f"arquivos.{campo}: não consegui publicar o arquivo ({type(e).__name__}: {str(e)[:200]})") from e
+        if campo.endswith("_urls"):
+            nova.setdefault(campo, []).append(url)
+        else:
+            nova[campo] = url
+        if fontes[0] == "upload_token":
+            tokens.append(ref["upload_token"])
+    return nova, tokens, blobs
+
+
+def _apagar(blobs):
+    for b in blobs:
+        try:
+            b.delete()
+        except Exception:  # noqa: BLE001 — limpeza é melhor esforço
+            pass
+
+
 def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=None) -> dict:
     """Roda um modelo do fal de ponta a ponta: confere custo e teto, envia, espera e registra em videoJobs.
 
@@ -183,11 +241,22 @@ def executar_tool(db, uid: str, args: dict, *, http=_http, dormir=None, relogio=
                 "teto_sem_confirmacao_usd": TETO_CONFIRMACAO_USD,
                 "mensagem": f"Custo estimado US$ {custo:.2f} passa do teto de US$ {TETO_CONFIRMACAO_USD:.2f}. "
                             f"Mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd={custo}."}
+    tokens, blobs = [], []
     try:
+        if args.get("arquivos"):
+            entrada, tokens, blobs = _resolver_arquivos(db, uid, args["arquivos"], entrada)
         api_key = chave(db)
         job = executar(modelo, entrada, api_key, http=http)
     except ErroFal as e:
+        _apagar(blobs)  # nada foi enviado: o arquivo publicado não serve a ninguém
         return {"erro": str(e)}
+    if tokens:
+        from types import SimpleNamespace
+
+        from tools.anexar_arquivo import consumir_upload_token
+
+        for t in tokens:
+            consumir_upload_token(SimpleNamespace(db=db, user_uid=uid), t)
 
     from google.cloud import firestore as gcf
 

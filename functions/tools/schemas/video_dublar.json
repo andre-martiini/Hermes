@@ -1,0 +1,42 @@
+{
+  "name": "video_dublar",
+  "description": "Dubla um vídeo do André para outro idioma com a voz dele (ElevenLabs Dubbing; a voz é clonada do próprio vídeo, autorizado por ele), SEM lip-sync: devolve o mesmo vídeo com o áudio no outro idioma. O vídeo entra por upload_token (preparar_upload) ou drive_file_id — o Hermes envia, então não precisa de URL pública. Custo: US$ 0,50 por minuto de vídeo por idioma; até US$ 5 envia direto, acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd. Espera até 8 min; se passar, chame de novo só com dubbing_id. Devolve uma URL de 2 h do MP4 dublado: para guardar na ação, chame anexar_arquivo com essa url. Lip-sync (caro) não é feito aqui. Tool longa: devolve job_id; busque com consultar_job.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "idioma": {
+        "type": "string",
+        "description": "Idioma de destino (código ISO 639-1): en, es, fr..."
+      },
+      "upload_token": {
+        "type": "string",
+        "description": "Token de preparar_upload com o vídeo (até 50 MB). Use este OU drive_file_id."
+      },
+      "drive_file_id": {
+        "type": "string",
+        "description": "Id do vídeo no Drive (até 50 MB). Use este OU upload_token."
+      },
+      "segundos": {
+        "type": "number",
+        "description": "Duração do vídeo em segundos (obrigatória: o custo é mostrado antes de gastar)."
+      },
+      "idioma_origem": {
+        "type": "string",
+        "description": "Idioma falado no vídeo (padrão pt)."
+      },
+      "aprovado_ate_usd": {
+        "type": "number",
+        "description": "Só depois de o André aprovar o custo mostrado: o valor aprovado (≥ custo estimado)."
+      },
+      "task_id": {
+        "type": "string",
+        "description": "Ação do Gaspar ligada a esta dublagem (fica registrada em videoJobs)."
+      },
+      "dubbing_id": {
+        "type": "string",
+        "description": "Só para retomar: o dubbing_id de uma chamada que passou do tempo. Reconsulta sem enviar nem cobrar de novo."
+      }
+    },
+    "required": []
+  }
+}

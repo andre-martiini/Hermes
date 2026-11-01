@@ -12,6 +12,9 @@
     PY efeitos.py transformar video.mp4 "prompt" SAIDA [--ref ref.png] [--modelo kling-pro] [--aprovado-ate X]
     PY efeitos.py dublar    video.mp4 en SAIDA [--lipsync]           # voz do André em outro idioma (boca sincronizada opcional)
     PY efeitos.py reframe   aula-16x9.mp4 reel.mp4                   # vertical seguindo o rosto, sem IA
+    PY efeitos.py recortar  video.mp4 SAIDA/pessoa.webm [--rapido]   # pessoa com alfa suave (RVM), grátis
+    PY efeitos.py cenario   video.mp4 fundo.png|"prompt" SAIDA [--ate 4 --transicao 0.4 --zoom 1.06]
+    PY efeitos.py folha-recorte video.mp4 SAIDA                      # recorte sobre preto/branco/azul + métricas
 
 PY = venv da tutorial-sistema com mediapipe; os comandos que chamam o fal usam também a pasta functions do
 Hermes (credencial em GOOGLE_APPLICATION_CREDENTIALS). Áudio: sempre o original.
@@ -27,6 +30,20 @@ import numpy as np
 
 RAIZ = Path(__file__).resolve().parents[3]
 MODELOS_MP = Path.home() / ".tutorial-sistema" / "modelos"
+URL_MP = "https://storage.googleapis.com/mediapipe-models/{0}/{0}/float16/1/{0}.task"
+
+
+def modelo_mp(nome: str) -> str:
+    """hand_landmarker / face_landmarker: cópia local, senão a do repositório (skills/gaspar-v2v/modelos, para
+    ambiente sem acesso ao storage do Google), senão baixa do endereço oficial."""
+    for p in (MODELOS_MP / f"{nome}.task", Path(__file__).resolve().parents[1] / "modelos" / f"{nome}.task"):
+        if p.exists():
+            return str(p)
+    import urllib.request
+
+    MODELOS_MP.mkdir(parents=True, exist_ok=True)
+    urllib.request.urlretrieve(URL_MP.format(nome), MODELOS_MP / f"{nome}.task")
+    return str(MODELOS_MP / f"{nome}.task")
 W, H, FPS = 1080, 1920, 30
 PALMA = (0, 5, 9, 13, 17)
 
@@ -48,12 +65,13 @@ def quadros(video: Path, w: int = W, h: int = H):
 
 
 class Gravador:
-    """Recebe quadros RGB e grava MP4 com o áudio do vídeo original."""
+    """Recebe quadros RGB e grava MP4 com o áudio do vídeo original (inteiro: celular grava o áudio um pouco
+    mais longo que o vídeo, e o último quadro se estende até o fim dele)."""
 
     def __init__(self, destino: Path, audio_de: Path):
         self.p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                    "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-i", str(audio_de), "-map", "0:v",
-                                   "-map", "1:a?", "-c:v", "libx264", "-crf", "17", "-pix_fmt", "yuv420p",
+                                   "-map", "1:a?", "-vf", "tpad=stop_mode=clone:stop_duration=2", "-c:v", "libx264", "-crf", "17", "-pix_fmt", "yuv420p",
                                    "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
                                    str(destino)], stdin=subprocess.PIPE)
 
@@ -77,9 +95,9 @@ def rastrear(video: Path, pasta: Path) -> list[dict]:
 
     modo = vision.RunningMode.VIDEO
     maos = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODELOS_MP / "hand_landmarker.task")), running_mode=modo, num_hands=1))
+        base_options=BaseOptions(model_asset_path=modelo_mp("hand_landmarker")), running_mode=modo, num_hands=1))
     rostos = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODELOS_MP / "face_landmarker.task")), running_mode=modo, num_faces=1))
+        base_options=BaseOptions(model_asset_path=modelo_mp("face_landmarker")), running_mode=modo, num_faces=1))
     rastro = []
     for k, q in enumerate(quadros(video)):
         img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(q))
@@ -352,7 +370,11 @@ def _chave_eleven() -> str:
 
 def dublar_audio(video: Path, idioma: str, pasta: Path) -> Path:
     """Dublagem do ElevenLabs com a voz do próprio André (clonagem automática do falante; autorizada por ele
-    em 01/11/2026). Devolve o áudio dublado (wav). Custa créditos do ElevenLabs."""
+    em 01/11/2026). Devolve o áudio dublado (wav). Custa créditos do ElevenLabs.
+
+    A tradução é automática e pode traduzir nomes próprios (01/11/2026: "Reditec" virou "Tech Network" e "MAGO",
+    "The Great Wizard"). Corrigir o texto pela API (modo manual/estúdio) é só do plano Enterprise; no Starter,
+    confira a transcrição do dublado antes de entregar."""
     import time
 
     import requests
@@ -424,8 +446,9 @@ def dublar(video: Path, idioma: str, pasta: Path, *, task_id: str | None, aprova
     if not lipsync:
         audio = dublar_audio(video, idioma, pasta)
         destino = pasta / f"dublado-{idioma}.mp4"
+        # O vídeo manda na duração: áudio dublado mais curto ganha silêncio no fim, nunca corta a imagem.
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-i", str(audio), "-map", "0:v",
-                        "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+                        "-map", "1:a", "-c:v", "copy", "-af", "apad", "-c:a", "aac", "-b:a", "192k", "-shortest",
                         "-movflags", "+faststart", str(destino)], check=True)
         return destino
     sys.path.insert(0, str(RAIZ / "functions"))
@@ -474,7 +497,7 @@ def reframe(video: Path, destino: Path, *, suave: float = 0.06, folga: float = 0
         raise SystemExit("O vídeo já é vertical.")
     largura = int(h0 * 9 / 16) // 2 * 2
     rostos = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODELOS_MP / "face_landmarker.task")),
+        base_options=BaseOptions(model_asset_path=modelo_mp("face_landmarker")),
         running_mode=vision.RunningMode.VIDEO, num_faces=1))
     grav = Gravador(destino, video)
     cx = None
@@ -493,6 +516,234 @@ def _redim_ret(img: np.ndarray, w: int, h: int) -> np.ndarray:
     from PIL import Image
 
     return np.array(Image.fromarray(np.ascontiguousarray(img)).resize((w, h), Image.LANCZOS))
+
+
+# ---------------------------------------------------------------- 4. recorte (alfa suave) e troca de cenário
+#
+# Robust Video Matting (ONNX, pesos nos releases do GitHub; recorrente = estável entre quadros) dá o alfa
+# contínuo e a cor do primeiro plano já descontaminada (sem a parede branca no cabelo). Depois: furos internos
+# pequenos fechados, rosto sempre opaco, alfa estabilizado no tempo e borda externa suavizada. Escolha
+# registrada em 01/11/2026: resnet50 (cabelo mais inteiro que o mobilenetv3, ~2,7 quadros/s na CPU).
+
+URL_RVM = "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/{}.onnx"
+FURO_MAX = 0.02  # furo interno menor que 2% do quadro é erro do modelo; maior é vão real (braço na cintura)
+
+
+def _rvm(nome: str):
+    import onnxruntime as ort
+
+    arq = MODELOS_MP / f"{nome}.onnx"
+    if not arq.exists():
+        import urllib.request
+
+        MODELOS_MP.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(URL_RVM.format(nome), arq)
+    return ort.InferenceSession(str(arq), providers=["CPUExecutionProvider"])
+
+
+def nucleo_rosto(pontos) -> np.ndarray:
+    """Oval do rosto (MediaPipe) recuada 12 px: ali o alfa é sempre 1."""
+    import cv2
+
+    m = np.zeros((H, W), np.uint8)
+    if pontos:
+        oval = np.array([pontos[i] for i in OVAL], np.int32)
+        cv2.fillPoly(m, [oval], 1)
+        m = cv2.erode(m, np.ones((25, 25), np.uint8))
+    return m.astype(bool)
+
+
+def furos_internos(a: np.ndarray, topo_rosto: float = 0) -> np.ndarray:
+    """Furos internos pequenos (< FURO_MAX do quadro), do topo do rosto para baixo e cercados de pessoa sólida
+    (alfa médio ≥ 0,85 em volta): erro do modelo (pescoço, alça, orelha). Acima do rosto, ou dentro da borda
+    semitransparente (cabelo), são vãos reais e ficam transparentes."""
+    from scipy.ndimage import binary_dilation, binary_fill_holes, find_objects, label
+
+    solido = a > 0.5
+    rot, n = label(binary_fill_holes(solido) & ~solido)
+    if not n:
+        return np.zeros_like(solido)
+    areas = np.bincount(rot.ravel())
+    ok = []
+    for k, sl in enumerate(find_objects(rot), 1):
+        if areas[k] >= FURO_MAX * a.size or sl[0].start < topo_rosto:
+            continue
+        y0, y1 = max(0, sl[0].start - 5), sl[0].stop + 5
+        x0, x1 = max(0, sl[1].start - 5), sl[1].stop + 5
+        furo = rot[y0:y1, x0:x1] == k
+        anel = binary_dilation(furo, iterations=4) & ~furo
+        if a[y0:y1, x0:x1][anel].mean() >= 0.85:
+            ok.append(k)
+    return np.isin(rot, ok)
+
+
+def refinar_alfa(a: np.ndarray, anterior: np.ndarray | None, nucleo: np.ndarray | None = None,
+                 topo_rosto: float = 0) -> np.ndarray:
+    """Alfa do modelo → alfa final (float 0–1): sem furo interno, rosto opaco, sem cintilação, borda suave."""
+    import cv2
+
+    a = np.where(furos_internos(a, topo_rosto), 1.0, a)
+    if anterior is not None:  # média só onde mudou pouco: borda parada não cintila, movimento rápido não borra
+        a = np.where(np.abs(a - anterior) < 0.25, 0.55 * a + 0.45 * anterior, a)
+    a = np.maximum(a, cv2.GaussianBlur(a, (0, 0), 1.6) * (a > 0.02))  # suaviza só para fora: não encolhe
+    a = cv2.GaussianBlur(a, (0, 0), 0.8)
+    if nucleo is not None:
+        a[nucleo] = 1.0
+    return np.clip(a, 0, 1).astype(np.float32)
+
+
+def recortar(video: Path, destino: Path, pasta: Path, *, modelo: str = "rvm_resnet50_fp32", reducao: float = 0.25) -> Path:
+    """Pessoa com alfa suave (WebM VP9 com alfa, 1080×1920, 30 fps). Com cache pelo horário do vídeo."""
+    if destino.exists() and destino.stat().st_mtime > video.stat().st_mtime and (pasta / "rastro.json").exists():
+        return destino
+    sess = _rvm(modelo)
+    rastro = rastrear(video, pasta)
+    rec = [np.zeros((1, 1, 1, 1), np.float32)] * 4
+    ds = np.array([reducao], np.float32)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{W}x{H}",
+                          "-r", str(FPS), "-i", "-", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "8M",
+                          "-deadline", "good", "-cpu-used", "5", "-row-mt", "1", "-auto-alt-ref", "0", str(destino)],
+                         stdin=subprocess.PIPE)
+    ant = None
+    for k, q in enumerate(quadros(video)):
+        src = (q.astype(np.float32) / 255).transpose(2, 0, 1)[None]
+        fgr, pha, *rec = sess.run(None, {"src": src, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2], "r4i": rec[3],
+                                         "downsample_ratio": ds})
+        rosto = rastro[k]["rosto"] if k < len(rastro) else None
+        topo = min(p[1] for p in rosto) if rosto else 0
+        a = ant = refinar_alfa(pha[0, 0], ant, nucleo_rosto(rosto), topo)
+        # Cor: pixel original só no miolo opaco; em toda borda/vão, a cor descontaminada do modelo (sem a parede).
+        w = np.clip((a - 0.97) / 0.03, 0, 1)[..., None]
+        cor = q * w + fgr[0].transpose(1, 2, 0) * 255 * (1 - w)
+        p.stdin.write(np.dstack([np.clip(cor, 0, 255), a * 255]).astype(np.uint8).tobytes())
+    p.stdin.close()
+    p.wait()
+    return destino
+
+
+def quadros_rgba(webm: Path):
+    """Quadros RGBA float 0–1 do recorte (o decodificador libvpx é o que lê o alfa)."""
+    p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-c:v", "libvpx-vp9", "-i", str(webm), "-f", "rawvideo",
+                          "-pix_fmt", "rgba", "-"], stdout=subprocess.PIPE)
+    n = W * H * 4
+    while len(b := p.stdout.read(n)) == n:
+        yield np.frombuffer(b, np.uint8).reshape(H, W, 4).astype(np.float32) / 255
+    p.wait()
+
+
+def compor(rgba: np.ndarray, fundo: np.ndarray, fundo_desf: np.ndarray, *, wrap: float = 0.18) -> np.ndarray:
+    """Pessoa sobre o fundo (float 0–1) com light wrap: a borda de dentro pega um pouco da luz do cenário."""
+    import cv2
+
+    a = rgba[..., 3:4]
+    borda = np.clip(1 - cv2.GaussianBlur(rgba[..., 3], (0, 0), 6), 0, 1)[..., None] * a
+    pessoa = rgba[..., :3] * (1 - wrap * borda) + fundo_desf * wrap * borda
+    return pessoa * a + fundo * (1 - a)
+
+
+CINTILACAO_MAX = 0.05  # referência: 0,041 neste pipeline no clipe de teste de 01/11/2026 (sem cintilação visível)
+
+
+def medir_recorte(alfas: list[np.ndarray], topos: list[float] | None = None) -> dict:
+    """furos: área (px) do maior furo interno do rosto para baixo (tem de ser 0). cintilacao: variação média do
+    alfa na borda entre quadros seguidos, descontado o movimento da silhueta (limite CINTILACAO_MAX)."""
+    furo = 0
+    for k, a in enumerate(alfas):
+        furo = max(furo, int(furos_internos(a, topos[k] if topos else 0).sum()))
+    cint = []
+    for a0, a1 in zip(alfas, alfas[1:]):
+        borda = ((a0 > 0.05) & (a0 < 0.95)) | ((a1 > 0.05) & (a1 < 0.95))
+        if borda.any():
+            mov = abs(float((a1 > 0.5).mean() - (a0 > 0.5).mean())) * 20  # silhueta que se mexe muda a borda de verdade
+            cint.append(max(0.0, float(np.abs(a1 - a0)[borda].mean()) - mov))
+    return {"furos_px": furo, "cintilacao": round(float(np.mean(cint)) if cint else 0.0, 4)}
+
+
+def franja_clara(comp: np.ndarray, a: np.ndarray, fundo: np.ndarray) -> float:
+    """Quanto a borda do recorte é mais clara que o cenário em volta (0–1 de luminância; aviso acima de 0,25)."""
+    import cv2
+
+    lum = lambda x: x @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    borda = (a > 0.1) & (a < 0.9)
+    anel = cv2.dilate((a > 0.1).astype(np.uint8), np.ones((15, 15), np.uint8)).astype(bool) & (a <= 0.02)
+    if not borda.any() or not anel.any():
+        return 0.0
+    return round(float(lum(comp)[borda].mean() - lum(fundo)[anel].mean()), 3)
+
+
+def cenario(video: Path, fundo: str, pasta: Path, *, ate: float = 4.0, transicao: float = 0.4, zoom: float = 1.06,
+            task_id: str | None = None) -> Path:
+    """Troca o cenário nos primeiros `ate` s (pessoa recortada sobre `fundo` com aproximação lenta) e volta ao
+    vídeo original numa fusão de `transicao` s. `fundo`: imagem/vídeo ou um texto (gera no nano-banana 9:16)."""
+    import cv2
+
+    pasta.mkdir(parents=True, exist_ok=True)
+    if not Path(fundo).exists():
+        sys.path.insert(0, str(RAIZ / "functions"))
+        sys.path.insert(0, str(Path(__file__).parent))
+        import urllib.request
+
+        from v2v import rodar_fal
+
+        png = pasta / "fundo.png"
+        if not png.exists():
+            r = rodar_fal("fal-ai/nano-banana", {"prompt": f"{fundo}, no people, vertical 9:16, soft depth of field",
+                                                 "aspect_ratio": "9:16", "num_images": 1}, task_id=task_id)
+            urllib.request.urlretrieve(r["urls"][0], png)
+        fundo = str(png)
+    pessoa = recortar(video, pasta / "pessoa.webm", pasta)
+    base = cv2.cvtColor(cv2.imread(fundo), cv2.COLOR_BGR2RGB)
+    s = max(W / base.shape[1], H / base.shape[0])
+    base = cv2.resize(base, (round(base.shape[1] * s), round(base.shape[0] * s)), interpolation=cv2.INTER_AREA)
+    y0, x0 = (base.shape[0] - H) // 2, (base.shape[1] - W) // 2
+    base = base[y0:y0 + H, x0:x0 + W].astype(np.float32) / 255
+    destino = pasta / "cenario.mp4"
+    grav = Gravador(destino, video)
+    franjas = []
+    for k, (q, rgba) in enumerate(zip(quadros(video), quadros_rgba(pessoa))):
+        t = k / FPS
+        if t >= ate + transicao:
+            grav(q)
+            continue
+        z = 1 + (zoom - 1) * min(1.0, t / max(ate, 0.1))
+        M = np.float32([[z, 0, (1 - z) * W / 2], [0, z, (1 - z) * H / 2]])
+        fd = cv2.warpAffine(base, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        comp = compor(rgba, fd, cv2.GaussianBlur(fd, (0, 0), 18))
+        if k % 15 == 0:
+            franjas.append(franja_clara(comp, rgba[..., 3], fd))
+        f = 0.0 if t < ate else (t - ate) / transicao
+        grav(np.clip((comp * (1 - f) + q / 255 * f) * 255, 0, 255).astype(np.uint8))
+    grav.fechar()
+    pior = max(franjas, default=0.0)
+    print(f"cenário: {destino} (franja clara máx. {pior:.2f}{' — AVISO: borda clara visível' if pior > 0.25 else ''})")
+    return destino
+
+
+def folha_recorte(video: Path, pasta: Path, *, instantes=(0.8, 2.8, 3.5, 12.0, 20.0)) -> Path:
+    """Critério de aceite: o recorte sobre preto, branco e azul saturado em quadros fixos + métricas."""
+    import cv2
+
+    pessoa = recortar(video, pasta / "pessoa.webm", pasta)
+    rastro = rastrear(video, pasta)
+    alvo = {round(t * FPS) for t in instantes}
+    linhas, alfas, topos = [], [], []
+    for k, rgba in enumerate(quadros_rgba(pessoa)):
+        if k <= 150:  # 0–5 s: o trecho da troca de cenário
+            alfas.append(rgba[..., 3])
+            r = rastro[k]["rosto"] if k < len(rastro) else None
+            topos.append(min(p[1] for p in r) if r else 0)
+        if k in alvo:
+            cores = [np.zeros(3), np.ones(3), np.array([20, 40, 230]) / 255]
+            linhas.append(np.hstack([cv2.resize(compor(rgba, np.broadcast_to(c, rgba[..., :3].shape).astype(np.float32),
+                                                       np.broadcast_to(c, rgba[..., :3].shape).astype(np.float32)), (360, 640))
+                                     for c in cores]))
+    folha = pasta / "folha-recorte.jpg"
+    cv2.imwrite(str(folha), cv2.cvtColor((np.vstack(linhas) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+    m = medir_recorte(alfas, topos)
+    (pasta / "recorte-metricas.json").write_text(json.dumps(m))
+    print(f"{folha} — furos {m['furos_px']} px, cintilação {m['cintilacao']} (limite {CINTILACAO_MAX})")
+    return folha
 
 
 def main():
@@ -515,6 +766,14 @@ def main():
                           modelo=opc("--modelo", "kling-pro"), aprovado=float(opc("--aprovado-ate", 0)), task_id=opc("--task")))
 
 
+    if cmd == "recortar":
+        print(recortar(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[3]).parent,
+                       modelo="rvm_mobilenetv3_fp32" if "--rapido" in sys.argv else "rvm_resnet50_fp32"))
+    if cmd == "cenario":
+        print(cenario(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), ate=float(opc("--ate", 4)),
+                      transicao=float(opc("--transicao", 0.4)), zoom=float(opc("--zoom", 1.06)), task_id=opc("--task")))
+    if cmd == "folha-recorte":
+        print(folha_recorte(Path(sys.argv[2]), Path(sys.argv[3])))
     if cmd == "reframe":
         print(reframe(Path(sys.argv[2]), Path(sys.argv[3])))
     if cmd == "dublar":

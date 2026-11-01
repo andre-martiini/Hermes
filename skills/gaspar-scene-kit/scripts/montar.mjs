@@ -7,6 +7,9 @@
 //   node montar.mjs roteiro.json SAIDA --sem-voz    # ignora "narracao" (vídeo mudo, grátis)
 //   --sem-trilha --sem-sfx --sem-lut                 # desliga partes da pós (Fase 3)
 //   --forcar                                         # renderiza mesmo com gate de legibilidade/legenda falhando
+//   --detach                                         # roda solto do terminal (log em SAIDA/montar.log)
+//   --sem-recorte                                    # sobreposição sem recorte da pessoa (sem titulo_atras nem gates de rosto)
+//   --animacao local                                 # ilustração animada sem Veo (partículas locais; o resumo avisa)
 //
 // Com "gravacao" (modo sobreposição): o vídeo do André fica no fundo com o som original, a legenda vem da
 // fala transcrita (palavra a palavra) e cada cartão entra no topo quando a fala diz o seu "quando".
@@ -15,16 +18,17 @@
 // roteiro; cada item entra quando a fala o cita, e a cena dura a fala + respiro.
 // Saída: SAIDA/<formato>/projeto/index.html, SAIDA/<titulo> (<formato>).mp4 e SAIDA/<formato>/cenas.json
 // (tempo de cada cena; os marcadores de SFX ficam em window.__sfx na página).
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TIPOS, duracaoMinima } from "../kit/primitivas.mjs";
 import { lint } from "./lint-cena.mjs";
 import { medirLoudness, posProduzir, trilhaPadrao } from "./pos.mjs";
-import { checkAudio, checkDuracao, checkLegendas, checkLegibilidade, checkLeitura, previa, relatorio } from "./gates.mjs";
+import { DUR_ANTES, analisarPessoa, checkAudio, checkComposicao, checkDuracao, checkLegendas, checkLegibilidade, checkLeitura,
+  checkQuadros, janelaPessoa, previa, relatorio } from "./gates.mjs";
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FPS = 30;
@@ -61,16 +65,8 @@ export function achar(frase, legendas) {
 const itensDaCena = (c) => c.itens?.map((i) => (Array.isArray(i) ? i[0] : i)) || c.etapas || c.linhas || null;
 
 // Sobreposição: cada cartão entra quando a fala diz `quando` (ou em `inicio` s) e fica `duracao` (≥ leitura).
-// Topo da cabeça (px em 1920) no recorte da pessoa, no instante t: 1ª linha com alfa no terço central.
-export function topoCabeca(webm, t) {
-  const env = { ...process.env, PATH: pathComFfmpeg() };
-  const bruto = execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-c:v", "libvpx-vp9", "-ss", String(t), "-i", webm,
-    "-frames:v", "1", "-vf", "alphaextract,scale=108:192", "-f", "rawvideo", "-pix_fmt", "gray", "-"], { env, maxBuffer: 1 << 20 });
-  for (let y = 0; y < 192; y++)
-    for (let x = 36; x < 72; x++) if (bruto[y * 108 + x] > 128) return y * 10;
-  return null;
-}
-
+// Título de abertura no modo "antes": cartão cheio de DUR_ANTES s. Topo da cabeça e queixo vêm da máscara da
+// pessoa na janela inteira do cartão (câmera na mão balança: um instante só engana).
 function planejarSobre(roteiro, voz) {
   const avisos = [];
   const cenas = roteiro.cenas.map((c, i) => {
@@ -78,13 +74,15 @@ function planejarSobre(roteiro, voz) {
     if (c.inicio == null && !c.quando) throw new Error(`Cartão ${i + 1}: falta "quando" (frase dita) ou "inicio" (s).`);
     const t0 = c.inicio ?? achar(c.quando, voz.legendas);
     if (t0 == null) throw new Error(`Cartão ${i + 1}: a fala não diz "${c.quando}". Use "inicio" (s) ou corrija "quando".`);
-    const minimo = duracaoMinima(c);
-    const fim = Math.min(t0 + Math.max(c.duracao || 0, minimo), voz.duracao);
+    const antes = c.tipo === "titulo_atras" && c.modo === "antes";
+    const minimo = antes ? DUR_ANTES : duracaoMinima(c);
+    const fim = Math.min(t0 + (antes ? DUR_ANTES : Math.max(c.duracao || 0, minimo)), voz.duracao);
     const depois = voz.legendas.filter((tk) => tk.startMs / 1000 >= t0);
     const itens = itensDaCena(c);
     const em = itens && !c.em ? itens.map((it) => { const e = deixa(it, depois, 0); return e == null ? null : +(e - t0).toFixed(3); }) : c.em;
-    const topo_cabeca = c.tipo === "titulo_atras" && voz.pessoa ? topoCabeca(voz.pessoa, t0 + 0.5) : undefined;
-    return { ...c, i, t0: +t0.toFixed(3), fim: +fim.toFixed(3), minimo, em: em?.some((e) => e != null) ? em : undefined, topo_cabeca };
+    const jan = c.tipo === "titulo_atras" && voz.analise ? janelaPessoa(voz.analise, t0, fim) : {};
+    return { ...c, i, t0: +t0.toFixed(3), fim: +fim.toFixed(3), minimo, em: em?.some((e) => e != null) ? em : undefined,
+      topo_cabeca: c.topo_cabeca ?? jan.topo, queixo: jan.queixo };
   });
   cenas.forEach((c, i) => cenas[i + 1] && cenas[i + 1].t0 < c.fim && avisos.push(`cartões ${i + 1} e ${i + 2} se sobrepõem`));
   return Object.assign(cenas, { avisos });
@@ -143,9 +141,13 @@ function htmlLegendas(trechos, juntarMs) {
   return { html: blocos.join("\n      "), dados };
 }
 
+// "idioma" do roteiro (pt padrão; en/es para versões dubladas): formato dos números e idioma da transcrição.
+const LOCALES = { pt: "pt-BR", en: "en-US", es: "es-ES", fr: "fr-FR" };
+
 export function gerarHtml(roteiro, formato, imagens = {}, voz = null, animacoes = {}) {
   const [w, h] = DIM[formato];
   const cenas = planejar(roteiro, voz);
+  cenas.forEach((c) => { c.locale = LOCALES[roteiro.idioma || "pt"] || roteiro.idioma; });
   const sobre = Boolean(roteiro.gravacao);
   const total = sobre ? voz.duracao : cenas.at(-1).fim;
   const fundo = sobre ? `<video id="gravacao" class="clip" src="assets/gravacao.mp4" data-start="0" data-duration="${total}" data-has-audio="true" data-track-index="0"></video>
@@ -154,13 +156,15 @@ export function gerarHtml(roteiro, formato, imagens = {}, voz = null, animacoes 
     const sobra = cenas[i + 1]?.transicao === "wipe" ? ENTRADA : 0;
     const classe = !sobre ? "" : c.tipo === "titulo_atras" ? " atras" : c.tipo === "chamada" ? " cta"
       : c.layout === "dividido" ? " dividida" : " sobre";
-    return `<section id="cena-${i}" class="cena${classe} clip" data-start="${c.t0}" data-duration="${+(c.fim - c.t0 + sobra).toFixed(3)}" data-track-index="0">` +
+    const modo = c.tipo === "titulo_atras" ? ` data-modo-titulo="${c.modo || "atras"}"` : "";
+    return `<section id="cena-${i}" class="cena${classe} clip"${modo} data-start="${c.t0}" data-duration="${+(c.fim - c.t0 + sobra).toFixed(3)}" data-track-index="0">` +
       TIPOS[c.tipo].html(c, imagens[i]) + `</section>`;
   };
   // Camadas (ordem do DOM = profundidade): gravação → títulos "atrás" → recorte da pessoa → cartões e legenda.
-  const atras = cenas.map((c, i) => (c.tipo === "titulo_atras" ? secao(c, i) : "")).filter(Boolean);
-  const frente = cenas.map((c, i) => (c.tipo !== "titulo_atras" ? secao(c, i) : "")).filter(Boolean);
-  const pessoa = sobre && voz?.pessoa ? `<video id="pessoa" class="clip" src="assets/pessoa.webm" muted data-start="0" data-duration="${total}" data-track-index="3"></video>` : "";
+  const ehAtras = (c) => c.tipo === "titulo_atras" && (c.modo || "atras") === "atras";
+  const atras = cenas.map((c, i) => (ehAtras(c) ? secao(c, i) : "")).filter(Boolean);
+  const frente = cenas.map((c, i) => (!ehAtras(c) ? secao(c, i) : "")).filter(Boolean);
+  const pessoa = sobre && voz?.pessoa && atras.length ? `<video id="pessoa" class="clip" src="assets/pessoa.webm" muted data-start="0" data-duration="${total}" data-track-index="3"></video>` : "";
   // Ilustração animada: vídeo mudo como camada própria, no lugar da imagem (painel no layout dividido).
   const paineis = cenas.filter((c) => animacoes[c.i]).map((c) =>
     `<video id="anim-${c.i}" class="clip painel-anim${c.layout === "dividido" && sobre ? " dividido" : ""}" src="${animacoes[c.i]}" muted ` +
@@ -173,7 +177,7 @@ export function gerarHtml(roteiro, formato, imagens = {}, voz = null, animacoes 
       JUNTAR_MS[roteiro.legenda_estilo || (sobre ? "palavra" : "frase")]) : { html: "", dados: [] };
   const dados = {
     cenas: cenas.map((c, i) => ({
-      i, primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor,
+      i, primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor, locale: c.locale,
       prefixo: c.prefixo, sufixo: c.sufixo, casas: c.casas, transicao: c.transicao, primeira: i === 0 && !sobre,
       layout: c.layout, foco: c.foco, escala: c.escala,
     })),
@@ -241,8 +245,10 @@ function preparar(projeto, roteiro, base) {
   return imagens;
 }
 
-// "animar": true numa cena de imagem → clipe do Veo Lite a partir da ilustração (cache por imagem + duração).
-function animarImagens(roteiro, base, projeto, formato, saida) {
+// "animar": true numa cena de imagem → clipe do Veo Lite a partir da ilustração. Cache em SAIDA/animacoes:
+// anim-<sha1(bytes da imagem + "aspecto|segundos arredondados p/ cima")[:12]>.mp4 (o local ganha "-local").
+// Sem Veo (falhou, ou --animacao local): animar_local.py (partículas e câmera, grátis) e o aviso no resumo.
+function animarImagens(roteiro, base, projeto, formato, saida, local = false) {
   const animacoes = {};
   const py = process.env.GASPAR_PY || join(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   roteiro.cenas.forEach((c, i) => {
@@ -250,12 +256,22 @@ function animarImagens(roteiro, base, projeto, formato, saida) {
     const img = resolve(base, c.imagem);
     const aspecto = formato === "vertical" && c.layout !== "dividido" ? "9:16" : "16:9";
     const dur = Math.max(c.duracao || 0, duracaoMinima(c));
-    const nome = `anim-${createHash("sha1").update(readFileSync(img)).update(`${aspecto}|${Math.ceil(dur)}`).digest("hex").slice(0, 12)}.mp4`;
-    const cache = join(saida, "animacoes", nome);
-    if (!existsSync(cache)) {
-      mkdirSync(dirname(cache), { recursive: true });
-      execFileSync(py, [join(SKILL, "scripts", "animar.py"), img, String(dur), cache, aspecto], { stdio: ["ignore", "inherit", "inherit"] });
+    const hash = createHash("sha1").update(readFileSync(img)).update(`${aspecto}|${Math.ceil(dur)}`).digest("hex").slice(0, 12);
+    let nome = `anim-${hash}.mp4`;
+    const rodar = (script, destino) => execFileSync(py, [join(SKILL, "scripts", script), img, String(dur), destino, aspecto],
+      { stdio: ["ignore", "inherit", "inherit"] });
+    mkdirSync(join(saida, "animacoes"), { recursive: true });
+    if (!existsSync(join(saida, "animacoes", nome))) {
+      try {
+        if (local) throw new Error("--animacao local");
+        rodar("animar.py", join(saida, "animacoes", nome));
+      } catch (e) {
+        nome = `anim-${hash}-local.mp4`;
+        console.warn(`aviso: cena ${i + 1} animada LOCALMENTE, não pelo Veo (${String(e.message).split("\n")[0]}).`);
+        if (!existsSync(join(saida, "animacoes", nome))) rodar("animar_local.py", join(saida, "animacoes", nome));
+      }
     }
+    const cache = join(saida, "animacoes", nome);
     cpSync(cache, join(projeto, "assets", nome));
     animacoes[i] = `assets/${nome}`;
   });
@@ -264,19 +280,15 @@ function animarImagens(roteiro, base, projeto, formato, saida) {
 
 // Voz: narrar.py (Aoede, com cache) + legendas.py (whisper só para o tempo; o texto é o do roteiro).
 // Refaz o alinhamento só quando a narração mudou.
-// Recorte da pessoa (para o texto passar atrás dela): HyperFrames remove-background local, com a borda
-// afinada (erosão + gama no alfa) para não sobrar o halo da parede clara. Com cache.
-function recortarPessoa(video, saida) {
+// Recorte da pessoa: o mesmo alfa suave do gaspar-v2v (Robust Video Matting + rosto sempre opaco), com cache.
+// Serve ao título "atrás" e aos gates de composição (onde está o rosto, o que a pessoa cobre).
+const EFEITOS = join(SKILL, "..", "gaspar-v2v", "scripts", "efeitos.py");
+function recortarPessoa(video, saida, py) {
   const destino = join(saida, "pessoa.webm");
-  if (existsSync(destino) && statSync(destino).mtimeMs > statSync(video).mtimeMs) return destino;
-  const env = { ...process.env, PATH: pathComFfmpeg() };
-  const base = join(saida, "pessoa-base.mp4"), bruto = join(saida, "pessoa-bruto.webm");
-  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", video, "-an", "-vf", `fps=${FPS}`, "-c:v", "libx264",
-    "-crf", "16", "-pix_fmt", "yuv420p", base], { env });
-  if (!existsSync(bruto)) hyperframes(["remove-background", base, "-o", bruto, "--quality", "best"], saida, env);
-  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-c:v", "libvpx-vp9", "-i", bruto, "-filter_complex",
-    "[0:v]format=rgba,split[c][a];[a]alphaextract,erosion,lut=y='pow(val/255\\,2.2)*255',gblur=sigma=0.8[m];[c][m]alphamerge",
-    "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "6M", "-auto-alt-ref", "0", destino], { env });
+  if (!existsSync(destino) || statSync(destino).mtimeMs < statSync(video).mtimeMs) {
+    console.log("recorte da pessoa (RVM, ~3 quadros/s na CPU; fica em cache)...");
+    execFileSync(py, [EFEITOS, "recortar", video, destino], { stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, PATH: pathComFfmpeg() } });
+  }
   return destino;
 }
 
@@ -288,12 +300,21 @@ function prepararVoz(arq, saida, flags) {
   if (roteiro.gravacao) {
     const video = resolve(dirname(resolve(arq)), roteiro.gravacao);
     const legArq = join(saida, "legendas.json");
-    if (!existsSync(legArq) || statSync(legArq).mtimeMs < statSync(video).mtimeMs)
-      rodar("legendas.py", "fala", video, saida, ...(roteiro.chaves ? ["--chaves", roteiro.chaves.join(",")] : []));
+    // Legenda revisada à mão ("legendas_revisadas") nunca é sobrescrita: se ficou mais velha que a gravação, avisa.
+    const velha = existsSync(legArq) && statSync(legArq).mtimeMs < statSync(video).mtimeMs;
+    if (velha && roteiro.legendas_revisadas)
+      console.warn(`aviso: ${legArq} é mais antiga que a gravação e foi mantida ("legendas_revisadas": true). ` +
+        "Se a gravação mudou, apague o arquivo para transcrever de novo.");
+    else if (!existsSync(legArq) || velha)
+      rodar("legendas.py", "fala", video, saida, ...(roteiro.chaves ? ["--chaves", roteiro.chaves.join(",")] : []),
+        ...(roteiro.idioma ? ["--idioma", roteiro.idioma] : []));
     const dur = execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video],
       { env: { ...process.env, PATH: pathComFfmpeg() } }).toString().trim();
-    return { video, duracao: +(+dur).toFixed(3), legendas: JSON.parse(readFileSync(legArq, "utf8")),
-      pessoa: roteiro.cenas.some((c) => c.tipo === "titulo_atras") ? recortarPessoa(video, saida) : null };
+    if (flags.includes("--sem-recorte") && roteiro.cenas.some((c) => c.tipo === "titulo_atras"))
+      throw new Error("titulo_atras precisa do recorte da pessoa (tire --sem-recorte).");
+    const pessoa = flags.includes("--sem-recorte") ? null : recortarPessoa(video, saida, py);
+    return { video, duracao: +(+dur).toFixed(3), legendas: JSON.parse(readFileSync(legArq, "utf8")), pessoa,
+      analise: pessoa ? analisarPessoa(pessoa, join(saida, "rastro.json")) : null };
   }
   if (flags.includes("--sem-voz") || !roteiro.cenas.some((c) => c.narracao)) return null;
   rodar("narrar.py", arq, saida);
@@ -303,9 +324,39 @@ function prepararVoz(arq, saida, flags) {
   return { falas: JSON.parse(readFileSync(falasArq, "utf8")), legendas: JSON.parse(readFileSync(legArq, "utf8")) };
 }
 
+// "ambiente" (global, lista, ou numa cena): {prompt | arquivo, inicio, fim, nivel_db, fade}. Na cena, o padrão é
+// a janela dela. O som vem do ambiente.py (gerado em loop, com cache/biblioteca) ou do arquivo local.
+function prepararAmbientes(roteiro, cenas, total, base, flags) {
+  const lista = [...[roteiro.ambiente].flat().filter(Boolean).map((a) => ({ inicio: 0, fim: total, ...a })),
+    ...cenas.filter((c) => c.ambiente).map((c) => ({ inicio: c.t0, fim: c.fim, ...c.ambiente }))];
+  if (!lista.length || flags.includes("--sem-ambiente")) return [];
+  const custo = lista.filter((a) => !a.arquivo).reduce((s, a) => s + 0.002 * Math.min(20, (a.fim ?? total) - (a.inicio || 0)), 0);
+  const teto = Number(flags[flags.indexOf("--aprovado-ate") + 1]) || 0;
+  if (custo > 5 && custo > teto) throw new Error(`ambiente: custo previsto US$ ${custo.toFixed(2)} passa de US$ 5; mostre ao André e repita com --aprovado-ate ${custo.toFixed(2)}`);
+  const py = process.env.GASPAR_PY || join(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  return lista.map((a) => {
+    if (a.arquivo) return { ...a, arquivo: resolve(base, a.arquivo) };
+    const r = JSON.parse(execFileSync(py, [join(SKILL, "scripts", "ambiente.py"), a.prompt, String((a.fim ?? total) - (a.inicio || 0))],
+      { stdio: ["ignore", "pipe", "inherit"] }).toString().trim().split("\n").at(-1));
+    console.log(`ambiente "${a.prompt.slice(0, 50)}": ${r.cache ? "da biblioteca (grátis)" : `${r.motor}, US$ ${r.custo_usd.toFixed(3)}`}`);
+    return { ...a, arquivo: r.arquivo };
+  });
+}
+
 async function main() {
   const [arq, saida, ...flags] = process.argv.slice(2);
   if (!arq || !saida) { console.error("uso: node montar.mjs roteiro.json SAIDA [--so-html] [--revisao] [--sem-voz]"); process.exit(2); }
+  if (flags.includes("--detach")) {
+    // O render morre se o processo pai sair (render_cancelled_parent_exited): roda solto, com log em SAIDA.
+    mkdirSync(resolve(saida), { recursive: true });
+    const log = resolve(saida, "montar.log");
+    const fd = openSync(log, "w");
+    const p = spawn(process.execPath, [fileURLToPath(import.meta.url), arq, saida, ...flags.filter((f) => f !== "--detach")],
+      { detached: true, stdio: ["ignore", fd, fd], windowsHide: true });
+    p.unref();
+    console.log(`rodando em segundo plano (pid ${p.pid}); acompanhe ${log}`);
+    return;
+  }
   const roteiro = JSON.parse(readFileSync(arq, "utf8"));
   const formatos = roteiro.formato === "ambos" ? ["vertical", "horizontal"] : [roteiro.formato || "vertical"];
   const env = flags.includes("--so-html") ? process.env : { ...process.env, PATH: pathComFfmpeg() };
@@ -319,12 +370,32 @@ async function main() {
     if (voz?.video) cpSync(voz.video, join(projeto, "assets", "gravacao.mp4"));
     if (voz?.pessoa) cpSync(voz.pessoa, join(projeto, "assets", "pessoa.webm"));
     voz?.falas?.filter((f) => f.wav).forEach((f) => cpSync(join(saida, "narracao", f.wav), join(projeto, "assets", `voz-${f.i}.wav`)));
-    const animacoes = flags.includes("--so-html") ? {} : animarImagens(roteiro, dirname(resolve(arq)), projeto, formato, resolve(saida));
-    const { html, cenas, total } = gerarHtml(roteiro, formato, imagens, voz, animacoes);
+    const animacoes = flags.includes("--so-html") ? {} : animarImagens(roteiro, dirname(resolve(arq)), projeto, formato, resolve(saida),
+      flags[flags.indexOf("--animacao") + 1] === "local" && flags.includes("--animacao"));
+    const [w, h] = DIM[formato];
+    let { html, cenas, total } = gerarHtml(roteiro, formato, imagens, voz, animacoes);
     writeFileSync(join(projeto, "index.html"), html);
-    writeFileSync(join(pasta, "cenas.json"), JSON.stringify(cenas.map(({ i, tipo, t0, fim, minimo, fala, em }) => ({ i, tipo, t0, fim, minimo, fala, em })), null, 2));
+    // Composição (sobreposição): mede os 4 modos de cada título de abertura contra a máscara da pessoa, escolhe
+    // o 1º que passa e refaz o projeto com ele; a 2ª medida valida o layout final (e os cartões contra o rosto).
+    let comp = { falhas: [], decisoes: {} };
+    if (voz?.analise && formato === "vertical") {
+      comp = await checkComposicao(projeto, cenas, voz.analise, voz.legendas, { largura: w, altura: h });
+      const escolha = roteiro.cenas.map((c, i) => (!c.modo && comp.decisoes[i]?.modo ? { ...c, modo: comp.decisoes[i].modo } : c));
+      if (escolha.some((c, i) => c !== roteiro.cenas[i])) {
+        ({ html, cenas, total } = gerarHtml({ ...roteiro, cenas: escolha }, formato, imagens, voz, animacoes));
+        writeFileSync(join(projeto, "index.html"), html);
+        const final = await checkComposicao(projeto, cenas, voz.analise, voz.legendas, { largura: w, altura: h });
+        comp.falhas = [...comp.falhas.filter((f) => f.regra === "titulo-sem-modo"), ...final.falhas];
+      }
+      for (const [i, d] of Object.entries(comp.decisoes)) {
+        const recusados = Object.entries(d.motivos).filter(([m]) => m !== d.modo).map(([m, n]) => `${m}: ${n.falhas[0]}`);
+        console.log(`título "${roteiro.cenas[i].titulo}": modo ${d.modo ?? "nenhum"}${recusados.length ? ` (recusados — ${recusados.join("; ")})` : ""}`);
+      }
+    }
+    writeFileSync(join(pasta, "cenas.json"), JSON.stringify(cenas.map(({ i, tipo, t0, fim, minimo, fala, em, modo }) => ({ i, tipo, t0, fim, minimo, fala, em, modo })), null, 2));
     cenas.filter((c) => c.duracao && c.duracao < c.minimo).forEach((c) =>
-      console.warn(`aviso: cena ${c.i + 1} pediu ${c.duracao} s, mas a leitura exige ${c.minimo} s (usei ${c.minimo}).`));
+      console.warn(`aviso: cena ${c.i + 1} pediu ${c.duracao} s, mas a leitura exige ${c.minimo} s (usei ${c.minimo}` +
+        `${roteiro.gravacao ? `; o cartão fica até ${c.fim.toFixed(1)} s, confira se ainda casa com a fala` : ""}).`));
     cenas.avisos.forEach((a) => console.warn("aviso: " + a));
 
     const erros = lint(html);
@@ -337,36 +408,41 @@ async function main() {
     console.log(`${formato}: ${cenas.length} cenas, ${total.toFixed(1)} s, lint ok`);
 
     // Gates de antes do render (Fase 6): bloqueiam, a menos que --forcar.
-    const [w, h] = DIM[formato];
     const antes = [...await checkLegibilidade(projeto, cenas, { largura: w, altura: h, sobre: Boolean(roteiro.gravacao) }),
-      ...checkLegendas(roteiro, voz), ...checkLeitura(cenas)];
+      ...checkLegendas(roteiro, voz), ...checkLeitura(cenas), ...comp.falhas];
     console.log(relatorio("gates (antes do render)", antes));
-    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes }, null, 2));
+    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes, titulos: comp.decisoes }, null, 2));
     if (antes.length && !flags.includes("--forcar")) { falhou = true; continue; }
     if (flags.includes("--so-html")) continue;
 
     if (flags.includes("--revisao")) {
-      const tempos = cenas.map((c) => Math.max(c.t0, c.fim - 0.5).toFixed(2)).join(",");
+      // Cada cena assentada + o pior quadro de cada título (maior oclusão pela pessoa).
+      const piores = Object.values(comp.decisoes).map((d) => d.motivos[d.modo]?.pior?.t).filter((t) => t != null);
+      const tempos = [...new Set([...cenas.map((c) => Math.max(c.t0, c.fim - 0.5)), ...piores])].sort((a, b) => a - b)
+        .map((t) => t.toFixed(2)).join(",");
       hyperframes(["snapshot", "--at", tempos, "--no-end", "-o", join(pasta, "revisao")], projeto, env);
     }
     const nome = (roteiro.titulo || "Gaspar Vídeo").replace(/[<>:"/\\|?*\u0000-\u001f]/g, " -").replace(/\s+/g, " ").trim();
     const mp4 = resolve(saida, `${nome} (${formato}).mp4`);
     const bruto = join(pasta, "bruto.mp4");
+    // Ambiente antes do render: se faltar som ou passar do teto, falha já, sem desperdiçar o render.
+    const ambientes = prepararAmbientes(roteiro, cenas, total, dirname(resolve(arq)), flags);
     hyperframes(["render", "-o", bruto, "-f", String(FPS), "-q", "delivery"], projeto, env);
     // Pós (Fase 3): SFX nos marcadores, trilha com ducking, −14 LUFS, LUT de marca.
     process.env.PATH = env.PATH;
     const trilha = flags.includes("--sem-trilha") || roteiro.trilha === false ? null
       : roteiro.trilha ? resolve(dirname(resolve(arq)), roteiro.trilha) : trilhaPadrao();
-    const r = await posProduzir({ bruto, projeto, final: mp4, trilha, sfx: !flags.includes("--sem-sfx"),
+    const r = await posProduzir({ bruto, projeto, final: mp4, trilha, ambientes, sfx: !flags.includes("--sem-sfx"),
       lut: !flags.includes("--sem-lut") && roteiro.lut !== false });
     const lu = medirLoudness(mp4);
     console.log(`→ ${mp4}
   ${r.sfx} SFX, trilha ${trilha ? "com ducking" : "não"}, ${lu.I} LUFS, pico ${lu.TP} dBTP`);
-    const depois = [...checkDuracao(mp4), ...checkAudio(mp4)];
+    const depois = [...checkDuracao(mp4), ...checkAudio(mp4),
+      ...(voz?.analise && formato === "vertical" ? checkQuadros(mp4, voz.video, cenas, voz.analise, comp.decisoes) : [])];
     console.log(relatorio("gates (depois do render)", depois));
     const quadros = previa(mp4, pasta);
     console.log(`  prévia para o diário: ${quadros.join(", ")}`);
-    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes, depois, previa: quadros }, null, 2));
+    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes, titulos: comp.decisoes, depois, previa: quadros }, null, 2));
     if (depois.length) falhou = true;
   }
   process.exit(falhou ? 1 : 0);

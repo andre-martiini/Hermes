@@ -8,7 +8,7 @@ const cab = (c) =>
   (c.titulo ? `<div class="titulo cab">${esc(c.titulo)}</div>` : "");
 
 const numeroFinal = (c) => (c.prefixo || "") +
-  new Intl.NumberFormat("pt-BR", { minimumFractionDigits: c.casas || 0, maximumFractionDigits: c.casas || 0 }).format(c.valor) + (c.sufixo || "");
+  new Intl.NumberFormat(c.locale || "pt-BR", { minimumFractionDigits: c.casas || 0, maximumFractionDigits: c.casas || 0 }).format(c.valor) + (c.sufixo || "");
 
 const palavras = (...textos) => textos.flat().join(" ").split(/\s+/).filter(Boolean).length;
 
@@ -70,11 +70,13 @@ export const TIPOS = {
     texto: (c) => [c.legenda_tela],
     itens: () => 2,
   },
-  // Texto gigante ATRÁS da pessoa (sobreposição): fica entre a gravação e o recorte dela.
+  // Título de abertura sobre a gravação. O montar.mjs escolhe o modo pela máscara da pessoa (data-modo-titulo):
+  // "atras" (entre a gravação e o recorte), "abaixo" (entre o queixo e a legenda), "antes" (cartão cheio no
+  // primeiro segundo) ou "topo" (painel acima da cabeça). O kit.js ajusta a fonte medindo no DOM.
   titulo_atras: {
     primitiva: "TitleBehind",
-    // --topo: onde começa a cabeça (px, medido no recorte pelo montar.mjs); o título se apoia nela.
-    html: (c) => `<div class="bloco" style="--chars: ${String(c.titulo).length}; --topo: ${c.topo_cabeca ?? 420}px">` +
+    // --topo: onde começa a cabeça; --queixo: o ponto mais baixo do rosto na janela (px, medidos na máscara).
+    html: (c) => `<div class="bloco" style="--chars: ${String(c.titulo).length}; --topo: ${c.topo_cabeca ?? 420}px; --queixo: ${c.queixo ?? 1100}px">` +
       (c.etiqueta ? `<div class="etiqueta">${esc(c.etiqueta)}</div>` : "") +
       `<div class="gigante">${esc(c.titulo)}</div></div>`,
     texto: (c) => [c.etiqueta, c.titulo],

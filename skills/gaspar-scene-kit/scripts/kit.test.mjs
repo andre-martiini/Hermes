@@ -84,3 +84,97 @@ test("correções do review: frase vazia, mix sem entradas, narração com quebr
   const voz = { legendas: [[tok("Primeiro", 0, 1), tok(" a", 1, 2), tok(" demanda.", 2, 3), tok(" Depois", 3, 4), tok(" o", 4, 5), tok(" ETP.", 5, 6)]] };
   assert.deepEqual(checkLegendas(roteiro, voz), []);
 });
+
+// ---------------------------------------------------------------- Gaspar Vídeo v2: composição × pessoa
+import { avaliarTitulo, cobertura, correlacao } from "./gates.mjs";
+
+// Pessoa sintética: alfa 1 dentro de [x0,y0,x1,y1] (px de 1080×1920), rosto na caixa dada, 10 quadros/s.
+function pessoa(caixa, rosto, n = 50) {
+  const alfa = new Uint8Array(108 * 192);
+  for (let y = Math.floor(caixa[1] / 10); y < Math.ceil(caixa[3] / 10); y++)
+    for (let x = Math.floor(caixa[0] / 10); x < Math.ceil(caixa[2] / 10); x++) alfa[y * 108 + x] = 255;
+  const quadros = Array.from({ length: n }, (_, k) => ({ t: k / 10, alfa, topo: caixa[1], rosto }));
+  return { quadros, em: (t) => quadros[Math.min(n - 1, Math.max(0, Math.round(t * 10)))] };
+}
+const medida = (letras, painel, fonte = 200) => [1, 1.5, 2, 2.5, 3].map((t) => ({ t, letras, textos: [[letras[0][0], letras[0][1] - 60, letras.at(-1)[2], letras[0][3]]], painel, fonte }));
+const cena = { i: 0, t0: 0, fim: 4 };
+const cabecaGrande = pessoa([200, 300, 880, 1920], [260, 420, 820, 1150]);
+
+test("titulo-oculto: letra atrás da cabeça no modo atras", () => {
+  const letras = [[100, 350, 300, 550], [300, 350, 500, 550], [500, 350, 700, 550], [700, 350, 900, 550]];
+  assert.ok(cobertura(cabecaGrande.em(1), letras[1]) > 0.9);
+  const e = avaliarTitulo("atras", medida(letras, [50, 290, 1030, 560]), cabecaGrande, cena, 3);
+  assert.ok(e.some((x) => x.regra === "titulo-oculto"));
+  assert.ok(e.pior.oculto > 0.9);
+});
+
+test("titulo-cortado: texto que passa da borda direita", () => {
+  const letras = [[300, 1250, 600, 1400], [600, 1250, 900, 1400], [900, 1250, 1180, 1400]];
+  const e = avaliarTitulo("abaixo", medida(letras, [50, 1180, 1030, 1420]), cabecaGrande, cena, 3);
+  assert.ok(e.some((x) => x.regra === "titulo-cortado"));
+});
+
+test("rosto-coberto: título abaixo encostando no queixo; abaixo do queixo passa", () => {
+  const letras = [[300, 1200, 500, 1320], [500, 1200, 700, 1320]];
+  const ruim = avaliarTitulo("abaixo", medida(letras, [50, 1100, 1030, 1340]), cabecaGrande, cena, 3);
+  assert.ok(ruim.some((x) => x.regra === "rosto-coberto"));
+  const bom = avaliarTitulo("abaixo", medida(letras, [50, 1180, 1030, 1340]), cabecaGrande, cena, 3);
+  assert.deepEqual(bom.map((x) => x.regra), []);
+});
+
+test("modo antes recusa quando a fala começa durante o cartão", () => {
+  const letras = [[300, 900, 500, 1000]];
+  assert.ok(avaliarTitulo("antes", medida(letras, [50, 850, 1030, 1050]), cabecaGrande, cena, 0.3).some((x) => x.regra === "fala-no-cartao"));
+  assert.deepEqual([...avaliarTitulo("antes", [{ t: 0.5, letras, textos: [[300, 900, 500, 1000]], painel: [50, 850, 1030, 1050], fonte: 120 }],
+    cabecaGrande, cena, 1.4)], []);
+});
+
+test("correlação do rosto: igual = 1, coberto por painel liso < 0,6", () => {
+  const w = 20, a = new Uint8Array(w * w * 3).map((_, i) => (i * 37) % 251), liso = new Uint8Array(w * w * 3).fill(40);
+  liso[0] = 41;
+  assert.ok(correlacao(a, a, w, [0, 0, w, w]) > 0.99);
+  assert.ok(correlacao(a, liso, w, [0, 0, w, w]) < 0.6);
+});
+
+test("ambiente entra na mixagem abaixo da voz, sem graves, com ducking e só na janela pedida", () => {
+  const { filtro } = filtroAudio({ voz: true, trilha: "t.m4a", ambientes: [{ arquivo: "a.wav", inicio: 2, fim: 10, nivel_db: -26 }], sfx: [], total: 12 });
+  assert.match(filtro, /\[0:a\]aresample=48000,asplit=3\[voz\]\[chave0\]\[chave1\]/);
+  assert.match(filtro, /\[2:a\]aresample=48000,highpass=f=120,lowpass=f=8000,volume=-26dB,atrim=0:8\.000/);
+  assert.match(filtro, /adelay=2000:all=1\[am0\];\[am0\]\[chave1\]sidechaincompress/);
+  assert.match(filtro, /amix=inputs=3/);
+});
+
+import { LIMITADOR, medirLoudness } from "./pos.mjs";
+import { execFileSync as ef } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as pj } from "node:path";
+
+test("true-peak: voz com picos fortes fica ≤ −1,5 dBTP medida no AAC final", () => {
+  const pasta = mkdtempSync(pj(tmpdir(), "tp-"));
+  const aac = pj(pasta, "x.m4a");
+  // Fala baixa com estalos: o loudnorm linear aplica ganho fixo (+10 dB) e os estalos passariam de 0 dBFS (+5,8 dBTP).
+  const fonte = "aevalsrc='0.08*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*3*t))+if(lt(mod(t,0.7),0.004),0.5,0)':s=48000:d=6";
+  ef("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", fonte, "-af",
+    `volume=10dB,${LIMITADOR},aresample=48000`, "-c:a", "aac", "-b:a", "192k", aac]);
+  const { TP } = medirLoudness(aac);
+  assert.ok(TP <= -1.5, `true-peak ${TP}`);
+});
+
+test("versão em outro idioma: o número segue o locale do roteiro", () => {
+  const cena = { tipo: "numero", valor: 1200, rotulo: "essays" };
+  assert.match(gerarHtml({ cenas: [cena] }, "vertical").html, /"locale":"pt-BR"/);
+  assert.match(gerarHtml({ idioma: "en", cenas: [cena] }, "vertical").html, /"locale":"en-US"/);
+});
+
+import { execFileSync as execPy } from "node:child_process";
+import { homedir } from "node:os";
+
+test("siglas: corrige Redtec→Reditec e ifes→Ifes, mas não troca palavra comum por sigla", () => {
+  const py = process.env.GASPAR_PY || pj(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const saida = execPy(py, ["-c", `import sys, json; sys.path.insert(0, ${JSON.stringify(new URL(".", import.meta.url).pathname.replace(/^\/(\w:)/, "$1"))})
+from legendas import corrigir_siglas
+ws = ["Redtec!", "mago", "ifes", "pago", "magro", "fies", "gastar"]
+print(json.dumps([p["w"] for p in corrigir_siglas([{"w": w, "p": 0.5} for w in ws], ["Reditec", "MAGO", "Ifes", "Gaspar"])]))`]).toString();
+  assert.deepEqual(JSON.parse(saida), ["Reditec!", "mago", "Ifes", "pago", "magro", "fies", "gastar"]);
+});

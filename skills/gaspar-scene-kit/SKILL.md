@@ -72,7 +72,12 @@ npm test                                               # testes do kit e do lint
 - **Sobreposição** (`"gravacao": "video.mp4"` no roteiro): a gravação fica no fundo com o som original, a
   legenda vem da fala transcrita (`legendas.py fala`) e cada cartão entra no topo, em painel de vidro,
   quando a fala diz o seu `"quando"` (frase exata) ou em `"inicio"` (s). `"chaves": ["Ifes", ...]` ajuda o
-  whisper com nomes próprios.
+  reconhecimento e corrige a grafia de nomes próprios e siglas (Redtec → Reditec).
+- **Motor da transcrição** (`GASPAR_ASR`): `whisper` (padrão) ou `parakeet` (NVIDIA Parakeet TDT 0.6B v3 int8 via
+  `sherpa-onnx`, pesos nos releases do GitHub; serve onde o Hugging Face é bloqueado, e o whisper cai nele
+  sozinho se não carregar). `PY -m pip install sherpa-onnx`; o modelo (~490 MB) baixa na 1ª vez.
+- Legenda revisada à mão: com `"legendas_revisadas": true`, `SAIDA/legendas.json` nunca é sobrescrito (se ficar
+  mais velho que a gravação, o montador avisa em vez de transcrever de novo).
 - `"legenda_estilo"`: `"palavra"` (300 ms, padrão na sobreposição/Reels) ou `"frase"` (1200 ms, padrão no
   motion/aula). `"legenda": false` desliga.
 - Palavras com confiança < 0,6 saem listadas no terminal: corrija em `SAIDA/legendas.json`, rode de novo
@@ -87,12 +92,24 @@ Técnicas do vídeo de referência do André (01/11/2026), todas compostas sobre
   para um cartão em retrato na metade de baixo (`"escala": 0.6` = tamanho; `"foco": 0.06` = recorte no topo) e o
   painel da cena ocupa a parte de cima (`imagem` preenche o painel; listas, números, fluxos em tamanho compacto).
   Volta à tela cheia no fim da cena.
-- **Título atrás da pessoa:** `{"tipo": "titulo_atras", "etiqueta": "...", "titulo": "2.0"}`. O montador recorta a
-  pessoa (HyperFrames `remove-background`, ~8 min de CPU por 20 s, com cache), mede o topo da cabeça e apoia o
-  título nele: só o terço de baixo das letras fica atrás (exceção à safe area: o título pode subir até 5%).
+- **Título de abertura:** `{"tipo": "titulo_atras", "etiqueta": "...", "titulo": "MAGO"}`. O montador recorta a
+  pessoa (o mesmo alfa suave do gaspar-v2v, ~3 quadros/s na CPU, com cache) e **escolhe o modo antes do render**,
+  medindo a caixa real do texto no Chrome contra a máscara da pessoa a cada 0,1 s da janela do cartão:
+  1. `atras` — entre o fundo e a pessoa, apoiado no topo da cabeça (p10 na janela). Só se cada letra ficar
+     ≥ 70% visível (p90) e o título couber inteiro na tela e na safe area (o título atrás pode subir até 5%);
+  2. `abaixo` — vidro escuro entre o queixo (p90 do rosto) e a legenda, sem tocar o rosto;
+  3. `antes` — cartão cheio de 1,2 s sobre a gravação desfocada; só se a fala começar depois dele;
+  4. `topo` — painel no topo, se houver espaço acima da cabeça.
+  A decisão (e por que os outros modos foram recusados) sai no terminal e em `gates.json` (`titulos`). Nenhum
+  serve → o montador não renderiza e diz quanto a cabeça ocupa do quadro (regrave mais afastado, ou faça uma pausa
+  de 1 s antes de falar). `"modo": "atras|abaixo|antes|topo"` força um modo, mas os gates valem igual. A fonte
+  encolhe medida no DOM até caber (nada de tamanho fixo no roteiro).
 - **Ilustração animada:** `"animar": true` numa cena `imagem` → o Veo 3.1 Lite anima a própria ilustração
-  (elementos flutuando, leve aproximação; mesmo estilo, sem texto novo). ~US$ 0,20 por 4 s, com cache por imagem.
-  Precisa de `GOOGLE_APPLICATION_CREDENTIALS` (conta de serviço do Hermes).
+  (elementos flutuando, leve aproximação; mesmo estilo, sem texto novo). ~US$ 0,20 por 4 s, com cache por imagem
+  (`SAIDA/animacoes/anim-<sha1(imagem + "aspecto|segundos")[:12]>.mp4`). Precisa de
+  `GOOGLE_APPLICATION_CREDENTIALS` (conta de serviço do Hermes). Sem Veo (falhou, ou `--animacao local`):
+  `animar_local.py` (partículas e câmera, grátis, arquivo `...-local.mp4`) e um **aviso** no terminal — diga ao
+  André que não foi o Veo.
 - **Fechamento:** `{"tipo": "chamada"}` desfoca e escurece a cena (ex.: no "valeu" final). `"titulo"` e
   `"botao"` são opcionais (o André prefere sem botão); com texto, comece cedo o bastante para a leitura.
 - Exemplo: `exemplos/estilo-apresentador.json` (título atrás → painel com ilustração → lista →
@@ -106,7 +123,15 @@ Depois do render, o `pos.mjs` (chamado pelo montador) faz no FFmpeg:
   pico da curva**, a −12 dB da voz. Biblioteca: `assets/sfx/` (20 sons ElevenLabs, ≤ 0,8 s; refazer um:
   `scripts/gerar_sfx.py --refazer nome`).
 - **Trilha** (a da tutorial-sistema, ou `"trilha": "x.m4a"`; `false` desliga) com **ducking** de ~9 dB sob a voz.
-- **Loudness** −14 LUFS / −1,5 dBTP (loudnorm em dois passes); o montador imprime a medição EBU R128.
+- **Ambiente** (cafeteria, auditório, rua…): `"ambiente": {"prompt": "busy coffee shop ambience…", "nivel_db": -26,
+  "fade": 1.0}` no roteiro (vale o vídeo todo; `inicio`/`fim` para uma janela), numa cena (vale a janela dela), ou
+  uma lista. `scripts/ambiente.py` gera um trecho de até 20 s **em loop sem emenda** no ElevenLabs Sound Effects v2
+  via fal (US$ 0,002/s: ~US$ 0,04 por vídeo; cai no ElevenLabs direto se o fal falhar) e guarda na biblioteca
+  `~/.tutorial-sistema/ambientes/` (catálogo com prompt, motor, data e licença: o mesmo prompt não paga de novo).
+  `"arquivo": "x.wav"` usa um som seu. Mistura: passa-alta 120 Hz e passa-baixa 8 kHz, −24 a −28 dB abaixo da voz,
+  ducking leve pela fala e fade. Prompt em inglês rende melhor. `--sem-ambiente` desliga.
+- **Loudness** −14 LUFS (loudnorm em dois passes) + limitador de true-peak a 4× a taxa (teto −3 dBFS), porque o
+  loudnorm linear sozinho deixa passar estalos; o gate mede o **AAC final**.
 - **LUT de marca** `assets/lut/gaspar.cube` (quente leve, contraste médio, pretos levantados) em todo vídeo;
   os botões ficam em `scripts/gerar_lut.py`. `"lut": false` ou `--sem-lut` desliga.
 - Transições são do kit (fade/wipe, no HyperFrames), não `xfade`. Requer FFmpeg completo (winget Gyan.FFmpeg).
@@ -119,8 +144,15 @@ O montador não entrega vídeo que não passe (`scripts/gates.mjs`; relatório e
   1080×1920, contraste < 4,5:1), medido no Chrome com cada cena assentada; `check-legendas` (motion: legenda
   = narração palavra por palavra; sobreposição: palavra com confiança < 0,6 só passa marcada `"revisado": true`
   em legendas.json ou com `"legendas_revisadas": true` no roteiro).
+- **Composição (sobreposição, antes do render, bloqueiam):** `titulo-cortado` (caixa real de qualquer texto fora de
+  0–1080 × 0–1920), `titulo-oculto` (letra do título atrás com < 70% visível em p90), `rosto-coberto` (cartão ou
+  painel sobre a caixa do rosto do MediaPipe em qualquer instante da janela; exceto `print` com `"layout":
+  "cheio"` até 8 s), `titulo-sem-modo` (nenhum modo do título cabe). A máscara vem do recorte da pessoa
+  (`--sem-recorte` desliga recorte e estes gates).
 - **Depois do render (falham o montar):** `check-duracao` (vídeo = áudio ± 100 ms; nenhuma cena abaixo do
-  tempo de leitura) e `check-audio` (−14 ± 1 LUFS, true peak ≤ −1,5 dBTP, nenhum silêncio > 1,5 s no meio).
+  tempo de leitura), `check-audio` (−14 ± 1 LUFS, true peak ≤ −1,5 dBTP, nenhum silêncio > 1,5 s no meio) e
+  `check-quadros` (nos quadros reais em 0,5 s, meio e fim de cada cartão: o rosto continua o da gravação —
+  correlação ≥ 0,6 — e nenhum texto novo encosta na borda).
 - **Prévia:** `previa-10/50/90.png` em `SAIDA/<formato>/` — anexe ao diário da ação antes da entrega.
 - **Entrega:** MP4 final no Drive ou anexado à ação (`preparar_upload` + `anexar_arquivo`), com link e custo
   no diário. Nunca só o caminho local.
@@ -128,7 +160,19 @@ O montador não entrega vídeo que não passe (`scripts/gates.mjs`; relatório e
 ## Revisão
 
 Abra `SAIDA/<formato>/revisao/contact-sheet.jpg` e confira: nada cortado ou fora da safe area, número
-numa linha, item ativo em âmbar, cena assentada. Só então entregue.
+numa linha, item ativo em âmbar, cena assentada. A folha traz também, por título, o **pior quadro** (maior oclusão
+pela pessoa). Os gates passarem não basta: olhe a folha. Só então entregue.
+
+## Ambiente de execução
+
+- Render longo: `node scripts/montar.mjs roteiro.json SAIDA --detach` roda solto do terminal (log em
+  `SAIDA/montar.log`); sem isso, um terminal/ferramenta que encerra o processo pai mata o render
+  (`render_cancelled_parent_exited`).
+- Sem acesso ao download do `chrome-headless-shell` (nuvem com lista de hosts): `HYPERFRAMES_BROWSER_PATH` e
+  `PRODUCER_HEADLESS_SHELL_PATH` apontando um Chrome instalado (ex.: `/usr/bin/google-chrome`); os gates usam o
+  mesmo Chrome.
+- Pré-requisitos da sobreposição, com cache em SAIDA (refeitos se a gravação for mais nova): `legendas.json`
+  (transcrição) e `pessoa.webm` + `rastro.json` (recorte e rosto, via `../gaspar-v2v/scripts/efeitos.py recortar`).
 
 ## Motor
 
