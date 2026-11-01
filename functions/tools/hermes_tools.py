@@ -3026,6 +3026,13 @@ def _video_ajustar(ctx: ToolContext, args: dict):
     return previa.resposta_tool(resultado)
 
 
+# fal.ai (plano de vídeo nov/2026, Fase 4): geração por IA paga, roda como job e registra em videoJobs.
+def _video_fal_executar(ctx: ToolContext, args: dict):
+    from video import fal
+
+    return fal.executar_tool(ctx.db, ctx.user_uid, args)
+
+
 # Fase 4 — pagas (piso de confirmação obrigatória: só rodam depois do "sim", via
 # confirmar_acao) e o cancelamento, que é livre.
 def _video_renderizar(ctx: ToolContext, args: dict):
@@ -3391,6 +3398,7 @@ _HANDLERS: dict = {
     "video_criar_projeto": _video_criar_projeto,
     "video_status": _video_status,
     "video_gerar_previa": _video_gerar_previa,
+    "video_fal_executar": _video_fal_executar,
     "video_ajustar": _video_ajustar,
     "video_renderizar": _video_renderizar,
     "video_refazer_cena": _video_refazer_cena,

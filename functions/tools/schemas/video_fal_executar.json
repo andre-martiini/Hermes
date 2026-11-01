@@ -1,0 +1,34 @@
+{
+  "name": "video_fal_executar",
+  "description": "Roda um modelo pago do fal.ai de ponta a ponta (vídeo V2V, imagem, lip-sync, reframe, retake). Calcula o custo pela tabela de preços (config/precos_fal); até US$ 5 envia direto; acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd igual ao custo. Espera o modelo terminar (até 8 min; se passar, chame de novo só com job_fal), registra o job em videoJobs (status, custo, URLs) e devolve as URLs do resultado. Tool longa: devolve job_id; busque com consultar_job.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "modelo": {
+        "type": "string",
+        "description": "Id do modelo no fal, ex.: fal-ai/flux/schnell, fal-ai/wan-vace-apps/video-edit, fal-ai/kling-video/o3/standard/video-to-video/edit. Precisa ter preço em config/precos_fal ou na tabela padrão."
+      },
+      "entrada": {
+        "type": "object",
+        "description": "Input do modelo exatamente como a página do modelo no fal descreve (prompt, video_url, image_url, num_images...)."
+      },
+      "segundos": {
+        "type": "number",
+        "description": "Duração cobrável em segundos: a do vídeo de entrada (V2V) ou a pedida. O custo usa o maior entre isto e o campo de duração da entrada; o real é recalculado pela duração gerada quando o fal a informa."
+      },
+      "aprovado_ate_usd": {
+        "type": "number",
+        "description": "Só depois de o André aprovar o custo mostrado: o valor aprovado (≥ custo estimado)."
+      },
+      "task_id": {
+        "type": "string",
+        "description": "Ação do Gaspar ligada a este job (fica registrada em videoJobs)."
+      },
+      "job_fal": {
+        "type": "string",
+        "description": "Só para retomar: o job_fal de uma chamada que passou do tempo. Reconsulta aquele job sem enviar nem cobrar de novo (modelo e entrada são ignorados)."
+      }
+    },
+    "required": []
+  }
+}
