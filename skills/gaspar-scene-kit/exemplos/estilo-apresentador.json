@@ -7,7 +7,7 @@
   "chaves": ["Claude", "André", "Gaspar"],
   "cenas": [
     {"tipo": "titulo_atras", "etiqueta": "Teste do", "titulo": "Vídeo 2.0", "inicio": 1.6, "duracao": 3.6},
-    {"tipo": "imagem", "layout": "dividido", "imagem": "SUA-ILUSTRACAO.png", "legenda_tela": "Novos recursos de vídeo", "quando": "novos recursos", "duracao": 3.4},
+    {"tipo": "imagem", "layout": "dividido", "imagem": "SUA-ILUSTRACAO.png", "animar": true, "legenda_tela": "Novos recursos de vídeo", "quando": "novos recursos", "duracao": 3.4},
     {"tipo": "topicos", "layout": "dividido", "titulo": "O que eu quero", "itens": ["Animações legais", "Interessantes", "Engajadoras"], "quando": "colocar animações", "duracao": 4.4},
     {"tipo": "chamada", "inicio": 21.0, "duracao": 1.3}
   ]

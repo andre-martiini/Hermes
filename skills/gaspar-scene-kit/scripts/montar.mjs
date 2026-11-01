@@ -17,6 +17,7 @@
 // (tempo de cada cena; os marcadores de SFX ficam em window.__sfx na página).
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -142,7 +143,7 @@ function htmlLegendas(trechos, juntarMs) {
   return { html: blocos.join("\n      "), dados };
 }
 
-export function gerarHtml(roteiro, formato, imagens = {}, voz = null) {
+export function gerarHtml(roteiro, formato, imagens = {}, voz = null, animacoes = {}) {
   const [w, h] = DIM[formato];
   const cenas = planejar(roteiro, voz);
   const sobre = Boolean(roteiro.gravacao);
@@ -160,7 +161,11 @@ export function gerarHtml(roteiro, formato, imagens = {}, voz = null) {
   const atras = cenas.map((c, i) => (c.tipo === "titulo_atras" ? secao(c, i) : "")).filter(Boolean);
   const frente = cenas.map((c, i) => (c.tipo !== "titulo_atras" ? secao(c, i) : "")).filter(Boolean);
   const pessoa = sobre && voz?.pessoa ? `<video id="pessoa" class="clip" src="assets/pessoa.webm" muted data-start="0" data-duration="${total}" data-track-index="3"></video>` : "";
-  const secoes = [fundo + atras.join("\n      "), pessoa, frente.join("\n      ")].filter(Boolean).join("\n      ");
+  // Ilustração animada: vídeo mudo como camada própria, no lugar da imagem (painel no layout dividido).
+  const paineis = cenas.filter((c) => animacoes[c.i]).map((c) =>
+    `<video id="anim-${c.i}" class="clip painel-anim${c.layout === "dividido" && sobre ? " dividido" : ""}" src="${animacoes[c.i]}" muted ` +
+    `data-start="${c.t0}" data-duration="${+(c.fim - c.t0).toFixed(3)}" data-track-index="4"></video>`).join("\n      ");
+  const secoes = [fundo + atras.join("\n      "), pessoa, paineis, frente.join("\n      ")].filter(Boolean).join("\n      ");
   const audios = voz && !sobre ? cenas.filter((c) => c.fala).map((c) =>
     `<audio id="voz-${c.i}" class="clip" src="assets/voz-${c.i}.wav" data-start="${(c.t0 + LEAD).toFixed(3)}" data-duration="${c.fala}" data-track-index="1"></audio>`).join("\n      ") : "";
   const leg = voz && roteiro.legenda !== false
@@ -168,7 +173,7 @@ export function gerarHtml(roteiro, formato, imagens = {}, voz = null) {
       JUNTAR_MS[roteiro.legenda_estilo || (sobre ? "palavra" : "frase")]) : { html: "", dados: [] };
   const dados = {
     cenas: cenas.map((c, i) => ({
-      primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor,
+      i, primitiva: TIPOS[c.tipo].primitiva, t0: c.t0, fim: c.fim, em: c.em, valor: c.valor,
       prefixo: c.prefixo, sufixo: c.sufixo, casas: c.casas, transicao: c.transicao, primeira: i === 0 && !sobre,
       layout: c.layout, foco: c.foco, escala: c.escala,
     })),
@@ -236,6 +241,27 @@ function preparar(projeto, roteiro, base) {
   return imagens;
 }
 
+// "animar": true numa cena de imagem → clipe do Veo Lite a partir da ilustração (cache por imagem + duração).
+function animarImagens(roteiro, base, projeto, formato, saida) {
+  const animacoes = {};
+  const py = process.env.GASPAR_PY || join(homedir(), ".tutorial-sistema", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  roteiro.cenas.forEach((c, i) => {
+    if (!c.animar || !c.imagem) return;
+    const img = resolve(base, c.imagem);
+    const aspecto = formato === "vertical" && c.layout !== "dividido" ? "9:16" : "16:9";
+    const dur = Math.max(c.duracao || 0, duracaoMinima(c));
+    const nome = `anim-${createHash("sha1").update(readFileSync(img)).update(`${aspecto}|${Math.ceil(dur)}`).digest("hex").slice(0, 12)}.mp4`;
+    const cache = join(saida, "animacoes", nome);
+    if (!existsSync(cache)) {
+      mkdirSync(dirname(cache), { recursive: true });
+      execFileSync(py, [join(SKILL, "scripts", "animar.py"), img, String(dur), cache, aspecto], { stdio: ["ignore", "inherit", "inherit"] });
+    }
+    cpSync(cache, join(projeto, "assets", nome));
+    animacoes[i] = `assets/${nome}`;
+  });
+  return animacoes;
+}
+
 // Voz: narrar.py (Aoede, com cache) + legendas.py (whisper só para o tempo; o texto é o do roteiro).
 // Refaz o alinhamento só quando a narração mudou.
 // Recorte da pessoa (para o texto passar atrás dela): HyperFrames remove-background local, com a borda
@@ -293,7 +319,8 @@ async function main() {
     if (voz?.video) cpSync(voz.video, join(projeto, "assets", "gravacao.mp4"));
     if (voz?.pessoa) cpSync(voz.pessoa, join(projeto, "assets", "pessoa.webm"));
     voz?.falas?.filter((f) => f.wav).forEach((f) => cpSync(join(saida, "narracao", f.wav), join(projeto, "assets", `voz-${f.i}.wav`)));
-    const { html, cenas, total } = gerarHtml(roteiro, formato, imagens, voz);
+    const animacoes = flags.includes("--so-html") ? {} : animarImagens(roteiro, dirname(resolve(arq)), projeto, formato, resolve(saida));
+    const { html, cenas, total } = gerarHtml(roteiro, formato, imagens, voz, animacoes);
     writeFileSync(join(projeto, "index.html"), html);
     writeFileSync(join(pasta, "cenas.json"), JSON.stringify(cenas.map(({ i, tipo, t0, fim, minimo, fala, em }) => ({ i, tipo, t0, fim, minimo, fala, em })), null, 2));
     cenas.filter((c) => c.duracao && c.duracao < c.minimo).forEach((c) =>

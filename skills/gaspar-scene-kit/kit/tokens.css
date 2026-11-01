@@ -99,6 +99,10 @@ html[data-modo="sobreposicao"] #gravacao, html[data-modo="sobreposicao"] #pessoa
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 html[data-modo="sobreposicao"] #pessoa { pointer-events: none; }
 
+/* Ilustração animada: cobre a tela (ou só o painel de cima no layout dividido). */
+.painel-anim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; }
+html[data-modo="sobreposicao"] .painel-anim.dividido { height: 42%; }
+
 /* Título gigante atrás da pessoa: fica entre a gravação e o recorte dela. */
 /* O bloco se apoia no topo da cabeça (--topo): só ~1/3 de baixo das letras fica atrás dela. */
 html[data-modo="sobreposicao"] .cena.atras { padding: 0; }

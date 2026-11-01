@@ -242,6 +242,12 @@
       if (c.transicao === "wipe" && i > 0) wipeEntra(tl, sec, c);
       if (c.layout === "dividido") apresentador(tl, c);
       anima(tl, sec, c);
+      // Ilustração animada (camada própria): entra e sai com a cena.
+      const anim = document.getElementById("anim-" + (c.i ?? i));
+      if (anim) {
+        tl.fromTo(anim, { opacity: 0 }, { opacity: 1, duration: T.entrada, ease: EASE.enter }, c.t0);
+        tl.to(anim, { opacity: 0, duration: T.saida, ease: EASE.exit }, c.fim - T.saida);
+      }
       // Na sobreposição todo cartão sai (a gravação continua por baixo); no motion, a última cena fica.
       if (i < cenas.length - 1 || dados.sobre) transicao(tl, sec, c, dados.sobre ? null : cenas[i + 1]);
     });
