@@ -7,6 +7,7 @@ import {
 import { formatDate } from '@/types';
 import { STATUS_COLORS, PROJECT_COLORS } from '@/constants';
 import { normalizeStatus } from '../../utils/helpers';
+import { estadoDaSubtarefa, subtarefaCorrente } from '../../utils/subtarefas';
 
 export const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
   return (
@@ -214,6 +215,12 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
   const isStandby = statusValue === 'stand-by' || statusValue === 'standby' || statusValue === 'stand by' || statusValue === 'cgby';
+  // Mesma regra do dashboard: a ação está em espera quando a etapa corrente aguarda terceiro.
+  const etapaCorrente = !isCompleted && !isStandby && Array.isArray(task.plano_acao) && task.plano_acao.length > 0
+    ? subtarefaCorrente(task.plano_acao, String(task.data_limite || '').slice(0, 10))
+    : null;
+  const isWaiting = !!etapaCorrente && estadoDaSubtarefa(etapaCorrente) === 'aguardando_terceiro';
+  const waitingFor = isWaiting ? String((etapaCorrente as any).aguardando_de || '').trim() : '';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isEditingDateTime, setIsEditingDateTime] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -433,6 +440,14 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           {isStandby && (
             <span className={`text-[8px] md:text-[9px] font-bold px-2 py-0.5 rounded-full border font-sans uppercase ${isDark ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
               Stand-by
+            </span>
+          )}
+          {isWaiting && (
+            <span
+              title={waitingFor ? `Aguardando ${waitingFor}` : 'Etapa atual aguardando terceiro'}
+              className={`text-[8px] md:text-[9px] font-bold px-2 py-0.5 rounded-full border font-sans uppercase ${isDark ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-amber-50 text-amber-700 border-amber-200'}`}
+            >
+              Em espera
             </span>
           )}
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (() => {
