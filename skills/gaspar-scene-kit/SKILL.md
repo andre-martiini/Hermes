@@ -80,6 +80,24 @@ npm test                                               # testes do kit e do lint
 - Requisitos: a venv da tutorial-sistema (`preparar.py` → PY) com `faster-whisper` (`PY -m pip install
   faster-whisper==1.1.1`); modelo em `GASPAR_WHISPER_MODELO` (padrão `small`; `medium` é mais exato).
 
+## Estilo "apresentador + painel" (sobreposição)
+
+Técnicas do vídeo de referência do André (01/11/2026), todas compostas sobre a gravação (rosto intacto):
+- **Apresentador em cartão:** `"layout": "dividido"` em qualquer cena da sobreposição. A gravação inteira encolhe
+  para um cartão em retrato na metade de baixo (`"escala": 0.6` = tamanho; `"foco": 0.06` = recorte no topo) e o
+  painel da cena ocupa a parte de cima (`imagem` preenche o painel; listas, números, fluxos em tamanho compacto).
+  Volta à tela cheia no fim da cena.
+- **Título atrás da pessoa:** `{"tipo": "titulo_atras", "etiqueta": "...", "titulo": "2.0"}`. O montador recorta a
+  pessoa (HyperFrames `remove-background`, ~8 min de CPU por 20 s, com cache), mede o topo da cabeça e apoia o
+  título nele: só o terço de baixo das letras fica atrás (exceção à safe area: o título pode subir até 5%).
+- **Ilustração animada:** `"animar": true` numa cena `imagem` → o Veo 3.1 Lite anima a própria ilustração
+  (elementos flutuando, leve aproximação; mesmo estilo, sem texto novo). ~US$ 0,20 por 4 s, com cache por imagem.
+  Precisa de `GOOGLE_APPLICATION_CREDENTIALS` (conta de serviço do Hermes).
+- **Fechamento:** `{"tipo": "chamada"}` desfoca e escurece a cena (ex.: no "valeu" final). `"titulo"` e
+  `"botao"` são opcionais (o André prefere sem botão); com texto, comece cedo o bastante para a leitura.
+- Exemplo: `exemplos/estilo-apresentador.json` (título atrás → painel com ilustração → lista →
+  chamada).
+
 ## Som e cor (Fase 3)
 
 Depois do render, o `pos.mjs` (chamado pelo montador) faz no FFmpeg:
