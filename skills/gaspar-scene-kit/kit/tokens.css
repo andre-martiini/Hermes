@@ -83,11 +83,11 @@ html[data-formato="horizontal"] .legenda { left: 200px; right: 200px; bottom: 64
    (ele grava deixando o espaço acima da cabeça livre). Tamanhos menores que no motion. */
 html[data-modo="sobreposicao"] #gravacao { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 html[data-modo="sobreposicao"] .cena.sobre {
-  inset: 4% 50px auto 50px; padding: 40px 44px; gap: 24px; justify-content: flex-start;
+  inset: 15% 50px auto 50px; padding: 40px 44px; gap: 24px; justify-content: flex-start;
   background: rgba(15, 23, 42, 0.8); border-radius: var(--raio); box-shadow: var(--sombra); backdrop-filter: blur(14px);
-  --tam-numero: 112px; --tam-titulo: 56px; --tam-texto: 38px; --largura-util: 860px;
+  --tam-numero: 120px; --tam-titulo: 60px; --tam-texto: 48px; --largura-util: 860px;
 }
-html[data-modo="sobreposicao"][data-formato="horizontal"] .cena.sobre { inset: 5% 28% auto 28%; --largura-util: 760px; }
+html[data-modo="sobreposicao"][data-formato="horizontal"] .cena.sobre { inset: 6% 28% auto 28%; --largura-util: 760px; }
 html[data-modo="sobreposicao"] .cena.sobre .caixa { padding: 22px 28px; gap: 22px; }
 html[data-modo="sobreposicao"] .cena.sobre .selo { width: 64px; height: 64px; }
 html[data-modo="sobreposicao"] .cena.sobre .conector { height: 14px; margin-left: 58px; }

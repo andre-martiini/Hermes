@@ -6,6 +6,7 @@
 //   node montar.mjs roteiro.json SAIDA --revisao    # + PNG de cada cena assentada em SAIDA/<formato>/revisao
 //   node montar.mjs roteiro.json SAIDA --sem-voz    # ignora "narracao" (vídeo mudo, grátis)
 //   --sem-trilha --sem-sfx --sem-lut                 # desliga partes da pós (Fase 3)
+//   --forcar                                         # renderiza mesmo com gate de legibilidade/legenda falhando
 //
 // Com "gravacao" (modo sobreposição): o vídeo do André fica no fundo com o som original, a legenda vem da
 // fala transcrita (palavra a palavra) e cada cartão entra no topo quando a fala diz o seu "quando".
@@ -22,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { TIPOS, duracaoMinima } from "../kit/primitivas.mjs";
 import { lint } from "./lint-cena.mjs";
 import { medirLoudness, posProduzir, trilhaPadrao } from "./pos.mjs";
+import { checkAudio, checkDuracao, checkLegendas, checkLegibilidade, previa, relatorio } from "./gates.mjs";
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FPS = 30;
@@ -267,6 +269,14 @@ async function main() {
       continue;
     }
     console.log(`${formato}: ${cenas.length} cenas, ${total.toFixed(1)} s, lint ok`);
+
+    // Gates de antes do render (Fase 6): bloqueiam, a menos que --forcar.
+    const [w, h] = DIM[formato];
+    const antes = [...await checkLegibilidade(projeto, cenas, { largura: w, altura: h, sobre: Boolean(roteiro.gravacao) }),
+      ...checkLegendas(roteiro, voz)];
+    console.log(relatorio("gates (antes do render)", antes));
+    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes }, null, 2));
+    if (antes.length && !flags.includes("--forcar")) { falhou = true; continue; }
     if (flags.includes("--so-html")) continue;
 
     if (flags.includes("--revisao")) {
@@ -285,6 +295,12 @@ async function main() {
     const lu = medirLoudness(mp4);
     console.log(`→ ${mp4}
   ${r.sfx} SFX, trilha ${trilha ? "com ducking" : "não"}, ${lu.I} LUFS, pico ${lu.TP} dBTP`);
+    const depois = [...checkDuracao(mp4, cenas), ...checkAudio(mp4)];
+    console.log(relatorio("gates (depois do render)", depois));
+    const quadros = previa(mp4, pasta);
+    console.log(`  prévia para o diário: ${quadros.join(", ")}`);
+    writeFileSync(join(pasta, "gates.json"), JSON.stringify({ antes, depois, previa: quadros }, null, 2));
+    if (depois.length) falhou = true;
   }
   process.exit(falhou ? 1 : 0);
 }

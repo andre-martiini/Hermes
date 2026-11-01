@@ -1,0 +1,10 @@
+{
+  "titulo": "Gaspar Vídeo - teste de gate (deve ser bloqueado)",
+  "formato": "vertical",
+  "cenas": [
+    {"tipo": "topicos", "etiqueta": "Tópicos demais", "titulo": "Uma cena com conteúdo além do que cabe na tela vertical",
+     "itens": ["Primeiro item com um texto bem comprido que quebra em duas linhas", "Segundo item também longo demais para a largura",
+               "Terceiro item com mais um texto extenso de exemplo", "Quarto item que continua empurrando o conteúdo para baixo",
+               "Quinto item que deve cair dentro da faixa reservada à legenda"]}
+  ]
+}

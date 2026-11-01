@@ -17,8 +17,8 @@ const ALVO = { I: -14, TP: -1.5, LRA: 11 };
 
 const ff = (args, opts = {}) => execFileSync("ffmpeg", ["-hide_banner", "-y", ...args], { maxBuffer: 1 << 28, ...opts });
 
-// Marcadores {t, evento}: abre a página no Chrome do HyperFrames e lê window.__sfx.
-export async function marcadores(projeto) {
+// Abre o index.html do projeto no Chrome do HyperFrames e roda `fn(pagina)` (marcadores, checagens).
+export async function comPagina(projeto, fn, { largura, altura } = {}) {
   const { default: puppeteer } = await import("puppeteer-core");
   const base = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
   const versao = readdirSync(base).sort().at(-1);
@@ -26,13 +26,17 @@ export async function marcadores(projeto) {
   const nav = await puppeteer.launch({ executablePath: existsSync(exe) ? exe : undefined, args: ["--allow-file-access-from-files"] });
   try {
     const pg = await nav.newPage();
+    if (largura) await pg.setViewport({ width: largura, height: altura });
     await pg.goto(pathToFileURL(join(projeto, "index.html")).href, { waitUntil: "load" });
-    await pg.waitForFunction("Array.isArray(window.__sfx)", { timeout: 15000 });
-    return await pg.evaluate("window.__sfx");
+    await pg.waitForFunction("Array.isArray(window.__sfx) && document.fonts.status === 'loaded'", { timeout: 15000 });
+    return await fn(pg);
   } finally {
     await nav.close();
   }
 }
+
+// Marcadores {t, evento} que o kit.js deixou em window.__sfx.
+export const marcadores = (projeto) => comPagina(projeto, (pg) => pg.evaluate("window.__sfx"));
 
 // Onde fica o pico (s) dentro de cada arquivo de SFX.
 function picoDoSom(arq) {
