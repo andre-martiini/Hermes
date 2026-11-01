@@ -707,7 +707,7 @@ pendencias:
 ---
 
 ```yaml
-pacote: "P08 sub-entrega 21/N -- tratador HTTP do worker (autonomy/worker_http.py, passos 2, 3 e 5): processar_chamada_worker(headers, corpo, config, agora, verificar_token, executar) -> RespostaWorker(status_http, codigo). Ordem fail-closed: Bearer -> verificar_token (injetado) -> autorizar_chamada_worker -> só então lê o corpo JSON {request_id} (único campo, ASCII, validado como id de documento do repositório) -> executar(request_id). StatusRunner.RETENTAR vira 503; os demais 200; exceção da execução 500; sem token 401; não autorizado 403; corpo inválido 400. Mensagens são códigos fixos (nunca ecoam token nem exceção). Nada chama o módulo em produção (shadow/off); criação do endpoint, verificação real do token (google.oauth2.id_token) e IAM ficam para o wiring."
+pacote: "P08 sub-entrega 21/N -- tratador HTTP do worker (autonomy/worker_http.py, passos 2, 3 e 5): processar_chamada_worker(headers, corpo, config, agora, verificar_token, executar) -> RespostaWorker(status_http, codigo). Ordem fail-closed: Bearer -> verificar_token (injetado) -> autorizar_chamada_worker -> só então lê o corpo JSON {request_id} (único campo, validado pelo mesmo validador de id de documento do repositório/enfileirador) -> executar(request_id). StatusRunner.RETENTAR vira 503; os demais 200; exceção da execução 500; sem token 401; não autorizado 403; corpo inválido 400. Mensagens são códigos fixos (nunca ecoam token nem exceção). Nada chama o módulo em produção (shadow/off); criação do endpoint, verificação real do token (google.oauth2.id_token) e IAM ficam para o wiring."
 estado: validado
 inicio: "2026-11-01T16:40:00Z"
 fim: "2026-11-01T17:20:00Z"
@@ -720,9 +720,9 @@ decisoes:
     motivo: "Cloud Tasks reenvia qualquer resposta não-2xx; 400/401/403/500 também serão retentados até o limite da fila. Configurar max_attempts/backoff da fila é decisão do wiring; documentado no módulo."
 testes:
   resultados:
-    - "functions/ completo ANTES 5205 OK (diário, P08 sub 20); DEPOIS 5281 OK (206s; 12 testes novos em test_autonomy_worker_http). A diferença para o diário (5205) vem de testes de outras PRs já em main (5269 antes desta)."
+    - "functions/ completo ANTES 5205 OK (diário, P08 sub 20); DEPOIS 5282 OK (189s; 13 testes novos em test_autonomy_worker_http). A diferença para o diário (5205) vem de testes de outras PRs já em main (5269 antes desta)."
 revisao_adversarial:
-  - "Rodada 1 (agente sem contexto, somente leitura): sem bypass; achados baixos reais corrigidos: Mapping hostil em headers/claims (agora 401/403), agora ingênuo (ValueError antes de verificar o token), request_id não-ASCII aceito via escape JSON (agora 400); chave JSON duplicada descartada (só chamador autenticado). Rodada 2 (focada na correção): não achei nada."
+  - "Rodada 1 (agente sem contexto, somente leitura): sem bypass; achados baixos reais corrigidos: Mapping hostil em headers/claims (agora 401/403), agora ingênuo (ValueError antes de verificar o token), request_id não-ASCII aceito via escape JSON (agora 400 -- REVERTIDO em seguida, ver Codex); chave JSON duplicada descartada (só chamador autenticado). Rodada 2 (focada na correção): não achei nada. Codex na PR #606: 1 achado P2 real (a regra ASCII era incompatível com _validar_id_documento/enfileirador, que aceitam ids não-ASCII válidos: a tarefa seria retentada para sempre com o orçamento já gasto); removida, o worker usa só o validador do repositório (qualquer forma do JSON); teste cobre. Rodada 3 (focada, agente sem contexto): 1 achado real (MAX_CORPO_BYTES 4096 rejeitava o id astral máximo de 1500 bytes que o enfileirador serializa com escapes ASCII = 4518 bytes; limite subido para 16384, teste cobre). Rodada 4 (focada na correção): não achei nada."
 pendencias:
   - "P08: wiring (dependência e cliente Cloud Tasks real, fila/IAM e max_attempts, agendar o ciclo, endpoint HTTP com verificação real do token ligando executar ao runner, FALHA_FINAL por reconciliação, AGUARDANDO_APROVACAO vencida (prazo a definir pelo André), espera sem lease, cliente Claude real com ConfigModelos, cache de prompt)."
 ```

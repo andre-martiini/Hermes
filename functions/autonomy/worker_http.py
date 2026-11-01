@@ -31,7 +31,9 @@ from autonomy.pedido_repositorio import _validar_id_documento
 from autonomy.runner import StatusRunner
 from autonomy.worker_auth import ConfigWorker, autorizar_chamada_worker
 
-MAX_CORPO_BYTES = 4096
+# Pior caso do enfileirador (json.dumps ASCII): id de 1500 bytes UTF-8 só com
+# caracteres astrais = 375 x 12 bytes escapados = 4500 + envelope.
+MAX_CORPO_BYTES = 16384
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,10 @@ def _bearer(headers: Mapping[Any, Any]) -> str | None:
 
 def _request_id(corpo: object) -> str | None:
     if isinstance(corpo, str):
-        corpo = corpo.encode("utf-8", errors="strict") if corpo.isascii() else None
+        try:
+            corpo = corpo.encode("utf-8")
+        except UnicodeEncodeError:  # substituto solitário
+            return None
     if not isinstance(corpo, (bytes, bytearray)) or not corpo or len(corpo) > MAX_CORPO_BYTES:
         return None
     try:
@@ -67,10 +72,9 @@ def _request_id(corpo: object) -> str | None:
     if not isinstance(dados, dict) or set(dados) != {"request_id"}:
         return None
     try:
-        rid = _validar_id_documento(dados["request_id"], "request_id")
+        return _validar_id_documento(dados["request_id"], "request_id")
     except ValueError:
         return None
-    return rid if rid.isascii() else None  # ids do dispatcher são ASCII; mesma regra para qualquer forma do JSON
 
 
 def processar_chamada_worker(

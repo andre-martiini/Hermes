@@ -66,7 +66,7 @@ class TestWorkerHttp(unittest.TestCase):
     def test_corpo_invalido(self):
         for c in [None, b"", b"{", b"[]", b'{"request_id":1}', b'{"request_id":"a/b"}',
                   b'{"request_id":" a"}', b'{"request_id":"a","x":1}', b"{}",
-                  b'\xff', b"x" * (MAX_CORPO_BYTES + 1), '{"request_id":"é"}', 5]:
+                  b'\xff', b"x" * (MAX_CORPO_BYTES + 1), 5]:
             r, ex = chamar(corpo=c)
             self.assertEqual((r.status_http, r.codigo), (400, "corpo_invalido"), c)
             self.assertEqual(ex.chamadas, [])
@@ -111,13 +111,23 @@ class TestWorkerHttp(unittest.TestCase):
                                      lambda t: chamadas.append(t), Exec())
         self.assertEqual(chamadas, [])
 
+    def test_id_astral_maximo_do_enfileirador(self):
+        rid = "\U0001F600" * 375  # 1500 bytes UTF-8, o máximo do validador
+        corpo = json.dumps({"request_id": rid}).encode()
+        self.assertGreater(len(corpo), 4096)
+        r, ex = chamar(corpo=corpo)
+        self.assertEqual((r.status_http, ex.chamadas), (200, [rid]))
+
     def test_sem_bearer_nao_verifica_e_id_nao_ascii(self):
         vistos = []
         processar_chamada_worker({}, CORPO, CFG, AGORA, lambda t: vistos.append(t), Exec())
         self.assertEqual(vistos, [])
-        for c in [b'{"request_id":"\\u00e9"}', bytearray(b'{"request_id":"\xc3\xa9"}')]:
+        # mesma regra do repositório/enfileirador: id não-ASCII válido é aceito em qualquer forma
+        for c in [b'{"request_id":"\\u00e9"}', bytearray(b'{"request_id":"\xc3\xa9"}'), '{"request_id":"é"}']:
             r, ex = chamar(corpo=c)
-            self.assertEqual((r.status_http, ex.chamadas), (400, []), c)
+            self.assertEqual((r.status_http, ex.chamadas), (200, ["é"]), c)
+        r, ex = chamar(corpo='{"request_id":"\ud800"}')
+        self.assertEqual(r.status_http, 400)
         r, _ = chamar(corpo=bytearray(CORPO))
         self.assertEqual(r.status_http, 200)
         r, _ = chamar(ex=Exec(ret=None))
