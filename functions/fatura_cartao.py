@@ -33,13 +33,21 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 
+from firebase_admin import firestore
+
 COL_FATURAS = "fatura_cartao"
 COL_ITENS = "fatura_cartao_itens"
 
+# Acao do Gaspar "Acompanhamento Financeiro Refinado", onde a importacao
+# automatica de fatura registra uma nota no diario (ver `avisar_importacao`).
+ACAO_ACOMPANHAMENTO_FINANCEIRO_ID = "7ab5feb3-1cec-4bd9-a"
+
 # Remetentes cuja fatura recebe o tratamento de cartao. A senha do PDF ja vem de
-# `bill_pdf_password_configs` / Secret Manager, configurada como "Fatura Elo".
+# `bill_pdf_password_configs` / Secret Manager, configurada como "Fatura Elo"/
+# "Fatura XP" (um documento por cartao, cadastrado uma vez na tela do Gaspar).
 REMETENTES_CARTAO: dict[str, str] = {
     "cartoescaixa@aplicacao.caixa.gov.br": "elo-caixa",
+    "fatura@xpi.com.br": "xp",
 }
 
 # A partir de quando a extracao pode corrigir o total em `fixed_bills`.
@@ -80,6 +88,7 @@ CABEÇALHO:
 - competencia: mês de referência da fatura (YYYY-MM)
 - limite_total, limite_disponivel: se aparecerem (número ou null)
 - total_anterior, pagamentos, juros_encargos: se aparecerem (número ou null)
+- pagamento_minimo: valor mínimo para pagar a fatura, se aparecer (número ou null)
 
 LANÇAMENTOS: todos os itens da fatura, um por linha do extrato.
 - data: data da compra (YYYY-MM-DD). Se só houver dia/mês, use o ano da competência.
@@ -99,7 +108,8 @@ Responda APENAS o JSON:
 {
   "cabecalho": {"total": 0, "vencimento": "YYYY-MM-DD", "competencia": "YYYY-MM",
                 "limite_total": null, "limite_disponivel": null,
-                "total_anterior": null, "pagamentos": null, "juros_encargos": null},
+                "total_anterior": null, "pagamentos": null, "juros_encargos": null,
+                "pagamento_minimo": null},
   "itens": [{"data": "YYYY-MM-DD", "estabelecimento": "", "valor": 0,
              "parcela_atual": null, "parcela_total": null, "cartao_final": null}]
 }
@@ -241,6 +251,7 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
         "total_anterior": _num(cabecalho.get("total_anterior")),
         "pagamentos": _num(cabecalho.get("pagamentos")),
         "juros_encargos": _num(cabecalho.get("juros_encargos")),
+        "pagamento_minimo": _num(cabecalho.get("pagamento_minimo")),
         "total_itens": len(itens),
         "google_message_id": google_message_id,
         "extraido_em": datetime.now(timezone.utc).isoformat(),
@@ -322,10 +333,12 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
 
     return {
         "fatura_id": fatura_id,
+        "cartao": cartao,
         "competencia": competencia,
         "ano": ano,
         "mes": mes,
         "total": total_cabecalho,
+        "pagamento_minimo": doc_cabecalho["pagamento_minimo"],
         "soma_compras": soma_compras,
         "soma_encargos": soma_encargos,
         "soma_total": soma_total,
@@ -587,7 +600,7 @@ def _cartao_do_item(item: dict) -> str:
 # --------------------------------------------------------------------------
 
 # Como achar o card de `fixed_bills` que corresponde a cada cartao.
-_DESCRICAO_DO_CARTAO = {"elo-caixa": "elo"}
+_DESCRICAO_DO_CARTAO = {"elo-caixa": "elo", "xp": "xp"}
 
 
 def campos_do_boleto_no_card(campos: dict, card_atual: dict) -> dict:
@@ -650,3 +663,142 @@ def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
 
     return {"corrigido": bool(alterados), "alteracoes": alterados,
             "motivo": None if alterados else "nenhum card correspondente ou ja estava certo"}
+
+
+# --------------------------------------------------------------------------
+# Fila de atencao e aviso ao Andre
+# --------------------------------------------------------------------------
+#
+# Ambas abaixo sao idempotentes por chave_dedupe (via
+# `atencao._persistir_itens_atencao`): reprocessar o mesmo e-mail ou a mesma
+# fatura atualiza o mesmo item, nunca cria um segundo. Uma falha aqui e
+# "melhor esforco" — nunca pode derrubar a sincronizacao de boletos, que ja
+# gravou a fatura antes de chegar aqui.
+
+_LIMIAR_DIVERGENCIA = 1.0
+
+
+def _fatura_confiavel(resumo: dict) -> bool:
+    divergencia = resumo.get("divergencia_total")
+    if divergencia is None:
+        return False
+    return divergencia < max(_LIMIAR_DIVERGENCIA, abs(resumo.get("soma_total") or 0) * 0.01)
+
+
+def verificar_divergencia(db, cartao: str, resumo: dict) -> dict:
+    """Fila de atencao quando o total impresso nao bate com a soma dos itens.
+
+    Cobre tanto leitura errada do PDF quanto fatura da qual so o total pôde
+    ser lido (itens_gravados=0): nos dois casos a fatura fica gravada com o
+    total, mas o dado nao e confiavel o bastante para corrigir `fixed_bills`
+    (ver `corrigir_fixed_bill`) sem o Andre olhar. Reimportar que bate fecha
+    o item sozinho.
+    """
+    import atencao as _atencao
+
+    fatura_id = resumo["fatura_id"]
+    chave = f"fatura_cartao_divergente:{fatura_id}"
+
+    if _fatura_confiavel(resumo):
+        doc_ref = db.collection(_atencao.COLLECTION).document(chave)
+        doc = doc_ref.get()
+        if doc.exists and (doc.to_dict() or {}).get("estado") not in _atencao.ESTADOS_FECHADOS:
+            _atencao.resolver_item(
+                db, chave, _atencao.ESTADO_RESOLVIDO,
+                desfecho=f"reimportado: soma bateu com o total (R$ {resumo.get('total')}).",
+            )
+        return {"criado": False}
+
+    marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao).upper()
+    item = {
+        "origem": "financeiro",
+        "tipo": _atencao.TIPO_FATURA_CARTAO_DIVERGENTE,
+        "prioridade": _atencao.PRIORIDADE_MEDIA,
+        "titulo": f"Fatura {marcador} de {resumo.get('competencia')}: total não bate com os lançamentos",
+        "resumo": (
+            f"Total impresso R$ {resumo.get('total')}; soma dos {resumo.get('itens_gravados')} "
+            f"lançamento(s) extraído(s) R$ {resumo.get('soma_total')} "
+            f"(diferença R$ {resumo.get('divergencia_total')}). "
+            "Pode ser leitura errada do PDF ou fatura cujos lançamentos não puderam ser extraídos "
+            "— neste caso só o total foi gravado."
+        ),
+        "acao_id": ACAO_ACOMPANHAMENTO_FINANCEIRO_ID,
+        "etapa_id": None,
+        "pessoa": None,
+        "prazo": resumo.get("vencimento"),
+        "evidencia": {k: v for k, v in resumo.items()},
+        "sugestao": "Conferir a fatura original e reimportar se necessário.",
+        "chave_dedupe": chave,
+    }
+    _atencao._persistir_itens_atencao(db, [item])
+    return {"criado": True, "chave_dedupe": chave}
+
+
+def registrar_falha(db, cartao: str, msg_id: str, motivo: str) -> dict:
+    """Fila de atencao quando a fatura nem pôde ser lida (senha errada, PDF
+    ilegível, e-mail sem anexo). Uma chave por e-mail: o mesmo e-mail falhando
+    de novo atualiza o mesmo item, nunca tenta sozinho de novo em loop — só
+    reabre quando o André mexer na configuração (ex.: salvar senha nova, que
+    já reprocessa o e-mail) e o reprocessamento voltar a chegar aqui.
+    """
+    import atencao as _atencao
+
+    marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao).upper()
+    chave = f"fatura_cartao_falha:{cartao}:{msg_id}"
+    item = {
+        "origem": "financeiro",
+        "tipo": _atencao.TIPO_FATURA_CARTAO_FALHA,
+        "prioridade": _atencao.PRIORIDADE_MEDIA,
+        "titulo": f"Fatura {marcador} não pôde ser lida",
+        "resumo": f"E-mail {msg_id}: {motivo}.",
+        "acao_id": ACAO_ACOMPANHAMENTO_FINANCEIRO_ID,
+        "etapa_id": None,
+        "pessoa": None,
+        "prazo": None,
+        "evidencia": {"cartao": cartao, "google_message_id": msg_id, "motivo": motivo},
+        "sugestao": "Conferir a senha cadastrada para este cartão na tela do Gaspar.",
+        "chave_dedupe": chave,
+    }
+    _atencao._persistir_itens_atencao(db, [item])
+    return {"criado": True, "chave_dedupe": chave}
+
+
+def resolver_falha_se_existir(db, cartao: str, msg_id: str) -> None:
+    """Fecha o item de falha deste e-mail quando ele afinal foi lido com sucesso."""
+    import atencao as _atencao
+
+    chave = f"fatura_cartao_falha:{cartao}:{msg_id}"
+    doc_ref = db.collection(_atencao.COLLECTION).document(chave)
+    doc = doc_ref.get()
+    if doc.exists and (doc.to_dict() or {}).get("estado") not in _atencao.ESTADOS_FECHADOS:
+        _atencao.resolver_item(db, chave, _atencao.ESTADO_RESOLVIDO, desfecho="e-mail reprocessado com sucesso.")
+
+
+def avisar_importacao(db, cartao: str, resumo: dict) -> None:
+    """Registra no diário da ação financeira e avisa o André em uma linha.
+
+    Melhor esforço: Telegram fora do ar ou ação movida não pode derrubar a
+    sincronização de boletos, que já gravou a fatura antes de chegar aqui.
+    """
+    marcador = _DESCRICAO_DO_CARTAO.get(cartao, cartao).upper()
+    nota = (
+        f"Fatura {marcador} importada por e-mail: vencimento {resumo.get('vencimento')}, "
+        f"total R$ {resumo.get('total')}, {resumo.get('itens_gravados')} lançamento(s)."
+    )
+    try:
+        task_ref = db.collection("tarefas").document(ACAO_ACOMPANHAMENTO_FINANCEIRO_ID)
+        if task_ref.get().exists:
+            task_ref.update({"acompanhamento": firestore.ArrayUnion([
+                {"data": datetime.now(timezone.utc).isoformat(), "nota": nota}
+            ])})
+    except Exception as exc:
+        print(f"[FATURA] Falha ao registrar no diário da ação: {exc}")
+
+    try:
+        from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw
+
+        chat_id = _resolve_default_telegram_chat_id(db)
+        if chat_id:
+            _send_telegram_message_raw(db, chat_id, nota)
+    except Exception as exc:
+        print(f"[FATURA] Falha ao avisar o André por Telegram: {exc}")
