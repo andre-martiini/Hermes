@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { arrayUnion, collection, doc, getDoc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { db, functions } from './firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -27,7 +27,9 @@ import DecidirBloco from './src/components/painel/DecidirBloco';
 import ElevacoesRodape, { type SugestaoDeElevacao } from './src/components/painel/ElevacoesRodape';
 import CaminhadaCard, { type DiaDeCaminhada } from './src/components/painel/CaminhadaCard';
 import { useMinutosAgora } from './src/components/painel/useRelogio';
-import { eventosDoDia, type EventoDaAgenda } from './src/utils/agendaProximidade';
+import { eventosDoDia, type EventoDaAgenda, type EventoDoDia } from './src/utils/agendaProximidade';
+import { MeetingRecordingEngineContext } from './src/hooks/useMeetingRecordingEngine';
+import { useAcompanhamentoClaude } from './src/hooks/useAcompanhamentoClaude';
 import { subtituloFinanceiro, subtituloSaude } from './src/utils/linksDoPainel';
 import EtiquetaExecutor from './src/components/painel/EtiquetaExecutor';
 import MenuExecutor from './src/components/painel/MenuExecutor';
@@ -49,6 +51,8 @@ interface DashboardViewProps {
     currentMonth: number;
     currentYear: number;
     onNavigate: (view: 'gallery' | 'finance' | 'saude' | 'diario') => void;
+    /** Abre Ferramentas › Reuniões em Tempo Real (botão Gravar da agenda). */
+    onAbrirReuniao?: () => void;
     onOpenTask?: (taskId: string) => void;
     onAskCopiloto?: (prompt: string) => void;
 }
@@ -1289,6 +1293,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     exerciseLogs = [] as ExerciseLog[],
     onSaveExerciseLog,
     onNavigate,
+    onAbrirReuniao,
     onOpenTask,
     onAskCopiloto
 }) => {
@@ -1323,7 +1328,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             setAgendaViva(snap.docs.map(d => {
                 const data = d.data() as any;
                 const inicio = horaDoIso(data.data_inicio);
-                return { titulo: data.titulo || '(sem título)', inicio, fim: horaDoIso(data.data_fim), dia_inteiro: inicio === null };
+                return { id: d.id, titulo: data.titulo || '(sem título)', inicio, fim: horaDoIso(data.data_fim), dia_inteiro: inicio === null };
             }));
         }, () => setAgendaViva(null));
         return () => unsub();
@@ -1395,6 +1400,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     );
     const diaInteiro = useMemo(() => agendaDoDia.filter(e => e.dia_inteiro).map(e => e.titulo), [agendaDoDia]);
     const agoraMin = useMinutosAgora();
+    // Gravar a reunião direto do evento: o motor vive na raiz do app (Context),
+    // então a gravação segue mesmo com o painel trocando de tela.
+    const motorReuniao = useContext(MeetingRecordingEngineContext);
+    const claudeAcompanhando = useAcompanhamentoClaude(motorReuniao?.isRecording ? motorReuniao.sessaoAoVivoId : null);
+    const gravarEvento = (e: EventoDoDia) => {
+        motorReuniao?.setEventoParaGravar({ id: e.eventoId ?? null, titulo: e.titulo });
+        onAbrirReuniao?.();
+    };
     const duasColunas = useLarguraMinima(LARGURA_DUAS_COLUNAS);
 
     // --- PRAZOS FINAIS (ao vivo, a partir das ações) ---
@@ -1736,7 +1749,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         />
                     </div>
                     <div className="order-2 xl:order-none">
-                        <AgendaBloco eventos={eventos} diaInteiro={diaInteiro} agoraMin={agoraMin} preparo={preparo} isDark={isDark} />
+                        <AgendaBloco
+                            eventos={eventos}
+                            diaInteiro={diaInteiro}
+                            agoraMin={agoraMin}
+                            preparo={preparo}
+                            isDark={isDark}
+                            gravacao={motorReuniao ? { gravando: motorReuniao.isRecording, titulo: motorReuniao.tituloGravacao, claudeAcompanhando } : undefined}
+                            onGravar={motorReuniao && onAbrirReuniao ? gravarEvento : undefined}
+                            onParar={motorReuniao ? () => motorReuniao.stopRecording(true) : undefined}
+                            onAbrirGravacao={onAbrirReuniao}
+                        />
                     </div>
                     <div className="order-1 xl:order-none">
                         <PrazosFinais prazos={prazos} isDark={isDark} variante={duasColunas ? 'lista' : 'faixa'} />

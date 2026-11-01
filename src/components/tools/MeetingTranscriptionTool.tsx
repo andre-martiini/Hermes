@@ -27,6 +27,7 @@ import {
   montarPromptConsultaAcervo,
 } from '../../utils/reuniaoAgenda';
 import type { GoogleCalendarEvent } from '@/types';
+import { montarTextoReuniao, nomeArquivoReuniao } from '../../utils/arquivoReuniao';
 
 // Reexportados para não quebrar quem já importava esses tipos daqui
 // (ex.: Modals.tsx) — a definição real agora vive junto do motor de
@@ -122,6 +123,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     registroConsentimentoRef,
     driveLinkByMeetingIdRef,
     stopRecording,
+    eventoParaGravar,
+    driveSalvo,
   } = engine;
   const [isSavingToDrive, setIsSavingToDrive] = useState(false);
 
@@ -184,7 +187,21 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
   // Pré-seleciona automaticamente o banco associado ao evento em curso/próximo
   useEffect(() => {
-    if (bancos.length === 0 || eventosAgenda.length === 0) return;
+    if (eventoParaGravar) {
+      // Escolhido no painel ("Gravar" no evento): vale mais que a dedução pelo horário.
+      const achado = eventosAgenda.find(e => e.id === eventoParaGravar.id || e.google_id === eventoParaGravar.id);
+      setReuniaoAgendaAtiva({
+        evento: achado ?? ({ id: eventoParaGravar.id ?? '', titulo: eventoParaGravar.titulo } as GoogleCalendarEvent),
+        emCurso: true,
+        minutosParaInicio: 0,
+      });
+      return;
+    }
+    if (eventosAgenda.length === 0) return;
+    if (bancos.length === 0) {
+      setReuniaoAgendaAtiva(buscarEventoReuniaoAtivoOuProximo(eventosAgenda));
+      return;
+    }
     const { bancoSugerido, eventoAtivo } = resolverBancoAutomatico(bancos, eventosAgenda);
     setReuniaoAgendaAtiva(eventoAtivo);
 
@@ -196,7 +213,20 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     } else {
       setBancoSugeridoAgendaId(null);
     }
-  }, [bancos, eventosAgenda, escolhaManualBanco, bancoSelecionadoId]);
+  }, [bancos, eventosAgenda, escolhaManualBanco, bancoSelecionadoId, eventoParaGravar]);
+
+  // Veio do painel: abre direto o aviso de consentimento e o guia do áudio.
+  // O navegador só deixa capturar a tela depois de um clique aqui, então o
+  // passo não pode ser pulado.
+  useEffect(() => {
+    if (!eventoParaGravar || isRecording) return;
+    if (!deepgramKey) {
+      setShowKeyModal(true);
+      return;
+    }
+    setTerceirosPresentes(true);
+    setShowShareGuide(true);
+  }, [eventoParaGravar, isRecording, deepgramKey]);
 
   const cartoesDoBanco = useMemo(
     () => bancos.find(b => b.id === bancoSelecionadoId)?.cartoes ?? [],
@@ -341,31 +371,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       ended: Date,
       entries: Array<{ speaker: string; text: string; timestamp: Date }>,
       chats: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> = []
-    ) => {
-      const transcriptionLines =
-        entries.length > 0
-          ? entries.map(t => `[${t.timestamp.toLocaleTimeString('pt-BR')}] ${t.speaker}: ${t.text}`)
-          : ['(Sem falas transcritas)'];
-
-      const chatSection = chats.length > 0
-        ? ['', '=== CHAT ASSISTENTE ===', ...chats.map(m => `[${m.timestamp.toLocaleTimeString('pt-BR')}] ${m.role === 'user' ? 'Você' : 'Assistente'}: ${m.content}`)]
-        : [];
-
-      const consentLine = formatarCabecalhoConsentimento(registroConsentimentoRef.current);
-
-      return [
-        'TRANSCRIÇÃO DE REUNIÃO',
-        '',
-        `Início: ${started.toLocaleString('pt-BR')}`,
-        `Fim: ${ended.toLocaleString('pt-BR')}`,
-        consentLine,
-        '',
-        '=== TRANSCRIÇÃO ===',
-        ...transcriptionLines,
-        ...chatSection,
-        '',
-      ].join('\n');
-    },
+    ) => montarTextoReuniao(started, ended, entries, formatarCabecalhoConsentimento(registroConsentimentoRef.current), chats),
     []
   );
 
@@ -378,14 +384,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     [meetingStartedAt, meetingEndedAt, transcripts, buildSummaryContent]
   );
 
-  const buildMeetingFileName = useCallback((startedAt: Date) => {
-    const year = startedAt.getFullYear();
-    const month = String(startedAt.getMonth() + 1).padStart(2, '0');
-    const day = String(startedAt.getDate()).padStart(2, '0');
-    const hour = String(startedAt.getHours()).padStart(2, '0');
-    const minute = String(startedAt.getMinutes()).padStart(2, '0');
-    return `Reuniao_${year}-${month}-${day}_${hour}-${minute}.txt`;
-  }, []);
+  const buildMeetingFileName = useCallback((startedAt: Date) => nomeArquivoReuniao(startedAt), []);
 
   // ── Escalonamento: O que responder nos últimos 30 segundos ───────────────
   const handleEscalarUltimos30s = useCallback(async () => {
@@ -482,7 +481,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   };
 
   const currentMeetingId = (meetingStartedAt ?? transcripts[0]?.timestamp)?.toISOString() ?? null;
-  const isSavedToDrive = !!driveSaveInfo && driveSaveInfo.meetingId === currentMeetingId;
+  const infoDrive = driveSaveInfo ?? driveSalvo;
+  const isSavedToDrive = !!infoDrive && infoDrive.meetingId === currentMeetingId;
 
   const handleFinalizeAndSaveToDrive = async () => {
     if (transcripts.length === 0) {
@@ -512,6 +512,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         endedAt: endedAt.toISOString(),
         fileName,
         content,
+        privado: true,
       });
 
       const data = result.data as { success?: boolean; webViewLink?: string; fileName?: string };
@@ -903,9 +904,9 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 <span className="hidden xl:inline">Baixar</span>
               </button>
 
-              {isSavedToDrive && driveSaveInfo ? (
+              {isSavedToDrive && infoDrive ? (
                 <a
-                  href={driveSaveInfo.webViewLink}
+                  href={infoDrive.webViewLink}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-[10px] font-bold uppercase tracking-wider transition-all ${isDark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
@@ -1617,7 +1618,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                     <span>Requisito de Privacidade:</span>
                   </p>
                   <p className="text-[11px] mt-1 leading-relaxed">
-                    Não grave terceiros em silêncio. Informe aos participantes que a reunião está sendo gravada e que os compromissos serão documentados.
+                    Não grave terceiros em silêncio. Informe aos participantes que a reunião está sendo gravada e transcrita (Deepgram), que uma IA acompanha a conversa (Claude, com triagem pelo Jev da TypeSafe), que a transcrição fica no Google Drive e que os compromissos serão documentados.
                   </p>
                   <label className="mt-2.5 flex items-start gap-2 cursor-pointer">
                     <input

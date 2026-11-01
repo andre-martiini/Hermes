@@ -5318,6 +5318,7 @@ const App: React.FC = () => {
                         currentMonth={currentMonth}
                         currentYear={currentYear}
                         onNavigate={handleDashboardNavigate}
+                        onAbrirReuniao={() => { setViewMode('ferramentas'); setActiveFerramenta('meeting_transcription'); }}
                         onOpenTask={handleCopilotoOpenTask}
                         onAskCopiloto={(prompt) => {
                           setCopilotoMode('default');
@@ -7367,15 +7368,25 @@ const App: React.FC = () => {
             Sem isso o usuário não teria como saber que o microfone/tela ainda estão
             sendo capturados enquanto navega para outro lugar do Hermes. */}
         {meetingRecordingEngine.isRecording && !isMeetingToolActive && (
-          <button
-            type="button"
-            onClick={() => { setViewMode('ferramentas'); setActiveFerramenta('meeting_transcription'); }}
-            className="fixed bottom-6 left-6 z-[650] flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-600 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-rose-600/30 transition-all hover:-translate-y-0.5 hover:bg-rose-500"
-            title="Voltar para a reunião em gravação"
-          >
-            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-            Gravando reunião
-          </button>
+          <div className="fixed bottom-6 left-6 z-[650] flex items-center overflow-hidden rounded-full border border-rose-500/40 bg-rose-600 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-rose-600/30">
+            <button
+              type="button"
+              onClick={() => { setViewMode('ferramentas'); setActiveFerramenta('meeting_transcription'); }}
+              className="flex items-center gap-2 px-4 py-2.5 transition-colors hover:bg-rose-500"
+              title="Voltar para a reunião em gravação"
+            >
+              <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+              Gravando reunião
+            </button>
+            <button
+              type="button"
+              onClick={() => meetingRecordingEngine.stopRecording(true)}
+              className="border-l border-white/30 px-3.5 py-2.5 transition-colors hover:bg-rose-500"
+              title="Parar a gravação; a transcrição vai sozinha para o Drive"
+            >
+              Parar
+            </button>
+          </div>
         )}
       </div>
     </MeetingRecordingEngineContext.Provider>

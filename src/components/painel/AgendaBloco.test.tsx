@@ -217,3 +217,50 @@ describe('AgendaBloco — Preparo e lista', () => {
         expect(screen.getByText('09:00–09:50')).toBeInTheDocument();
     });
 });
+
+describe('AgendaBloco — gravar a reunião', () => {
+    const agenda = [{ id: 'evt-proad', titulo: 'Reunião web com a PROAD', inicio: '14:00', fim: '15:00' }];
+
+    it('o botão Gravar da caixa entrega o evento com o id do Google Agenda', () => {
+        const onGravar = vi.fn();
+        render(<AgendaBloco eventos={eventosDoDia(agenda, [])} agoraMin={min('13:50')} preparo={[]} onGravar={onGravar} />);
+        fireEvent.click(screen.getAllByTestId('botao-gravar')[0]);
+        expect(onGravar).toHaveBeenCalledWith(expect.objectContaining({ titulo: 'Reunião web com a PROAD', eventoId: 'evt-proad' }));
+    });
+
+    it('sem onGravar não há botão (painel fora do app, testes antigos)', () => {
+        render(<AgendaBloco eventos={eventosDoDia(agenda, [])} agoraMin={min('13:50')} preparo={[]} />);
+        expect(screen.queryByTestId('botao-gravar')).toBeNull();
+    });
+
+    it('gravando: some o Gravar, aparece o selo com Parar e o estado do Claude', () => {
+        const onParar = vi.fn();
+        render(
+            <AgendaBloco
+                eventos={eventosDoDia(agenda, [])}
+                agoraMin={min('14:10')}
+                preparo={[]}
+                onGravar={vi.fn()}
+                onParar={onParar}
+                gravacao={{ gravando: true, titulo: 'Reunião web com a PROAD', claudeAcompanhando: true }}
+            />,
+        );
+        expect(screen.queryByTestId('botao-gravar')).toBeNull();
+        expect(screen.getByTestId('selo-claude')).toHaveAttribute('data-ativo', 'sim');
+        expect(screen.getByTestId('selo-claude')).toHaveTextContent('Claude acompanhando');
+        fireEvent.click(screen.getByTestId('botao-parar'));
+        expect(onParar).toHaveBeenCalled();
+    });
+
+    it('Claude sem sinal aparece como não acompanhando', () => {
+        render(
+            <AgendaBloco
+                eventos={eventosDoDia(agenda, [])}
+                agoraMin={min('14:10')}
+                preparo={[]}
+                gravacao={{ gravando: true, titulo: null, claudeAcompanhando: false }}
+            />,
+        );
+        expect(screen.getByTestId('selo-claude')).toHaveTextContent('Claude não está acompanhando');
+    });
+});

@@ -96,9 +96,35 @@ interface AgendaBlocoProps {
     agoraMin: number;
     preparo: ItemPreparo[];
     isDark?: boolean;
+    /** Gravação de reunião no ar (motor de Reuniões em Tempo Real). */
+    gravacao?: { gravando: boolean; titulo: string | null; claudeAcompanhando: boolean };
+    /** Abre a tela da reunião já com este evento escolhido. Sem ele, não há botão Gravar. */
+    onGravar?: (evento: EventoDoDia) => void;
+    onParar?: () => void;
+    onAbrirGravacao?: () => void;
 }
 
-const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], agoraMin, preparo, isDark = false }) => {
+const BotaoGravar: React.FC<{ evento: EventoDoDia; onGravar: (e: EventoDoDia) => void; isDark: boolean }> = ({ evento, onGravar, isDark }) => (
+    <button
+        type="button"
+        data-testid="botao-gravar"
+        onClick={() => onGravar(evento)}
+        aria-label={`Gravar a reunião ${evento.titulo}`}
+        title="Gravar esta reunião; o Claude pode acompanhar"
+        className={`flex-none inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11.5px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7e22ce] ${
+            isDark ? 'border-rose-400/40 text-rose-300 hover:bg-rose-500/10' : 'border-rose-200 text-rose-700 bg-white hover:bg-rose-50'
+        }`}
+    >
+        <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden="true" />
+        Gravar
+    </button>
+);
+
+const AgendaBloco: React.FC<AgendaBlocoProps> = ({
+    eventos, diaInteiro = [], agoraMin, preparo, isDark = false, gravacao, onGravar, onParar, onAbrirGravacao,
+}) => {
+    const gravando = !!gravacao?.gravando;
+    const podeGravar = !!onGravar && !gravando;
     const [aberta, setAberta] = useState(false);
     const [ocultos, setOcultos] = useState<string[]>(lerOcultos);
     const reduzido = usePrefersReducedMotion();
@@ -206,8 +232,56 @@ const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], ago
                     <span className="text-[11px] font-bold tracking-[.08em] uppercase">{estilo.rotulo}</span>
                     <span className="text-sm font-bold">{titulo}</span>
                 </div>
-                <span className="text-[13px] font-extrabold whitespace-nowrap">{tempo}</span>
+                <div className="flex items-center gap-2.5">
+                    <span className="text-[13px] font-extrabold whitespace-nowrap">{tempo}</span>
+                    {podeGravar && alvo && <BotaoGravar evento={alvo} onGravar={onGravar!} isDark={isDark} />}
+                </div>
             </div>
+
+            {gravando && (
+                <div
+                    data-testid="selo-gravando"
+                    role="status"
+                    className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3.5 py-2.5 rounded-xl border ${
+                        isDark ? 'bg-rose-500/10 border-rose-400/40 text-rose-200' : 'bg-rose-50 border-rose-200 text-rose-900'
+                    }`}
+                >
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
+                        <span className={`h-2 w-2 rounded-full bg-rose-500 ${reduzido ? '' : 'animate-pulse'}`} aria-hidden="true" />
+                        <span className="text-[11px] font-bold tracking-[.08em] uppercase">Gravando</span>
+                        {gravacao?.titulo && <span className="text-sm font-bold">{gravacao.titulo}</span>}
+                        <span
+                            data-testid="selo-claude"
+                            data-ativo={gravacao?.claudeAcompanhando ? 'sim' : 'nao'}
+                            className={`text-[11.5px] font-bold ${gravacao?.claudeAcompanhando ? (isDark ? 'text-emerald-300' : 'text-emerald-700') : suave}`}
+                        >
+                            {gravacao?.claudeAcompanhando ? '· Claude acompanhando' : '· Claude não está acompanhando'}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {onAbrirGravacao && (
+                            <button
+                                type="button"
+                                onClick={onAbrirGravacao}
+                                className={`rounded-lg border px-2.5 py-1 text-[11.5px] font-bold ${isDark ? 'border-rose-400/40 hover:bg-rose-500/10' : 'border-rose-200 bg-white hover:bg-rose-100'}`}
+                            >
+                                Abrir
+                            </button>
+                        )}
+                        {onParar && (
+                            <button
+                                type="button"
+                                data-testid="botao-parar"
+                                onClick={onParar}
+                                title="Parar a gravação; a transcrição vai sozinha para o Drive"
+                                className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11.5px] font-bold text-white hover:bg-rose-500"
+                            >
+                                Parar
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div className="flex flex-col gap-1" aria-hidden="true">
                 <div className={`relative h-[50px] rounded-[10px] overflow-hidden ${isDark ? 'bg-[#1e293b]' : 'bg-[#f6f6f9]'}`}>
@@ -289,6 +363,7 @@ const AgendaBloco: React.FC<AgendaBlocoProps> = ({ eventos, diaInteiro = [], ago
                                     </p>
                                 )}
                             </div>
+                            {podeGravar && <div className="ml-auto self-center"><BotaoGravar evento={e} onGravar={onGravar!} isDark={isDark} /></div>}
                         </div>
                     ))}
                     {eventos.length === 0 && diaInteiro.length === 0 && (

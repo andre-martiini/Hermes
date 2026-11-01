@@ -13555,13 +13555,16 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
         file_id = uploaded.get('id')
         web_link = uploaded.get('webViewLink')
 
-        try:
-            service.permissions().create(
-                fileId=file_id,
-                body={'type': 'anyone', 'role': 'reader'}
-            ).execute()
-        except Exception as perm_e:
-            print(f"Aviso: não foi possível definir permissão pública no arquivo de reunião: {perm_e}")
+        # Transcrição com fala de terceiros: com privado=True (o que a tela manda
+        # desde 01/11/2026) o arquivo fica só com o dono, sem link público.
+        if not data.get('privado'):
+            try:
+                service.permissions().create(
+                    fileId=file_id,
+                    body={'type': 'anyone', 'role': 'reader'}
+                ).execute()
+            except Exception as perm_e:
+                print(f"Aviso: não foi possível definir permissão pública no arquivo de reunião: {perm_e}")
 
         db.collection('conhecimento').document(file_id).set({
             'id': file_id,

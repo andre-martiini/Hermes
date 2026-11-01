@@ -267,6 +267,18 @@ describe('firestore.rules — fluxos legítimos do frontend não quebram (achado
     await assertSucceeds(getDoc(ref));
     await assertFails(setDoc(ref, { titulo: 'teste' }));
   });
+
+  it('"acompanhamento_claude": dono lê o sinal do leitor local, mas só o servidor grava', async () => {
+    const db = testEnv
+      .authenticatedContext('dono-uid', {
+        email: DONO_EMAIL,
+        email_verified: true,
+      })
+      .firestore();
+    const ref = doc(db, 'acompanhamento_claude', 'sessao-teste');
+    await assertSucceeds(getDoc(ref));
+    await assertFails(setDoc(ref, { ativo: true }));
+  });
 });
 
 
