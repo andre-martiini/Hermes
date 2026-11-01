@@ -686,9 +686,14 @@ def _assinar_upload(caminho: str, mime: str) -> str:
     exige que a service account do runtime tenha permissao de assinar em si
     mesma (`roles/iam.serviceAccountTokenCreator`).
     """
-    blob = _bucket().blob(caminho)
-    comum = dict(version="v4", expiration=timedelta(minutes=UPLOAD_TTL_MIN),
-                 method="PUT", content_type=mime)
+    return assinar(_bucket().blob(caminho), method="PUT", minutos=UPLOAD_TTL_MIN, content_type=mime)
+
+
+def assinar(blob, *, method: str = "GET", minutos: int = 120, content_type: str | None = None) -> str:
+    """URL assinada v4 de `blob`; no Cloud Functions (sem chave privada) assina pela API SignBlob do IAM."""
+    comum = dict(version="v4", expiration=timedelta(minutes=minutos), method=method)
+    if content_type:
+        comum["content_type"] = content_type
     try:
         return blob.generate_signed_url(**comum)
     except Exception as sem_chave:
@@ -705,7 +710,7 @@ def _assinar_upload(caminho: str, mime: str) -> str:
             )
         except Exception as via_iam:
             raise ValueError(
-                "Nao foi possivel gerar a URL assinada de upload. Assinatura "
+                "Nao foi possivel gerar a URL assinada. Assinatura "
                 f"local falhou ({sem_chave}) e a via IAM tambem ({via_iam}). "
                 "Confira se a service account do runtime tem "
                 "roles/iam.serviceAccountTokenCreator sobre si mesma."

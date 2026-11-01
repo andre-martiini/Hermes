@@ -210,6 +210,8 @@ _TOOLS_LONGAS: set[str] = {
     "video_ajustar",
     # fal.ai: envia, espera o modelo (segundos a minutos) e registra em videoJobs.
     "video_fal_executar",
+    # ElevenLabs Dubbing: envia, espera a dublagem (dezenas de segundos a minutos).
+    "video_dublar",
     # Imagens (GPT Image): de dezenas de segundos a ~2 min em qualidade alta.
     # Texto JSON no sucesso; o `consultar_job` anexa as previas como bloco de imagem.
     "gerar_imagem",

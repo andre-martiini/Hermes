@@ -1549,6 +1549,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum — só lê video_projetos/{id} e as subcoleções cenas/clipes",
     ),
     # fal.ai: gasta dólares por job (teto de confirmação de US$ 5 em video/fal.py).
+    "video_dublar": ToolInventoryEntry(
+        "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+        "a resposta traz a URL do MP4 dublado; o documento videoJobs/eleven-<dubbing_id> guarda status e custo",
+        rede_servico="ElevenLabs Dubbing (api.elevenlabs.io)",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="Cada chamada nova envia uma dublagem paga (créditos do ElevenLabs). Acima de US$ 5 "
+        "(video/dublagem.py TETO_CONFIRMACAO_USD) não envia sem aprovado_ate_usd. Com dubbing_id só reconsulta.",
+    ),
     "video_fal_executar": ToolInventoryEntry(
         "video", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
         "a resposta traz as URLs do resultado; o documento videoJobs/<job_fal> guarda status, custo e URLs",

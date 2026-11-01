@@ -201,7 +201,8 @@ _CATALOG: dict[str, str] = {
     "video_criar_projeto": "Cria um projeto de vídeo a partir do roteiro aprovado (cenas, narração, bíblia visual) e devolve a estimativa de custo; não gera nada pago",
     "video_status": "Estado de um projeto de vídeo: etapa atual, cenas, progresso dos clipes, custo estimado e real, link do vídeo",
     # Fase 2: prévia do storyboard (centavos por chamada, teto por prévia; roda como job).
-    "video_fal_executar": "Roda um modelo do fal.ai (V2V, imagem, lip-sync, reframe) de ponta a ponta: mostra o custo, pede aprovação acima de US$ 5, registra em videoJobs e devolve as URLs do resultado",
+    "video_dublar": "Dubla um vídeo do André para outro idioma com a voz dele (ElevenLabs, sem lip-sync): recebe o vídeo por upload_token/drive_file_id, mostra o custo (US$ 0,50/min), pede aprovação acima de US$ 5 e devolve a URL do MP4 dublado",
+    "video_fal_executar": "Roda um modelo do fal.ai (V2V, imagem, lip-sync, reframe, som de ambiente) de ponta a ponta: aceita arquivo por upload_token/drive_file_id, mostra o custo, pede aprovação acima de US$ 5, registra em videoJobs e devolve as URLs do resultado",
     "video_gerar_previa": "Gera a prévia do storyboard de um projeto de vídeo: narração por cena, quadros-chave, folha de contato e MP3 no Drive (custo de centavos, com teto)",
     "video_ajustar": "Ajusta o storyboard de um projeto de vídeo (narração ou descrição de cena, instrução para um quadro) e refaz só o que mudou",
     # Fase 4: pagas (piso de confirmação obrigatória) e cancelamento.
@@ -321,6 +322,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "video_criar_projeto",
     # Prévia e ajustes: gravam cenas/quadros e publicam arquivos no Drive.
     "video_fal_executar",
+    "video_dublar",
     "video_gerar_previa",
     "video_ajustar",
     "video_renderizar",
@@ -344,6 +346,7 @@ _ASYNC_TOOLS: set[str] = {
     "ler_pagina_web",
     # Hermes Vídeo: narração + quadros-chave + folha de contato levam minutos.
     "video_fal_executar",
+    "video_dublar",
     "video_gerar_previa",
     "video_ajustar",
     # Imagens: de dezenas de segundos a ~2 min em qualidade alta.
@@ -405,6 +408,7 @@ _VOICE_EXCLUDED: set[str] = {
     "video_criar_projeto",
     # A prévia se avalia olhando a folha de contato; o ajuste é por cena/quadro.
     "video_fal_executar",
+    "video_dublar",
     "video_gerar_previa",
     "video_ajustar",
     # Gasto de dólares não se aprova falando (mesmo motivo das escritas de investimento),

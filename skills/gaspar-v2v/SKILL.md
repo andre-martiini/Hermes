@@ -11,7 +11,7 @@ description: Troca o cenário e a roupa de um vídeo do André falando, mantendo
 >
 > | Quer | Use | Custo |
 > |---|---|---|
-> | Trocar o cenário a cada corte | **Recorte + fundo** (abaixo) — aprovado | ~US$ 0,04 por cenário |
+> | Trocar o cenário | `efeitos.py cenario` (recorte suave + fundo, abaixo) — aprovado | ~US$ 0,04 por cenário |
 > | Efeito na mão (fogo, magia, raio, holograma, logo…) | `efeitos.py elemento` + `efeitos.py mao` | ~US$ 0,24 por elemento (reutilizável) |
 > | Roupa/estilo (mago, terno, armadura…) | `efeitos.py transformar` (gera e **devolve o rosto original**) | Kling O3 Pro ~US$ 0,17/s |
 >
@@ -20,8 +20,9 @@ description: Troca o cenário e a roupa de um vídeo do André falando, mantendo
 
 ## Efeitos com o rosto intacto (`scripts/efeitos.py`)
 
-PY = venv da tutorial-sistema (`~/.tutorial-sistema/.venv`, com mediapipe 1.2 e google-cloud-firestore/storage);
-modelos do MediaPipe em `~/.tutorial-sistema/modelos/` (hand_landmarker.task, face_landmarker.task).
+PY = venv da tutorial-sistema (`~/.tutorial-sistema/.venv`, com mediapipe 1.2, onnxruntime, scipy, opencv e
+google-cloud-firestore/storage); modelos do MediaPipe em `~/.tutorial-sistema/modelos/` ou, sem eles, os do próprio
+repositório (`modelos/`, para ambiente sem acesso ao storage do Google).
 
 - `efeitos.py rastrear video SAIDA` — mão (21 pontos) e rosto (478) por quadro, grátis, com cache.
 - `efeitos.py elemento "descrição" SAIDA` — elemento animado isolado sobre preto (imagem no fal + 4 s no Veo Lite).
@@ -40,12 +41,24 @@ modelos do MediaPipe em `~/.tutorial-sistema/modelos/` (hand_landmarker.task, fa
   na parte de baixo do rosto** (nariz ao queixo); o resto do quadro volta do original. Exige plano Starter+ no ElevenLabs (o
   gratuito e o pago por uso só dublam com marca d'água e sem clonagem). Testado em 01/11/2026: 22 s PT→EN, US$ 1,81 de lip-sync.
 
-## Recorte + fundo (troca de cenário)
+## Recorte suave + troca de cenário
 
-`hyperframes remove-background base30.mp4 -o pessoa.mov` (local, ~1,3 quadro/s na CPU) → cenários gerados
-(nano-banana 9:16, "no people", fundo desfocado) com aproximação lenta → overlay com a borda do recorte afinada
-(`erosion` + gama no alfa, tira o halo da parede clara) → áudio original. Ver `saida/v2v/recorte` no histórico
-do plano (01/11/2026).
+- `efeitos.py recortar video.mp4 SAIDA/pessoa.webm [--rapido]` — pessoa com **alfa contínuo** (WebM VP9 com alfa).
+  Robust Video Matting (ONNX resnet50; `--rapido` = mobilenetv3, 2× mais rápido e cabelo menos inteiro; pesos baixados
+  dos releases do GitHub do RVM para `~/.tutorial-sistema/modelos/`), ~3 quadros/s na CPU, com cache. O modelo já
+  devolve a **cor do primeiro plano descontaminada** (sem a parede branca no cabelo); depois: furos internos pequenos
+  fechados só do rosto para baixo e cercados de pessoa (pescoço, alça, orelha — vão entre fios de cabelo fica),
+  **rosto sempre opaco** (oval do MediaPipe), média temporal onde o alfa mudou pouco (sem cintilação, sem borrar
+  movimento rápido) e degradê só para fora (não encolhe o rosto). É o mesmo recorte do `titulo_atras` do kit.
+- `efeitos.py cenario video.mp4 fundo.png|"prompt do cenário" SAIDA [--ate 4] [--transicao 0.4] [--zoom 1.06]` —
+  nos primeiros `--ate` s a pessoa aparece sobre o cenário (imagem/vídeo, ou gerado no nano-banana 9:16 a partir do
+  texto, ~US$ 0,04) com aproximação lenta e *light wrap* (18% da luz do cenário na borda de dentro); depois volta
+  ao vídeo original numa fusão. Áudio original inteiro. Imprime a **franja clara** máxima (aviso acima de 0,25).
+- `efeitos.py folha-recorte video.mp4 SAIDA` — critério de aceite: o recorte sobre preto, branco e azul saturado
+  em 0,8/2,8/3,5/12/20 s (`folha-recorte.jpg`) e as métricas de 0–5 s (`recorte-metricas.json`): furos internos =
+  0 px e cintilação ≤ 0,05 (variação média do alfa na borda entre quadros, descontado o movimento; 0,039 no clipe
+  de teste de 01/11/2026). Regressão: `GASPAR_CLIPE_TESTE=1000414196.mp4 PY -m unittest test_v2v` compara 5
+  quadros com `testes/recorte_ref/` (IoU ≥ 0,97).
 
 # (Legado) V2V de quadro inteiro — só para cenas sem o rosto do André
 

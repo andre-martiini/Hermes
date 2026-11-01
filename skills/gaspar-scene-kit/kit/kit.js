@@ -101,7 +101,7 @@
       const base = cabecalho(tl, sec, c.t0, c.primeira);
       const el = sec.querySelector(".numero");
       entra(tl, $(sec, ".numero, .rotulo"), base);
-      const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: c.casas || 0, maximumFractionDigits: c.casas || 0 });
+      const fmt = new Intl.NumberFormat(c.locale || "pt-BR", { minimumFractionDigits: c.casas || 0, maximumFractionDigits: c.casas || 0 });
       const n = { v: 0 };
       const escreve = () => { el.textContent = (c.prefixo || "") + fmt.format(n.v) + (c.sufixo || ""); };
       escreve();
@@ -169,6 +169,8 @@
     },
 
     TitleBehind(tl, sec, c) {
+      ajustarTitulo(sec);
+      document.fonts?.ready.then(() => ajustarTitulo(sec));
       const g = sec.querySelector(".gigante");
       tl.fromTo(g, { opacity: 0, y: 120, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: T.entrada * 1.4, ease: EASE.enter }, c.t0 + 0.1);
       tl.to(g, { scale: 1.04, duration: Math.max(1, c.fim - c.t0 - 1), ease: EASE.settle }, c.t0 + 0.1 + T.entrada * 1.4);
@@ -200,6 +202,26 @@
       });
     },
   };
+
+  // Título de abertura: encolhe a fonte até o texto caber na largura do bloco (e na altura, se ele tiver
+  // max-height). Mede o texto de verdade (Range), não estima pela quantidade de letras.
+  function ajustarTitulo(sec) {
+    const bloco = sec.querySelector(".bloco"), g = sec.querySelector(".gigante");
+    if (!bloco || !g) return;
+    bloco.style.removeProperty("--tg");
+    const maxH = parseFloat(getComputedStyle(bloco).maxHeight);
+    let fs = parseFloat(getComputedStyle(g).fontSize);
+    for (let k = 0; k < 4; k++) {
+      // Largura real do texto (Range), sem a escala atual da animação, vezes 1,04 (a escala máxima dela).
+      const r = document.createRange(); r.selectNodeContents(g);
+      const larg = (r.getBoundingClientRect().width / (gsap.getProperty(g, "scale") || 1)) * 1.04;
+      const f = Math.min(1, (g.clientWidth / larg) * 0.98,
+        Number.isFinite(maxH) ? maxH / bloco.scrollHeight : 1);
+      if (f >= 0.999) break;
+      fs = Math.floor(fs * f);
+      bloco.style.setProperty("--tg", fs + "px");
+    }
+  }
 
   // Transições: no máximo 2 tipos por vídeo — "fade" (padrão) e "wipe". O wipe pertence à cena
   // que entra: ela varre por cima da anterior, que o montar.mjs prolonga por T.entrada.
@@ -271,5 +293,5 @@
     return tl;
   }
 
-  window.Kit = { EASE, T, PICO, MOTION_ROLES, montar };
+  window.Kit = { EASE, T, PICO, MOTION_ROLES, montar, ajustarTitulo };
 })();

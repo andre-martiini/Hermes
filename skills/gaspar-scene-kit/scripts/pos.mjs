@@ -15,6 +15,8 @@ const SFX_MAP = JSON.parse(readFileSync(join(SKILL, "kit", "sfx-map.json"), "utf
 const NIVEL = { sfx: -12, trilha: -9 }; // dB: SFX em relação à voz; trilha antes do ducking
 // TP mira em −2,0: o gate exige ≤ −1,5 e o loudnorm erra alguns décimos em gravação real com picos fortes.
 const ALVO = { I: -14, TP: -2.0, LRA: 11 };
+// Limitador de true-peak: a 4× a taxa (pega o pico entre amostras), teto −3 dBFS; −2,3 dBTP no AAC no pior caso testado.
+export const LIMITADOR = "aresample=192000,alimiter=limit=0.708:level=disabled:attack=1:release=60";
 
 const ff = (args, opts = {}) => execFileSync("ffmpeg", ["-hide_banner", "-y", ...args], { maxBuffer: 1 << 28, ...opts });
 
@@ -34,8 +36,12 @@ export async function comPagina(projeto, fn, { largura, altura } = {}) {
 }
 
 let _chrome;
+// HYPERFRAMES_BROWSER_PATH (ou PRODUCER_HEADLESS_SHELL_PATH) aponta um Chrome já instalado: é o caminho em
+// máquina/nuvem sem acesso ao download do chrome-headless-shell (ex.: /usr/bin/google-chrome).
 function chromeDoHyperframes() {
   if (_chrome) return _chrome;
+  const env = process.env.HYPERFRAMES_BROWSER_PATH || process.env.PRODUCER_HEADLESS_SHELL_PATH;
+  if (env && existsSync(env)) return (_chrome = env);
   const bin = join(SKILL, "node_modules", "hyperframes", "bin", "hyperframes.mjs");
   const saida = execFileSync(process.execPath, [bin, "browser", "ensure"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
   const caminho = saida.match(/Path:\s*(.+)/)?.[1].trim();
@@ -74,19 +80,37 @@ export function trilhaPadrao() {
   return achar(raiz);
 }
 
-export function filtroAudio({ voz, trilha, sfx, total }) {
-  // Entradas: 0 = bruto, 1 = trilha (se houver), depois um arquivo por SFX distinto.
+// Ambiente (cafeteria, rua…): loop já normalizado a −14 LUFS (ambiente.py); entra `nivel_db` abaixo da voz,
+// sem graves (passa-alta 120 Hz) nem agudos de sobra (passa-baixa 8 kHz) para não disputar com a fala,
+// com fade e um ducking leve pela voz. Referência: voz 0, SFX −12, trilha −9 (com ducking), ambiente −24 a −28.
+export const AMBIENTE_PADRAO = { nivel_db: -26, fade: 1.0 };
+
+export function filtroAudio({ voz, trilha, ambientes = [], sfx, total }) {
+  // Entradas: 0 = bruto, 1 = trilha (se houver), depois um loop por ambiente, depois um arquivo por SFX distinto.
   const partes = [];
   const mix = [];
   let n = trilha ? 2 : 1;
-  if (voz) partes.push(`[0:a]aresample=48000,asplit=2[voz][chave]`), mix.push("[voz]");
+  const chaves = voz ? (trilha ? 1 : 0) + ambientes.length : 0;
+  if (voz) partes.push(`[0:a]aresample=48000,asplit=${1 + Math.max(1, chaves)}[voz]${Array.from({ length: Math.max(1, chaves) }, (_, k) => `[chave${k}]`).join("")}`), mix.push("[voz]");
+  let k = 0;
   if (trilha) {
     partes.push(`[1:a]aresample=48000,volume=${NIVEL.trilha}dB,atrim=0:${total},afade=t=out:st=${Math.max(0, total - 1.5)}:d=1.5[tr0]`);
     // Ducking: a voz comprime a trilha (~9 dB a menos enquanto há fala; ratio 3 dá ~10, 8 dá ~13).
-    if (voz) partes.push(`[tr0][chave]sidechaincompress=threshold=0.02:ratio=2.5:attack=15:release=350:makeup=1[tr]`);
+    if (voz) partes.push(`[tr0][chave${k++}]sidechaincompress=threshold=0.02:ratio=2.5:attack=15:release=350:makeup=1[tr]`);
     else partes.push(`[tr0]anull[tr]`);
     mix.push("[tr]");
-  } else if (voz) partes.push(`[chave]anullsink`);
+  }
+  ambientes.forEach((a, j) => {
+    const idx = n++, ini = Math.max(0, a.inicio || 0), fim = Math.min(total, a.fim ?? total), dur = Math.max(0.1, fim - ini);
+    const fade = Math.min(a.fade ?? AMBIENTE_PADRAO.fade, dur / 2);
+    partes.push(`[${idx}:a]aresample=48000,highpass=f=120,lowpass=f=8000,volume=${a.nivel_db ?? AMBIENTE_PADRAO.nivel_db}dB,` +
+      `atrim=0:${dur.toFixed(3)},afade=t=in:d=${fade}:curve=qsin,afade=t=out:st=${(dur - fade).toFixed(3)}:d=${fade}:curve=qsin,` +
+      `adelay=${Math.round(ini * 1000)}:all=1[am${j}]`);
+    if (voz) partes.push(`[am${j}][chave${k++}]sidechaincompress=threshold=0.03:ratio=1.8:attack=30:release=500:makeup=1[amb${j}]`);
+    else partes.push(`[am${j}]anull[amb${j}]`);
+    mix.push(`[amb${j}]`);
+  });
+  if (voz && !chaves) partes.push(`[chave0]anullsink`);
   const porArquivo = new Map();
   sfx.forEach((s) => { if (!porArquivo.has(s.arq)) porArquivo.set(s.arq, []); porArquivo.get(s.arq).push(s); });
   for (const usos of porArquivo.values()) {
@@ -104,7 +128,7 @@ export function filtroAudio({ voz, trilha, sfx, total }) {
   return { filtro: partes.join(";"), arquivosSfx: [...porArquivo.keys()] };
 }
 
-export async function posProduzir({ bruto, projeto, final, trilha = trilhaPadrao(), sfx = true, lut = true }) {
+export async function posProduzir({ bruto, projeto, final, trilha = trilhaPadrao(), ambientes = [], sfx = true, lut = true }) {
   const total = duracao(bruto);
   const voz = temAudio(bruto);
   const eventos = sfx ? (await marcadores(projeto)) : [];
@@ -114,17 +138,19 @@ export async function posProduzir({ bruto, projeto, final, trilha = trilhaPadrao
     if (!picos.has(arq)) picos.set(arq, picoDoSom(arq));
     return { t: e.t, arq, pico: picos.get(arq) };
   }).filter((u) => u.t < total);
-  const { filtro, arquivosSfx } = filtroAudio({ voz, trilha, sfx: usos, total });
-  const entradas = ["-i", bruto, ...(trilha ? ["-stream_loop", "-1", "-i", trilha] : []), ...arquivosSfx.flatMap((a) => ["-i", a])];
+  const { filtro, arquivosSfx } = filtroAudio({ voz, trilha, ambientes, sfx: usos, total });
+  const entradas = ["-i", bruto, ...(trilha ? ["-stream_loop", "-1", "-i", trilha] : []),
+    ...ambientes.flatMap((a) => ["-stream_loop", "-1", "-i", a.arquivo]), ...arquivosSfx.flatMap((a) => ["-i", a])];
 
-  // Loudness em dois passes: mede, depois corrige linear para −14 LUFS / −1,5 dBTP.
+  // Loudness em dois passes: mede, depois corrige linear para −14 LUFS. O loudnorm linear não garante o teto
+  // quando a voz tem picos: o LIMITADOR depois dele segura o true-peak (o gate mede no AAC final).
   const m = medirParaNormalizar(entradas, filtro);
   const norm = `loudnorm=I=${ALVO.I}:TP=${ALVO.TP}:LRA=${ALVO.LRA}:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
     `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
   const lutArq = join(SKILL, "assets", "lut", "gaspar.cube");
   const video = lut ? ["-vf", "lut3d=gaspar.cube"] : [];
   ff(["-loglevel", "error", ...entradas,
-    "-filter_complex", `${filtro};[mix]${norm},aresample=48000[a]`, "-map", "0:v", "-map", "[a]",
+    "-filter_complex", `${filtro};[mix]${norm},${LIMITADOR},aresample=48000[a]`, "-map", "0:v", "-map", "[a]",
     ...video, "-c:v", lut ? "libx264" : "copy", ...(lut ? ["-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"] : []),
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-t", String(total), resolve(final)], { cwd: dirname(lutArq) });
   return { total, voz, sfx: usos.length };

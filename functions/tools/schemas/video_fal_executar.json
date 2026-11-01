@@ -1,6 +1,6 @@
 {
   "name": "video_fal_executar",
-  "description": "Roda um modelo pago do fal.ai de ponta a ponta (vídeo V2V, imagem, lip-sync, reframe, retake). Calcula o custo pela tabela de preços (config/precos_fal); até US$ 5 envia direto; acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd igual ao custo. Espera o modelo terminar (até 8 min; se passar, chame de novo só com job_fal), registra o job em videoJobs (status, custo, URLs) e devolve as URLs do resultado. Tool longa: devolve job_id; busque com consultar_job.",
+  "description": "Roda um modelo pago do fal.ai de ponta a ponta (vídeo V2V, imagem, lip-sync, reframe, retake). Calcula o custo pela tabela de preços (config/precos_fal); até US$ 5 envia direto; acima disso NÃO gasta e devolve status confirmation_required com o custo — mostre ao André e, se ele aprovar, chame de novo com aprovado_ate_usd igual ao custo. Espera o modelo terminar (até 8 min; se passar, chame de novo só com job_fal), registra o job em videoJobs (status, custo, URLs) e devolve as URLs do resultado. Arquivo local ou do Drive como entrada (vídeo para V2V, imagem de referência): passe em `arquivos` — o Hermes busca, publica e preenche o campo; não precisa de URL pública. Para guardar o resultado na ação, chame anexar_arquivo com a url devolvida (o Hermes baixa). Som de ambiente/efeito: modelo fal-ai/elevenlabs/sound-effects/v2 (text, duration_seconds até 22, loop). Tool longa: devolve job_id; busque com consultar_job.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -15,6 +15,11 @@
       "segundos": {
         "type": "number",
         "description": "Duração cobrável em segundos: a do vídeo de entrada (V2V) ou a pedida. O custo usa o maior entre isto e o campo de duração da entrada; o real é recalculado pela duração gerada quando o fal a informa."
+      },
+      "arquivos": {
+        "type": "object",
+        "description": "Entradas de arquivo que o Hermes resolve: {campo da entrada: {upload_token} ou {drive_file_id}}. Ex.: {\"video_url\": {\"upload_token\": \"upl-...\"}} (de preparar_upload) ou {\"image_urls\": {\"drive_file_id\": \"...\"}}. O campo recebe uma URL assinada de 2 h; campo terminado em _urls recebe lista. Até 50 MB por arquivo.",
+        "additionalProperties": {"type": "object"}
       },
       "aprovado_ate_usd": {
         "type": "number",
