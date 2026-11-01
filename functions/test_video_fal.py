@@ -30,7 +30,7 @@ class _Db:
 
 class TestEstimativa(unittest.TestCase):
     def test_kling_o3_std_5s(self):
-        self.assertEqual(fal.estimar_custo("fal-ai/kling-video/o3/standard/video-edit", segundos=5), 0.63)
+        self.assertEqual(fal.estimar_custo("fal-ai/kling-video/o3/standard/video-to-video/edit", segundos=5), 0.63)
 
     def test_imagem_e_modelo_sem_preco(self):
         self.assertEqual(fal.estimar_custo("fal-ai/flux/schnell"), 0.003)
@@ -103,7 +103,7 @@ class _DbEscrita(_Db):
 
 
 class TestTool(unittest.TestCase):
-    KLING = "fal-ai/kling-video/o3/standard/video-edit"
+    KLING = "fal-ai/kling-video/o3/standard/video-to-video/edit"
 
     def _http_ok(self, metodo, url, api_key, corpo=None):
         if metodo == "POST":

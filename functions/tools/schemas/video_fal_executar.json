@@ -6,7 +6,7 @@
     "properties": {
       "modelo": {
         "type": "string",
-        "description": "Id do modelo no fal, ex.: fal-ai/flux/schnell, fal-ai/wan-vace-apps/video-edit, fal-ai/kling-video/o3/standard/video-edit. Precisa ter preço em config/precos_fal ou na tabela padrão."
+        "description": "Id do modelo no fal, ex.: fal-ai/flux/schnell, fal-ai/wan-vace-apps/video-edit, fal-ai/kling-video/o3/standard/video-to-video/edit. Precisa ter preço em config/precos_fal ou na tabela padrão."
       },
       "entrada": {
         "type": "object",
