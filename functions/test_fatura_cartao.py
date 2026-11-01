@@ -14,8 +14,11 @@ O que estes testes protegem, em ordem de importancia:
 import json
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
+import atencao as atc
 import fatura_cartao as fc
+from test_importar_fatura import _Db
 
 
 class _FakeDoc:
@@ -87,8 +90,13 @@ class TestRemetente(unittest.TestCase):
             fc.e_fatura_de_cartao("Cartões CAIXA <cartoescaixa@aplicacao.caixa.gov.br>"),
             "elo-caixa")
 
+    def test_reconhece_a_xp(self):
+        self.assertEqual(
+            fc.e_fatura_de_cartao("XP Investimentos <fatura@xpi.com.br>"),
+            "xp")
+
     def test_ignora_outros_boletos(self):
-        for remetente in ("fatura@xpi.com.br", "boleto@allcaregestoradesaude.com.br", None, ""):
+        for remetente in ("boleto@allcaregestoradesaude.com.br", None, ""):
             self.assertIsNone(fc.e_fatura_de_cartao(remetente), remetente)
 
 
@@ -241,6 +249,125 @@ class TestPromptDeExtracao(unittest.TestCase):
         inicio = fc._PROMPT.index('{\n  "cabecalho"')
         fim = fc._PROMPT.index("}\nSe o documento")
         json.loads(fc._PROMPT[inicio:fim + 1])
+
+
+def _resumo(**kw):
+    base = {
+        "fatura_id": "xp-2026-11", "cartao": "xp", "competencia": "2026-11",
+        "ano": 2026, "mes": 11, "total": 1209.30, "pagamento_minimo": 181.40,
+        "soma_compras": 1209.30, "soma_encargos": 0.0, "soma_total": 1209.30,
+        "divergencia_total": 0.0, "vencimento": "2026-11-05",
+        "itens_gravados": 9, "itens_ignorados": 0,
+    }
+    base.update(kw)
+    return base
+
+
+class TestVerificarDivergencia(unittest.TestCase):
+    """Fila de atencao quando o total impresso nao bate com os lancamentos.
+
+    Cobre tambem a fatura da qual so o total pode ser lido: sem lancamentos
+    extraidos, a soma fica 0 e a divergencia vira o total inteiro.
+    """
+
+    def test_fatura_confiavel_nao_cria_item(self):
+        db = _Db()
+        r = fc.verificar_divergencia(db, "xp", _resumo())
+        self.assertFalse(r["criado"])
+        self.assertEqual(db.banco.get(atc.COLLECTION, {}), {})
+
+    def test_divergencia_grande_cria_item_na_fila(self):
+        db = _Db()
+        resumo = _resumo(soma_total=0.0, divergencia_total=1209.30, itens_gravados=0)
+        r = fc.verificar_divergencia(db, "xp", resumo)
+        self.assertTrue(r["criado"])
+        item = db.banco[atc.COLLECTION][r["chave_dedupe"]]
+        self.assertEqual(item["tipo"], atc.TIPO_FATURA_CARTAO_DIVERGENTE)
+        self.assertEqual(item["estado"], atc.ESTADO_ABERTO)
+        self.assertEqual(item["acao_id"], fc.ACAO_ACOMPANHAMENTO_FINANCEIRO_ID)
+
+    def test_reimportar_divergente_nao_duplica_item(self):
+        db = _Db()
+        resumo = _resumo(soma_total=0.0, divergencia_total=1209.30, itens_gravados=0)
+        fc.verificar_divergencia(db, "xp", resumo)
+        fc.verificar_divergencia(db, "xp", resumo)
+        self.assertEqual(len(db.banco[atc.COLLECTION]), 1)
+
+    def test_reimportar_que_bate_fecha_o_item(self):
+        db = _Db()
+        divergente = _resumo(soma_total=0.0, divergencia_total=1209.30, itens_gravados=0)
+        fc.verificar_divergencia(db, "xp", divergente)
+        fc.verificar_divergencia(db, "xp", _resumo())
+        chave = "fatura_cartao_divergente:xp-2026-11"
+        self.assertEqual(db.banco[atc.COLLECTION][chave]["estado"], atc.ESTADO_RESOLVIDO)
+
+
+class TestFalhaDeLeitura(unittest.TestCase):
+    """Senha errada, PDF ilegível ou e-mail sem anexo: um item por e-mail,
+    nunca tenta de novo em loop sozinho."""
+
+    def test_registrar_falha_cria_item(self):
+        db = _Db()
+        fc.registrar_falha(db, "xp", "msg1", "pdf_protegido_por_senha")
+        item = db.banco[atc.COLLECTION]["fatura_cartao_falha:xp:msg1"]
+        self.assertEqual(item["tipo"], atc.TIPO_FATURA_CARTAO_FALHA)
+        self.assertIn("pdf_protegido_por_senha", item["resumo"])
+        self.assertEqual(item["estado"], atc.ESTADO_ABERTO)
+
+    def test_reprocessar_a_mesma_falha_nao_duplica(self):
+        db = _Db()
+        fc.registrar_falha(db, "xp", "msg1", "pdf_protegido_por_senha")
+        fc.registrar_falha(db, "xp", "msg1", "pdf_protegido_por_senha")
+        self.assertEqual(len(db.banco[atc.COLLECTION]), 1)
+
+    def test_resolver_falha_se_existir_fecha_o_item(self):
+        db = _Db()
+        fc.registrar_falha(db, "xp", "msg1", "pdf_protegido_por_senha")
+        fc.resolver_falha_se_existir(db, "xp", "msg1")
+        self.assertEqual(
+            db.banco[atc.COLLECTION]["fatura_cartao_falha:xp:msg1"]["estado"],
+            atc.ESTADO_RESOLVIDO,
+        )
+
+    def test_resolver_falha_sem_item_nao_quebra(self):
+        fc.resolver_falha_se_existir(_Db(), "xp", "msg-sem-falha-nenhuma")
+
+
+class TestAvisoDeImportacao(unittest.TestCase):
+    """Diário da ação + uma linha pro André. Melhor esforço: nunca levanta."""
+
+    def setUp(self):
+        self.db = _Db({"tarefas": {fc.ACAO_ACOMPANHAMENTO_FINANCEIRO_ID: {"acompanhamento": []}}})
+
+    def test_registra_no_diario_e_avisa_por_telegram(self):
+        with mock.patch.object(fc.firestore, "ArrayUnion", side_effect=lambda values: values), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value="12345"), \
+             mock.patch("main._send_telegram_message_raw") as mock_send:
+            fc.avisar_importacao(self.db, "xp", _resumo())
+
+        nota = self.db.banco["tarefas"][fc.ACAO_ACOMPANHAMENTO_FINANCEIRO_ID]["acompanhamento"][0]
+        self.assertIn("XP", nota["nota"])
+        self.assertIn("1209.3", nota["nota"])
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args[0][1], "12345")
+
+    def test_sem_chat_id_nao_manda_telegram(self):
+        with mock.patch.object(fc.firestore, "ArrayUnion", side_effect=lambda values: values), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value=None), \
+             mock.patch("main._send_telegram_message_raw") as mock_send:
+            fc.avisar_importacao(self.db, "xp", _resumo())
+        mock_send.assert_not_called()
+
+    def test_falha_no_telegram_nao_propaga(self):
+        with mock.patch.object(fc.firestore, "ArrayUnion", side_effect=lambda values: values), \
+             mock.patch("main._resolve_default_telegram_chat_id", side_effect=RuntimeError("fora do ar")):
+            fc.avisar_importacao(self.db, "xp", _resumo())  # nao deve levantar
+
+    def test_acao_inexistente_nao_propaga(self):
+        db = _Db()  # sem a tarefa cadastrada
+        with mock.patch.object(fc.firestore, "ArrayUnion", side_effect=lambda values: values), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value=None):
+            fc.avisar_importacao(db, "xp", _resumo())  # nao deve levantar
 
 
 if __name__ == "__main__":

@@ -2559,8 +2559,22 @@ def sync_boletos_gmail(service, sync_ref, logs):
             # código de barras); esta aqui cuida do que uma fatura tem e um
             # boleto não: em que o dinheiro foi gasto, e quanto está parcelado.
             # Uma falha aqui não pode derrubar a sincronização de boletos.
-            _cartao = fatura_cartao.e_fatura_de_cartao(sender) if pdf_data else None
-            if _cartao:
+            #
+            # `_cartao` é calculado pelo remetente, independente de ter
+            # anexo: senha errada ou PDF protegido fazem `prepare_pdf_for_gemini`
+            # devolver `pdf_data=None` acima, e sem isso o remetente de cartão
+            # ficaria sem nenhum aviso de que a fatura não entrou.
+            _cartao = fatura_cartao.e_fatura_de_cartao(sender)
+            if _cartao and not pdf_data:
+                fatura_cartao.registrar_falha(
+                    db, _cartao, msg_id, pdf_fallback_reason or "e-mail sem PDF anexado"
+                )
+                log_to_firestore(
+                    sync_ref, logs,
+                    f"[FATURA] {_cartao}: não foi possível ler o PDF de {msg_id} "
+                    f"({pdf_fallback_reason or 'sem anexo'}); item criado na fila de atenção."
+                )
+            elif _cartao:
                 try:
                     _extraido = fatura_cartao.extrair(
                         client, types, pdf_data,
@@ -2574,6 +2588,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                         f"[FATURA] {_cartao} {_resumo['competencia']}: "
                         f"{_resumo['itens_gravados']} lançamento(s), total R$ {_resumo['total']}."
                     )
+                    fatura_cartao.resolver_falha_se_existir(db, _cartao, msg_id)
+                    fatura_cartao.verificar_divergencia(db, _cartao, _resumo)
                     _correcao = fatura_cartao.corrigir_fixed_bill(db, _cartao, _resumo)
                     if _correcao.get("corrigido"):
                         log_to_firestore(
@@ -2585,7 +2601,9 @@ def sync_boletos_gmail(service, sync_ref, logs):
                             sync_ref, logs,
                             f"[FATURA] Card não corrigido — {_correcao['motivo']}."
                         )
+                    fatura_cartao.avisar_importacao(db, _cartao, _resumo)
                 except Exception as _fatura_err:
+                    fatura_cartao.registrar_falha(db, _cartao, msg_id, str(_fatura_err))
                     log_to_firestore(
                         sync_ref, logs,
                         f"[FATURA] Falha ao extrair lançamentos de {msg_id}: {_fatura_err}"

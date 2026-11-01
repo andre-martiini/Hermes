@@ -49,6 +49,8 @@ TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
 TIPO_SECRETARIO_PERGUNTOU_SE_ROBO = "secretario_perguntou_se_robo"
 TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
+TIPO_FATURA_CARTAO_DIVERGENTE = "fatura_cartao_divergente"
+TIPO_FATURA_CARTAO_FALHA = "fatura_cartao_falha"
 #: P05 sub-entrega 19/N (passo 10 do pacote) -- ver
 #: `event_outbox.varrer_outbox_travado_core`/`_diagnostico_para_item_atencao`.
 TIPO_OUTBOX_EVENTO_TRAVADO = "outbox_evento_travado"
