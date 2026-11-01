@@ -1048,6 +1048,7 @@ class TestOutputSchema(unittest.TestCase):
                     "secretario_investigacao_concluida",
                     "secretario_insistencia", "secretario_assunto_sensivel",
                     "secretario_decisao_forcada",
+                    "fatura_cartao_divergente", "fatura_cartao_falha",
                     None,
                 ],
             },
